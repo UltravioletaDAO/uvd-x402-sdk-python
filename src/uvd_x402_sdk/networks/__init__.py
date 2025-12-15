@@ -1,0 +1,54 @@
+"""
+Network configurations for x402 payments.
+
+This module provides configuration for all supported blockchain networks,
+including USDC contract addresses, RPC URLs, and network-specific parameters.
+
+The SDK supports 15 mainnet networks out of the box:
+- 11 EVM chains: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
+                 Celo, HyperEVM, Unichain, BSC (disabled), Monad
+- 2 SVM chains: Solana, Fogo
+- 1 NEAR: NEAR Protocol
+- 1 Stellar: Stellar
+
+You can register custom networks using `register_network()`.
+"""
+
+from uvd_x402_sdk.networks.base import (
+    NetworkConfig,
+    NetworkType,
+    get_network,
+    get_network_by_chain_id,
+    register_network,
+    list_networks,
+    get_supported_chain_ids,
+    get_supported_network_names,
+    SUPPORTED_NETWORKS,
+    # CAIP-2 utilities (x402 v2)
+    parse_caip2_network,
+    to_caip2_network,
+    is_caip2_format,
+    normalize_network,
+)
+
+# Import all default network configurations
+from uvd_x402_sdk.networks import evm, solana, near, stellar
+
+__all__ = [
+    # Core
+    "NetworkConfig",
+    "NetworkType",
+    # Registry functions
+    "get_network",
+    "get_network_by_chain_id",
+    "register_network",
+    "list_networks",
+    "get_supported_chain_ids",
+    "get_supported_network_names",
+    "SUPPORTED_NETWORKS",
+    # CAIP-2 utilities (x402 v2)
+    "parse_caip2_network",
+    "to_caip2_network",
+    "is_caip2_format",
+    "normalize_network",
+]

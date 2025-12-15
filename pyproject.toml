@@ -1,0 +1,106 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "uvd-x402-sdk"
+version = "0.1.0"
+description = "Python SDK for integrating x402 payments via the Ultravioleta DAO facilitator"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Ultravioleta DAO", email = "dev@ultravioletadao.xyz" }
+]
+keywords = [
+    "x402",
+    "payments",
+    "crypto",
+    "usdc",
+    "web3",
+    "evm",
+    "solana",
+    "near",
+    "stellar",
+    "facilitator",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Point-Of-Sale",
+]
+dependencies = [
+    "httpx>=0.24.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+web3 = [
+    "web3>=6.0.0",
+    "eth-account>=0.10.0",
+]
+flask = [
+    "flask>=2.0.0",
+]
+fastapi = [
+    "fastapi>=0.100.0",
+    "starlette>=0.27.0",
+]
+django = [
+    "django>=4.0.0",
+]
+aws = [
+    "boto3>=1.26.0",
+]
+all = [
+    "uvd-x402-sdk[web3,flask,fastapi,django,aws]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "httpx>=0.24.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ultravioletadao/uvd-x402-sdk"
+Documentation = "https://docs.ultravioletadao.xyz/x402-sdk"
+Repository = "https://github.com/ultravioletadao/uvd-x402-sdk"
+Issues = "https://github.com/ultravioletadao/uvd-x402-sdk/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uvd_x402_sdk"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
