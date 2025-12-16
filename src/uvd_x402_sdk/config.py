@@ -84,17 +84,16 @@ class X402Config:
     verify_timeout: float = 30.0
     settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
 
-    # Network configuration - All 15 networks (14 enabled by default)
+    # Network configuration - All 14 networks
     supported_networks: List[str] = field(default_factory=lambda: [
-        # EVM chains (11 total, 10 enabled)
+        # EVM chains (10)
         "base", "ethereum", "polygon", "arbitrum", "optimism",
         "avalanche", "celo", "hyperevm", "unichain", "monad",
-        # bsc disabled: Binance-Peg USDC doesn't support ERC-3009
-        # SVM chains (2 total, 2 enabled)
+        # SVM chains (2)
         "solana", "fogo",
-        # NEAR (1 total, 1 enabled)
+        # NEAR (1)
         "near",
-        # Stellar (1 total, 1 enabled)
+        # Stellar (1)
         "stellar",
     ])
 

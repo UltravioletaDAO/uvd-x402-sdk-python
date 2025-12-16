@@ -4,9 +4,9 @@ Network configurations for x402 payments.
 This module provides configuration for all supported blockchain networks,
 including USDC contract addresses, RPC URLs, and network-specific parameters.
 
-The SDK supports 15 mainnet networks out of the box:
-- 11 EVM chains: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
-                 Celo, HyperEVM, Unichain, BSC (disabled), Monad
+The SDK supports 14 mainnet networks out of the box:
+- 10 EVM chains: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
+                 Celo, HyperEVM, Unichain, Monad
 - 2 SVM chains: Solana, Fogo
 - 1 NEAR: NEAR Protocol
 - 1 Stellar: Stellar

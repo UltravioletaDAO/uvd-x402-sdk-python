@@ -48,7 +48,7 @@ class NetworkConfig:
         network_type: Type of network (EVM, SOLANA, NEAR, STELLAR)
         chain_id: EVM chain ID (0 for non-EVM networks)
         usdc_address: USDC contract/token address
-        usdc_decimals: Number of decimals for USDC (usually 6, BSC=18, Stellar=7)
+        usdc_decimals: Number of decimals for USDC (6 for EVM/SVM, 7 for Stellar)
         usdc_domain_name: EIP-712 domain name for USDC (EVM only)
         usdc_domain_version: EIP-712 domain version (EVM only)
         rpc_url: Default RPC endpoint
@@ -234,7 +234,6 @@ _NETWORK_TO_CAIP2 = {
     "hyperevm": "eip155:999",
     "unichain": "eip155:130",
     "monad": "eip155:143",
-    "bsc": "eip155:56",
     # SVM chains (solana:genesisHash first 32 chars)
     "solana": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
     "fogo": "solana:fogo",  # Placeholder - update when known

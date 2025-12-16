@@ -2,11 +2,11 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept USDC payments across **15 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept USDC payments across **14 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 ## Features
 
-- **15 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
+- **14 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign authorizations, facilitator pays all network fees
@@ -39,13 +39,10 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | HyperEVM | EVM | 999 | `eip155:999` | Active |
 | Unichain | EVM | 130 | `eip155:130` | Active |
 | Monad | EVM | 143 | `eip155:143` | Active |
-| BSC | EVM | 56 | `eip155:56` | Disabled* |
 | Solana | SVM | - | `solana:5eykt...` | Active |
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
 | Stellar | Stellar | - | `stellar:pubnet` | Active |
-
-*BSC's USDC doesn't support ERC-3009 TransferWithAuthorization
 
 ## Installation
 
@@ -640,7 +637,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 
 **"Unsupported network"**
 - Check that the network is in `supported_networks`
-- Verify the network is enabled (BSC is disabled by default)
+- Verify the network is enabled
 - For v2, ensure CAIP-2 format is correct
 
 **"Payment verification failed"**
@@ -707,6 +704,12 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.2.1 (2025-12-16)
+
+- Removed BSC network (doesn't support ERC-3009)
+- Added GitHub Actions workflow for PyPI publishing
+- Updated to 14 supported networks
+
 ### v0.2.0 (2025-12-15)
 
 - Added **NEAR Protocol** support with NEP-366 meta-transactions
@@ -717,11 +720,10 @@ MIT License - see LICENSE file.
 - Added CAIP-2 parsing utilities (`parse_caip2_network`, `to_caip2_network`)
 - Added `MultiPaymentConfig` for multi-network recipient configuration
 - Added `Payment402BuilderV2` for v2 response construction
-- Updated to 15 supported networks (14 enabled)
 
 ### v0.1.0 (2025-12-01)
 
 - Initial release
-- 14 network support (EVM, Solana, Stellar)
+- EVM, Solana, Stellar network support
 - Flask, FastAPI, Django, Lambda integrations
 - Full Pydantic models

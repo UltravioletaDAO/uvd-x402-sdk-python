@@ -7,7 +7,6 @@ Each chain uses ERC-3009 TransferWithAuthorization for USDC transfers.
 Important EIP-712 domain considerations:
 - Most chains use 'USD Coin' as the domain name
 - Celo, HyperEVM, Unichain, Monad use 'USDC' as the domain name
-- BSC USDC uses 18 decimals (not standard 6)
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -164,22 +163,6 @@ MONAD = NetworkConfig(
     enabled=True,
 )
 
-# BNB Smart Chain (BSC)
-# NOTE: BSC USDC uses 18 decimals (not 6 like other chains)
-# NOTE: Binance-Peg USDC doesn't support ERC-3009 - DISABLED
-BSC = NetworkConfig(
-    name="bsc",
-    display_name="BNB Smart Chain",
-    network_type=NetworkType.EVM,
-    chain_id=56,
-    usdc_address="0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
-    usdc_decimals=18,  # Different from other chains!
-    usdc_domain_name="USD Coin",
-    usdc_domain_version="2",
-    rpc_url="https://binance.llamarpc.com",
-    enabled=False,  # Disabled: Binance-Peg USDC doesn't support ERC-3009
-)
-
 # =============================================================================
 # Register all EVM networks
 # =============================================================================
@@ -195,7 +178,6 @@ _EVM_NETWORKS = [
     HYPEREVM,
     UNICHAIN,
     MONAD,
-    BSC,
 ]
 
 for network in _EVM_NETWORKS:
@@ -228,8 +210,6 @@ def get_token_decimals(network_name: str) -> int:
         network_name: Network identifier
 
     Returns:
-        Number of decimals (6 for most chains, 18 for BSC)
+        Number of decimals (6 for all supported chains)
     """
-    if network_name.lower() == "bsc":
-        return 18
     return 6
