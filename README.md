@@ -631,6 +631,34 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 
 ---
 
+## Error Codes
+
+| Exception | Description |
+|-----------|-------------|
+| `PaymentRequiredError` | No payment header provided |
+| `PaymentVerificationError` | Signature invalid, amount mismatch, expired |
+| `PaymentSettlementError` | On-chain settlement failed |
+| `UnsupportedNetworkError` | Network not recognized or disabled |
+| `InvalidPayloadError` | Malformed X-PAYMENT header |
+| `FacilitatorError` | Facilitator service error |
+| `ConfigurationError` | Invalid SDK configuration |
+| `X402TimeoutError` | Request timed out |
+
+---
+
+## Security
+
+- Users **NEVER** pay gas or submit transactions directly
+- **EVM**: Users sign EIP-712 structured messages only (no transaction broadcast)
+- **Solana/Fogo**: Users sign partial transactions (facilitator co-signs and submits)
+- **Stellar**: Users sign Soroban authorization entries only
+- **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
+- The facilitator submits and pays for all on-chain transactions
+- All signatures include expiration timestamps (`validBefore`) for replay protection
+- Nonces prevent double-spending of authorizations
+
+---
+
 ## Troubleshooting
 
 ### Common Issues
@@ -669,8 +697,8 @@ logging.getLogger("uvd_x402_sdk").setLevel(logging.DEBUG)
 
 ```bash
 # Clone and install
-git clone https://github.com/ultravioletadao/uvd-x402-sdk
-cd uvd-x402-sdk/sdk/python
+git clone https://github.com/UltravioletaDAO/uvd-x402-sdk-python
+cd uvd-x402-sdk-python
 pip install -e ".[dev]"
 
 # Run tests
@@ -688,11 +716,12 @@ mypy src
 
 ## Links
 
+- [x402 Protocol](https://x402.org)
 - [Ultravioleta DAO](https://ultravioletadao.xyz)
-- [402milly Pixel Marketplace](https://402milly.xyz)
-- [x402 Protocol Documentation](https://docs.ultravioletadao.xyz/x402)
-- [Facilitator Status](https://facilitator.ultravioletadao.xyz/health)
-- [GitHub Issues](https://github.com/ultravioletadao/uvd-x402-sdk/issues)
+- [402milly](https://402milly.xyz)
+- [GitHub](https://github.com/UltravioletaDAO/uvd-x402-sdk-python)
+- [PyPI](https://pypi.org/project/uvd-x402-sdk/)
+- [TypeScript SDK](https://github.com/UltravioletaDAO/uvd-x402-sdk-typescript)
 
 ---
 
@@ -703,6 +732,13 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.2.2 (2025-12-16)
+
+- Added Security section to documentation
+- Added Error Codes table
+- Updated links to new GitHub repository
+- Synced documentation with TypeScript SDK
 
 ### v0.2.1 (2025-12-16)
 
