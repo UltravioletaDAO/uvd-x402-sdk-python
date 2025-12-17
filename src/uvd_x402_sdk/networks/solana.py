@@ -11,12 +11,17 @@ All SVM chains use the same payment flow:
 3. Facilitator is fee payer (user pays ZERO SOL/tokens)
 4. Facilitator co-signs and submits transaction
 
-Transaction Structure (REQUIRED by facilitator):
-- Instruction 0: SetComputeUnitLimit (units: 20,000)
-- Instruction 1: SetComputeUnitPrice (microLamports: 1)
-- Instruction 2: TransferChecked (USDC transfer)
+Transaction Structure (flexible, facilitator v1.9.4+):
+- SetComputeUnitLimit instruction (recommended: 20,000 units)
+- SetComputeUnitPrice instruction (recommended: 100,000 microLamports)
+- TransferChecked (USDC transfer)
+- Optional: CreateAssociatedTokenAccount (if recipient ATA doesn't exist)
+- Additional instructions may be added by wallets (e.g., Phantom memo)
 
-The facilitator validates this exact structure in src/chain/solana.rs.
+The facilitator scans for the transfer instruction rather than requiring
+fixed positions, allowing wallets like Phantom to add extra instructions.
+The full signed transaction is sent to the facilitator, which uses it
+exactly as signed (no reconstruction).
 """
 
 import base64
@@ -52,8 +57,8 @@ SOLANA = NetworkConfig(
         "ata_program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
         # Default compute units for transfer
         "compute_units": 20000,
-        # Default priority fee in microLamports
-        "priority_fee_microlamports": 1,
+        # Priority fee in microLamports (100k for fast landing on mainnet)
+        "priority_fee_microlamports": 100_000,
         # Block explorer
         "explorer_url": "https://solscan.io",
         # Genesis hash (first 32 chars for CAIP-2)
@@ -82,8 +87,8 @@ FOGO = NetworkConfig(
         "ata_program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
         # Default compute units for transfer
         "compute_units": 20000,
-        # Default priority fee in microLamports
-        "priority_fee_microlamports": 1,
+        # Priority fee in microLamports (100k for fast landing)
+        "priority_fee_microlamports": 100_000,
         # Block explorer (placeholder - update when available)
         "explorer_url": "https://explorer.fogo.nightly.app",
         # Network type identifier
@@ -165,11 +170,17 @@ def validate_svm_transaction_structure(transaction_base64: str) -> bool:
     """
     Validate that an SVM transaction has the correct structure for x402.
 
-    The facilitator expects:
-    - VersionedTransaction with exactly 3 instructions
-    - Instruction 0: SetComputeUnitLimit
-    - Instruction 1: SetComputeUnitPrice
-    - Instruction 2: TransferChecked (SPL token)
+    The facilitator expects (flexible order, Dec 2024+):
+    - VersionedTransaction with at least 3 instructions
+    - SetComputeUnitLimit instruction (any position)
+    - SetComputeUnitPrice instruction (any position)
+    - TransferChecked instruction (SPL token)
+    - Optional: CreateAssociatedTokenAccount instruction
+    - Optional: Additional instructions from wallet (e.g., Phantom memo)
+
+    Note: Wallets like Phantom may add extra instructions during signing.
+    The facilitator v1.9.4+ handles this by scanning for the transfer
+    instruction rather than requiring fixed positions.
 
     Args:
         transaction_base64: Base64-encoded serialized transaction
@@ -266,4 +277,6 @@ SET_COMPUTE_UNIT_PRICE_DISCRIMINATOR = 3
 
 # Default values for x402 transactions
 DEFAULT_COMPUTE_UNITS = 20000
-DEFAULT_PRIORITY_FEE_MICROLAMPORTS = 1
+# Use 100k microlamports/CU for fast landing on mainnet
+# Lower values (like 1) cause transactions to be deprioritized and time out
+DEFAULT_PRIORITY_FEE_MICROLAMPORTS = 100_000
