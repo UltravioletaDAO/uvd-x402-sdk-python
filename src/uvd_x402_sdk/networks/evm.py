@@ -7,11 +7,20 @@ Each chain uses ERC-3009 TransferWithAuthorization for USDC transfers.
 Important EIP-712 domain considerations:
 - Most chains use 'USD Coin' as the domain name
 - Celo, HyperEVM, Unichain, Monad use 'USDC' as the domain name
+
+Multi-token support:
+- USDC: All chains (6 decimals)
+- EURC: Ethereum, Base, Avalanche (6 decimals)
+- AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
+- PYUSD: Ethereum (6 decimals)
+- GHO: Ethereum, Base, Arbitrum (18 decimals)
+- crvUSD: Ethereum, Arbitrum (18 decimals)
 """
 
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
+    TokenConfig,
     register_network,
 )
 
@@ -19,7 +28,7 @@ from uvd_x402_sdk.networks.base import (
 # EVM Networks Configuration
 # =============================================================================
 
-# Base (Layer 2)
+# Base (Layer 2) - supports USDC, EURC, GHO
 BASE = NetworkConfig(
     name="base",
     display_name="Base",
@@ -31,9 +40,29 @@ BASE = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://mainnet.base.org",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "eurc": TokenConfig(
+            address="0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+            decimals=6,
+            name="EURC",
+            version="2",
+        ),
+        "gho": TokenConfig(
+            address="0x6Bb7a212910682DCFdbd5BCBb3e28FB4E8da10Ee",
+            decimals=18,
+            name="Gho Token",
+            version="1",
+        ),
+    },
 )
 
-# Ethereum Mainnet
+# Ethereum Mainnet (supports all 6 stablecoins)
 ETHEREUM = NetworkConfig(
     name="ethereum",
     display_name="Ethereum",
@@ -45,9 +74,47 @@ ETHEREUM = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://eth.llamarpc.com",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "eurc": TokenConfig(
+            address="0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
+            decimals=6,
+            name="EURC",
+            version="2",
+        ),
+        "ausd": TokenConfig(
+            address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            decimals=6,
+            name="Agora USD",
+            version="1",
+        ),
+        "pyusd": TokenConfig(
+            address="0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+            decimals=6,
+            name="PayPal USD",
+            version="1",
+        ),
+        "gho": TokenConfig(
+            address="0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f",
+            decimals=18,
+            name="Gho Token",
+            version="1",
+        ),
+        "crvusd": TokenConfig(
+            address="0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+            decimals=18,
+            name="Curve.Fi USD Stablecoin",
+            version="1",
+        ),
+    },
 )
 
-# Polygon (PoS)
+# Polygon (PoS) - supports USDC, AUSD
 POLYGON = NetworkConfig(
     name="polygon",
     display_name="Polygon",
@@ -59,9 +126,23 @@ POLYGON = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://polygon-rpc.com",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "ausd": TokenConfig(
+            address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            decimals=6,
+            name="Agora USD",
+            version="1",
+        ),
+    },
 )
 
-# Arbitrum One
+# Arbitrum One - supports USDC, AUSD, GHO, crvUSD
 ARBITRUM = NetworkConfig(
     name="arbitrum",
     display_name="Arbitrum One",
@@ -73,6 +154,32 @@ ARBITRUM = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://arb1.arbitrum.io/rpc",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "ausd": TokenConfig(
+            address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            decimals=6,
+            name="Agora USD",
+            version="1",
+        ),
+        "gho": TokenConfig(
+            address="0x7dfF72693f6A4149b17e7C6314655f6A9F7c8B33",
+            decimals=18,
+            name="Gho Token",
+            version="1",
+        ),
+        "crvusd": TokenConfig(
+            address="0x498Bf2B1e120FeD3ad3D42EA2165E9b73f99C1e5",
+            decimals=18,
+            name="Curve.Fi USD Stablecoin",
+            version="1",
+        ),
+    },
 )
 
 # Optimism
@@ -89,7 +196,7 @@ OPTIMISM = NetworkConfig(
     enabled=True,
 )
 
-# Avalanche C-Chain
+# Avalanche C-Chain - supports USDC, EURC, AUSD
 AVALANCHE = NetworkConfig(
     name="avalanche",
     display_name="Avalanche C-Chain",
@@ -101,6 +208,26 @@ AVALANCHE = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://avalanche-c-chain-rpc.publicnode.com",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "eurc": TokenConfig(
+            address="0xC891EB4cbdEFf6e073e859e987815Ed1505c2ACD",
+            decimals=6,
+            name="EURC",
+            version="2",
+        ),
+        "ausd": TokenConfig(
+            address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            decimals=6,
+            name="Agora USD",
+            version="1",
+        ),
+    },
 )
 
 # Celo
@@ -148,7 +275,7 @@ UNICHAIN = NetworkConfig(
     enabled=True,
 )
 
-# Monad
+# Monad - supports USDC, AUSD
 # NOTE: Monad uses 'USDC' (not 'USD Coin') for EIP-712 domain name
 MONAD = NetworkConfig(
     name="monad",
@@ -161,6 +288,20 @@ MONAD = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://rpc.monad.xyz",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x754704bc059f8c67012fed69bc8a327a5aafb603",
+            decimals=6,
+            name="USDC",
+            version="2",
+        ),
+        "ausd": TokenConfig(
+            address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
+            decimals=6,
+            name="Agora USD",
+            version="1",
+        ),
+    },
 )
 
 # =============================================================================

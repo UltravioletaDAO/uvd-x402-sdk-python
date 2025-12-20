@@ -37,7 +37,7 @@ Supported Networks (14 total):
 - Stellar (1): Stellar
 """
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -83,6 +83,14 @@ from uvd_x402_sdk.networks import (
     get_supported_chain_ids,
     get_supported_network_names,
     NetworkType,
+    # Token types (multi-stablecoin support)
+    TokenType,
+    TokenConfig,
+    ALL_TOKEN_TYPES,
+    get_token_config,
+    get_supported_tokens,
+    is_token_supported,
+    get_networks_by_token,
     # CAIP-2 utilities (v2 support)
     parse_caip2_network,
     to_caip2_network,
@@ -151,6 +159,14 @@ __all__ = [
     "get_supported_chain_ids",
     "get_supported_network_names",
     "NetworkType",
+    # Token types (multi-stablecoin support)
+    "TokenType",
+    "TokenConfig",
+    "ALL_TOKEN_TYPES",
+    "get_token_config",
+    "get_supported_tokens",
+    "is_token_supported",
+    "get_networks_by_token",
     # CAIP-2 utilities
     "parse_caip2_network",
     "to_caip2_network",

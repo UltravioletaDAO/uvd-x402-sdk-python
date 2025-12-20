@@ -4,12 +4,48 @@ Base network configuration and registry.
 This module provides the foundation for network configuration, including:
 - NetworkConfig dataclass for defining network parameters
 - NetworkType enum for categorizing networks
+- TokenType for multi-stablecoin support
 - Global registry for storing and retrieving network configurations
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Literal, Optional, Any
+
+
+# =============================================================================
+# Token Type Definitions (Multi-Stablecoin Support)
+# =============================================================================
+
+# Supported stablecoin token types
+# - usdc: USD Coin (Circle) - 6 decimals
+# - eurc: Euro Coin (Circle) - 6 decimals
+# - ausd: Agora USD (Agora Finance) - 6 decimals
+# - pyusd: PayPal USD (PayPal/Paxos) - 6 decimals
+# - gho: GHO Stablecoin (Aave) - 18 decimals
+# - crvusd: Curve USD (Curve Finance) - 18 decimals
+TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "gho", "crvusd"]
+
+# All supported token types
+ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "gho", "crvusd"]
+
+
+@dataclass
+class TokenConfig:
+    """
+    Configuration for a stablecoin token on a specific network.
+
+    Attributes:
+        address: Contract address of the token
+        decimals: Number of decimals (6 for most stablecoins, 18 for GHO/crvUSD)
+        name: Token name for EIP-712 domain (e.g., "USD Coin" or "USDC")
+        version: Token version for EIP-712 domain
+    """
+
+    address: str
+    decimals: int
+    name: str
+    version: str
 
 
 class NetworkType(Enum):
@@ -53,6 +89,7 @@ class NetworkConfig:
         usdc_domain_version: EIP-712 domain version (EVM only)
         rpc_url: Default RPC endpoint
         enabled: Whether network is currently enabled
+        tokens: Multi-token configurations (EVM chains only, maps token type to config)
         extra_config: Additional network-specific configuration
     """
 
@@ -66,6 +103,7 @@ class NetworkConfig:
     usdc_domain_version: str = "2"
     rpc_url: str = ""
     enabled: bool = True
+    tokens: Dict[TokenType, TokenConfig] = field(default_factory=dict)
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -207,6 +245,119 @@ def get_supported_network_names() -> List[str]:
 
 # Expose registry for inspection
 SUPPORTED_NETWORKS = _NETWORK_REGISTRY
+
+
+# =============================================================================
+# Token Helper Functions (Multi-Stablecoin Support)
+# =============================================================================
+
+
+def get_token_config(network_name: str, token_type: TokenType = "usdc") -> Optional[TokenConfig]:
+    """
+    Get token configuration for a specific network and token type.
+
+    Args:
+        network_name: Network identifier (e.g., 'base', 'ethereum')
+        token_type: Token type (defaults to 'usdc')
+
+    Returns:
+        TokenConfig if the token is supported on this network, None otherwise
+
+    Example:
+        >>> config = get_token_config('ethereum', 'eurc')
+        >>> if config:
+        ...     print(f"EURC address: {config.address}")
+    """
+    network = get_network(network_name)
+    if not network:
+        return None
+
+    # Check tokens dict first (multi-token support)
+    if token_type in network.tokens:
+        return network.tokens[token_type]
+
+    # Fall back to USDC config for backward compatibility
+    if token_type == "usdc":
+        return TokenConfig(
+            address=network.usdc_address,
+            decimals=network.usdc_decimals,
+            name=network.usdc_domain_name,
+            version=network.usdc_domain_version,
+        )
+
+    return None
+
+
+def get_supported_tokens(network_name: str) -> List[TokenType]:
+    """
+    Get list of supported token types for a network.
+
+    Args:
+        network_name: Network identifier
+
+    Returns:
+        List of supported TokenType values
+
+    Example:
+        >>> tokens = get_supported_tokens('ethereum')
+        >>> print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd', 'gho', 'crvusd']
+    """
+    network = get_network(network_name)
+    if not network:
+        return []
+
+    # Get tokens from the tokens dict
+    tokens: List[TokenType] = list(network.tokens.keys())
+
+    # Always include 'usdc' if the network has USDC configured
+    if "usdc" not in tokens and network.usdc_address:
+        tokens.insert(0, "usdc")
+
+    return tokens
+
+
+def is_token_supported(network_name: str, token_type: TokenType) -> bool:
+    """
+    Check if a specific token is supported on a network.
+
+    Args:
+        network_name: Network identifier
+        token_type: Token type to check
+
+    Returns:
+        True if token is supported, False otherwise
+
+    Example:
+        >>> is_token_supported('ethereum', 'eurc')
+        True
+        >>> is_token_supported('celo', 'eurc')
+        False
+    """
+    return get_token_config(network_name, token_type) is not None
+
+
+def get_networks_by_token(token_type: TokenType) -> List[NetworkConfig]:
+    """
+    Get all networks that support a specific token type.
+
+    Args:
+        token_type: Token type to search for
+
+    Returns:
+        List of NetworkConfig instances that support the token
+
+    Example:
+        >>> networks = get_networks_by_token('eurc')
+        >>> for n in networks:
+        ...     print(n.name)  # ethereum, base, avalanche
+    """
+    result = []
+    for network in _NETWORK_REGISTRY.values():
+        if not network.enabled:
+            continue
+        if is_token_supported(network.name, token_type):
+            result.append(network)
+    return result
 
 
 # =============================================================================

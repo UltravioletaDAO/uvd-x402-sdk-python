@@ -11,12 +11,24 @@ The SDK supports 14 mainnet networks out of the box:
 - 1 NEAR: NEAR Protocol
 - 1 Stellar: Stellar
 
+Multi-token support (EVM chains only):
+- USDC: All chains
+- EURC: Ethereum, Base, Avalanche
+- AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad
+- PYUSD: Ethereum
+- GHO: Ethereum, Base, Arbitrum
+- crvUSD: Ethereum, Arbitrum
+
 You can register custom networks using `register_network()`.
 """
 
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
+    # Token types (multi-stablecoin support)
+    TokenType,
+    TokenConfig,
+    ALL_TOKEN_TYPES,
     get_network,
     get_network_by_chain_id,
     register_network,
@@ -24,6 +36,11 @@ from uvd_x402_sdk.networks.base import (
     get_supported_chain_ids,
     get_supported_network_names,
     SUPPORTED_NETWORKS,
+    # Token helper functions
+    get_token_config,
+    get_supported_tokens,
+    is_token_supported,
+    get_networks_by_token,
     # CAIP-2 utilities (x402 v2)
     parse_caip2_network,
     to_caip2_network,
@@ -38,6 +55,10 @@ __all__ = [
     # Core
     "NetworkConfig",
     "NetworkType",
+    # Token types (multi-stablecoin support)
+    "TokenType",
+    "TokenConfig",
+    "ALL_TOKEN_TYPES",
     # Registry functions
     "get_network",
     "get_network_by_chain_id",
@@ -46,6 +67,11 @@ __all__ = [
     "get_supported_chain_ids",
     "get_supported_network_names",
     "SUPPORTED_NETWORKS",
+    # Token helper functions
+    "get_token_config",
+    "get_supported_tokens",
+    "is_token_supported",
+    "get_networks_by_token",
     # CAIP-2 utilities (x402 v2)
     "parse_caip2_network",
     "to_caip2_network",

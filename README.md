@@ -2,17 +2,18 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept USDC payments across **14 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **14 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 ## Features
 
 - **14 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
+- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, GHO, crvUSD (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
-- **Gasless Payments**: Users sign authorizations, facilitator pays all network fees
+- **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
-- **Extensible**: Register custom networks easily
+- **Extensible**: Register custom networks and tokens easily
 
 ## Quick Start (5 Lines)
 
@@ -43,6 +44,17 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
 | Stellar | Stellar | - | `stellar:pubnet` | Active |
+
+### Supported Tokens (EVM Chains)
+
+| Token | Networks | Decimals |
+|-------|----------|----------|
+| USDC | All EVM chains | 6 |
+| EURC | Ethereum, Base, Avalanche | 6 |
+| AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad | 6 |
+| PYUSD | Ethereum | 6 |
+| GHO | Ethereum, Base, Arbitrum | 18 |
+| crvUSD | Ethereum, Arbitrum | 18 |
 
 ## Installation
 
@@ -561,6 +573,92 @@ config = X402Config(
 
 ---
 
+## Multi-Token Support
+
+The SDK supports 6 stablecoins on EVM chains. Use the token helper functions to query and work with different tokens.
+
+### Querying Token Support
+
+```python
+from uvd_x402_sdk import (
+    TokenType,
+    get_token_config,
+    get_supported_tokens,
+    is_token_supported,
+    get_networks_by_token,
+)
+
+# Check which tokens a network supports
+tokens = get_supported_tokens("ethereum")
+print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd', 'gho', 'crvusd']
+
+tokens = get_supported_tokens("base")
+print(tokens)  # ['usdc', 'eurc', 'gho']
+
+# Check if a specific token is supported
+if is_token_supported("ethereum", "eurc"):
+    print("EURC is available on Ethereum!")
+
+# Get token configuration
+config = get_token_config("ethereum", "eurc")
+if config:
+    print(f"EURC address: {config.address}")
+    print(f"Decimals: {config.decimals}")
+    print(f"EIP-712 name: {config.name}")
+    print(f"EIP-712 version: {config.version}")
+
+# Find all networks that support a token
+networks = get_networks_by_token("gho")
+for network in networks:
+    print(f"GHO available on: {network.display_name}")
+# Output: GHO available on: Ethereum, Base, Arbitrum One
+```
+
+### Token Configuration
+
+Each token has specific EIP-712 domain parameters required for signing:
+
+```python
+from uvd_x402_sdk import TokenConfig, get_token_config
+
+# TokenConfig structure
+# - address: Contract address
+# - decimals: Token decimals (6 for most, 18 for GHO/crvUSD)
+# - name: EIP-712 domain name (e.g., "USD Coin", "EURC", "Gho Token")
+# - version: EIP-712 domain version
+
+# Example: Get EURC config on Base
+eurc = get_token_config("base", "eurc")
+# TokenConfig(
+#     address="0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+#     decimals=6,
+#     name="EURC",
+#     version="2"
+# )
+
+# Example: Get GHO config on Ethereum (note: 18 decimals)
+gho = get_token_config("ethereum", "gho")
+# TokenConfig(
+#     address="0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f",
+#     decimals=18,
+#     name="Gho Token",
+#     version="1"
+# )
+```
+
+### Available Tokens
+
+| Token | Description | Decimals | Issuer |
+|-------|-------------|----------|--------|
+| `usdc` | USD Coin | 6 | Circle |
+| `eurc` | Euro Coin | 6 | Circle |
+| `ausd` | Agora USD | 6 | Agora Finance |
+| `pyusd` | PayPal USD | 6 | PayPal/Paxos |
+| `gho` | GHO Stablecoin | 18 | Aave |
+| `crvusd` | Curve USD | 18 | Curve Finance |
+
+---
+
 ## Error Handling
 
 ```python
@@ -606,7 +704,7 @@ except X402Error as e:
 
 ## How x402 Works
 
-The x402 protocol enables gasless USDC payments:
+The x402 protocol enables gasless stablecoin payments (USDC, EURC, AUSD, PYUSD, GHO, crvUSD):
 
 ```
 1. User Request     -->  Client sends request without payment
@@ -649,13 +747,14 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 ## Security
 
 - Users **NEVER** pay gas or submit transactions directly
-- **EVM**: Users sign EIP-712 structured messages only (no transaction broadcast)
+- **EVM**: Users sign EIP-712 structured messages for any supported stablecoin (USDC, EURC, AUSD, PYUSD, GHO, crvUSD)
 - **Solana/Fogo**: Users sign partial transactions (facilitator co-signs and submits)
 - **Stellar**: Users sign Soroban authorization entries only
 - **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
 - The facilitator submits and pays for all on-chain transactions
 - All signatures include expiration timestamps (`validBefore`) for replay protection
 - Nonces prevent double-spending of authorizations
+- Each token has verified contract addresses and EIP-712 domain parameters
 
 ---
 
@@ -732,6 +831,20 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.3.0 (2025-12-20)
+
+- **Multi-Stablecoin Support**: Added support for 6 stablecoins on EVM chains
+  - USDC (all EVM chains)
+  - EURC (Ethereum, Base, Avalanche)
+  - AUSD (Ethereum, Arbitrum, Avalanche, Polygon, Monad)
+  - PYUSD (Ethereum)
+  - GHO (Ethereum, Base, Arbitrum)
+  - crvUSD (Ethereum, Arbitrum)
+- Added `TokenType` literal type and `TokenConfig` dataclass
+- Added token helper functions: `get_token_config()`, `get_supported_tokens()`, `is_token_supported()`, `get_networks_by_token()`
+- Added `tokens` field to `NetworkConfig` for multi-token configurations
+- Updated EVM network configurations with token contract addresses and EIP-712 domain parameters
 
 ### v0.2.2 (2025-12-16)
 
