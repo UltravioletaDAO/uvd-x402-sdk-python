@@ -653,6 +653,55 @@ pyusd = get_token_config("ethereum", "pyusd")
 | `ausd` | Agora USD | 6 | Agora Finance |
 | `pyusd` | PayPal USD | 6 | PayPal/Paxos |
 
+### Critical Implementation Notes
+
+#### EIP-712 Domain Names Vary by Chain
+
+The same token may use **different EIP-712 domain names on different chains**. This affects signature verification.
+
+| Token | Ethereum | Base | Avalanche |
+|-------|----------|------|-----------|
+| EURC | `"Euro Coin"` | `"EURC"` | `"Euro Coin"` |
+| USDC | `"USD Coin"` | `"USD Coin"` | `"USD Coin"` |
+| AUSD | `"AUSD"` | N/A | `"AUSD"` |
+| PYUSD | `"PayPal USD"` | N/A | N/A |
+
+**Important:** Always use `get_token_config()` to get the correct domain name. Never hardcode domain names.
+
+```python
+# CORRECT: Use get_token_config for each chain
+eurc_base = get_token_config("base", "eurc")
+# TokenConfig(name="EURC", version="2", ...)
+
+eurc_ethereum = get_token_config("ethereum", "eurc")
+# TokenConfig(name="Euro Coin", version="2", ...)
+```
+
+#### PYUSD Signature Format (PayPal USD)
+
+PYUSD uses the Paxos implementation which only supports the **v,r,s signature variant** of `transferWithAuthorization`. This is different from Circle's USDC/EURC which support both compact bytes and v,r,s variants.
+
+**Backend implications:**
+- The x402 facilitator (v1.9.0+) automatically handles this by detecting PYUSD and using `transferWithAuthorization_1(v,r,s)` instead of `transferWithAuthorization_0(bytes signature)`
+- If using a custom facilitator, ensure it supports the v,r,s variant for PYUSD
+
+#### Token Info Must Be Passed to Facilitator
+
+When using non-USDC tokens, your backend **must** pass the token info (including EIP-712 domain) to the facilitator. This is done via the `extra` field in `paymentRequirements`:
+
+```python
+# When building payment requirements for the facilitator
+payment_requirements = {
+    "asset": token_address,  # Use actual token address, NOT hardcoded USDC
+    "extra": {
+        "name": token_config.name,     # EIP-712 domain name
+        "version": token_config.version,  # EIP-712 domain version
+    }
+}
+```
+
+Without this, the facilitator will use wrong EIP-712 domain and signature verification will fail with "invalid signature" error.
+
 ---
 
 ## Error Handling
@@ -827,6 +876,13 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.3.2 (2025-12-21)
+
+- Added critical implementation notes for multi-token support:
+  - EIP-712 domain names vary by chain (e.g., EURC is "Euro Coin" on Ethereum but "EURC" on Base)
+  - PYUSD uses v,r,s signature variant (Paxos implementation)
+  - Token info must be passed to facilitator via `extra` field
 
 ### v0.3.1 (2025-12-21)
 
