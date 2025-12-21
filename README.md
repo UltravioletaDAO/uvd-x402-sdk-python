@@ -7,7 +7,7 @@ Accept **gasless stablecoin payments** across **14 blockchain networks** with a 
 ## Features
 
 - **14 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
-- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, GHO, crvUSD (EVM chains)
+- **4 Stablecoins**: USDC, EURC, AUSD, PYUSD (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
@@ -53,8 +53,6 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | EURC | Ethereum, Base, Avalanche | 6 |
 | AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad | 6 |
 | PYUSD | Ethereum | 6 |
-| GHO | Ethereum, Base, Arbitrum | 18 |
-| crvUSD | Ethereum, Arbitrum | 18 |
 
 ## Installation
 
@@ -590,10 +588,10 @@ from uvd_x402_sdk import (
 
 # Check which tokens a network supports
 tokens = get_supported_tokens("ethereum")
-print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd', 'gho', 'crvusd']
+print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd']
 
 tokens = get_supported_tokens("base")
-print(tokens)  # ['usdc', 'eurc', 'gho']
+print(tokens)  # ['usdc', 'eurc']
 
 # Check if a specific token is supported
 if is_token_supported("ethereum", "eurc"):
@@ -608,10 +606,10 @@ if config:
     print(f"EIP-712 version: {config.version}")
 
 # Find all networks that support a token
-networks = get_networks_by_token("gho")
+networks = get_networks_by_token("eurc")
 for network in networks:
-    print(f"GHO available on: {network.display_name}")
-# Output: GHO available on: Ethereum, Base, Arbitrum One
+    print(f"EURC available on: {network.display_name}")
+# Output: EURC available on: Ethereum, Base, Avalanche C-Chain
 ```
 
 ### Token Configuration
@@ -623,7 +621,7 @@ from uvd_x402_sdk import TokenConfig, get_token_config
 
 # TokenConfig structure
 # - address: Contract address
-# - decimals: Token decimals (6 for most, 18 for GHO/crvUSD)
+# - decimals: Token decimals (6 for all supported stablecoins)
 # - name: EIP-712 domain name (e.g., "USD Coin", "EURC", "Gho Token")
 # - version: EIP-712 domain version
 
@@ -636,12 +634,12 @@ eurc = get_token_config("base", "eurc")
 #     version="2"
 # )
 
-# Example: Get GHO config on Ethereum (note: 18 decimals)
-gho = get_token_config("ethereum", "gho")
+# Example: Get PYUSD config on Ethereum
+pyusd = get_token_config("ethereum", "pyusd")
 # TokenConfig(
-#     address="0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f",
-#     decimals=18,
-#     name="Gho Token",
+#     address="0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+#     decimals=6,
+#     name="PayPal USD",
 #     version="1"
 # )
 ```
@@ -654,8 +652,6 @@ gho = get_token_config("ethereum", "gho")
 | `eurc` | Euro Coin | 6 | Circle |
 | `ausd` | Agora USD | 6 | Agora Finance |
 | `pyusd` | PayPal USD | 6 | PayPal/Paxos |
-| `gho` | GHO Stablecoin | 18 | Aave |
-| `crvusd` | Curve USD | 18 | Curve Finance |
 
 ---
 
@@ -704,7 +700,7 @@ except X402Error as e:
 
 ## How x402 Works
 
-The x402 protocol enables gasless stablecoin payments (USDC, EURC, AUSD, PYUSD, GHO, crvUSD):
+The x402 protocol enables gasless stablecoin payments (USDC, EURC, AUSD, PYUSD):
 
 ```
 1. User Request     -->  Client sends request without payment
@@ -747,7 +743,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 ## Security
 
 - Users **NEVER** pay gas or submit transactions directly
-- **EVM**: Users sign EIP-712 structured messages for any supported stablecoin (USDC, EURC, AUSD, PYUSD, GHO, crvUSD)
+- **EVM**: Users sign EIP-712 structured messages for any supported stablecoin (USDC, EURC, AUSD, PYUSD)
 - **Solana/Fogo**: Users sign partial transactions (facilitator co-signs and submits)
 - **Stellar**: Users sign Soroban authorization entries only
 - **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
@@ -832,15 +828,18 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.3.1 (2025-12-21)
+
+- Removed GHO and crvUSD token support (not EIP-3009 compatible)
+- SDK now supports 4 stablecoins: USDC, EURC, AUSD, PYUSD
+
 ### v0.3.0 (2025-12-20)
 
-- **Multi-Stablecoin Support**: Added support for 6 stablecoins on EVM chains
+- **Multi-Stablecoin Support**: Added support for 4 stablecoins on EVM chains
   - USDC (all EVM chains)
   - EURC (Ethereum, Base, Avalanche)
   - AUSD (Ethereum, Arbitrum, Avalanche, Polygon, Monad)
   - PYUSD (Ethereum)
-  - GHO (Ethereum, Base, Arbitrum)
-  - crvUSD (Ethereum, Arbitrum)
 - Added `TokenType` literal type and `TokenConfig` dataclass
 - Added token helper functions: `get_token_config()`, `get_supported_tokens()`, `is_token_supported()`, `get_networks_by_token()`
 - Added `tokens` field to `NetworkConfig` for multi-token configurations

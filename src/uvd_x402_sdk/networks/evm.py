@@ -13,8 +13,6 @@ Multi-token support:
 - EURC: Ethereum, Base, Avalanche (6 decimals)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
-- GHO: Ethereum, Base, Arbitrum (18 decimals)
-- crvUSD: Ethereum, Arbitrum (18 decimals)
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -28,7 +26,7 @@ from uvd_x402_sdk.networks.base import (
 # EVM Networks Configuration
 # =============================================================================
 
-# Base (Layer 2) - supports USDC, EURC, GHO
+# Base (Layer 2) - supports USDC, EURC
 BASE = NetworkConfig(
     name="base",
     display_name="Base",
@@ -53,16 +51,10 @@ BASE = NetworkConfig(
             name="EURC",
             version="2",
         ),
-        "gho": TokenConfig(
-            address="0x6Bb7a212910682DCFdbd5BCBb3e28FB4E8da10Ee",
-            decimals=18,
-            name="Gho Token",
-            version="1",
-        ),
     },
 )
 
-# Ethereum Mainnet (supports all 6 stablecoins)
+# Ethereum Mainnet - supports USDC, EURC, AUSD, PYUSD
 ETHEREUM = NetworkConfig(
     name="ethereum",
     display_name="Ethereum",
@@ -99,18 +91,6 @@ ETHEREUM = NetworkConfig(
             name="PayPal USD",
             version="1",
         ),
-        "gho": TokenConfig(
-            address="0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f",
-            decimals=18,
-            name="Gho Token",
-            version="1",
-        ),
-        "crvusd": TokenConfig(
-            address="0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
-            decimals=18,
-            name="Curve.Fi USD Stablecoin",
-            version="1",
-        ),
     },
 )
 
@@ -142,7 +122,7 @@ POLYGON = NetworkConfig(
     },
 )
 
-# Arbitrum One - supports USDC, AUSD, GHO, crvUSD
+# Arbitrum One - supports USDC, AUSD
 ARBITRUM = NetworkConfig(
     name="arbitrum",
     display_name="Arbitrum One",
@@ -165,18 +145,6 @@ ARBITRUM = NetworkConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
             name="Agora USD",
-            version="1",
-        ),
-        "gho": TokenConfig(
-            address="0x7dfF72693f6A4149b17e7C6314655f6A9F7c8B33",
-            decimals=18,
-            name="Gho Token",
-            version="1",
-        ),
-        "crvusd": TokenConfig(
-            address="0x498Bf2B1e120FeD3ad3D42EA2165E9b73f99C1e5",
-            decimals=18,
-            name="Curve.Fi USD Stablecoin",
             version="1",
         ),
     },

@@ -22,12 +22,10 @@ from typing import Dict, List, Literal, Optional, Any
 # - eurc: Euro Coin (Circle) - 6 decimals
 # - ausd: Agora USD (Agora Finance) - 6 decimals
 # - pyusd: PayPal USD (PayPal/Paxos) - 6 decimals
-# - gho: GHO Stablecoin (Aave) - 18 decimals
-# - crvusd: Curve USD (Curve Finance) - 18 decimals
-TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "gho", "crvusd"]
+TokenType = Literal["usdc", "eurc", "ausd", "pyusd"]
 
 # All supported token types
-ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "gho", "crvusd"]
+ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd"]
 
 
 @dataclass
@@ -37,7 +35,7 @@ class TokenConfig:
 
     Attributes:
         address: Contract address of the token
-        decimals: Number of decimals (6 for most stablecoins, 18 for GHO/crvUSD)
+        decimals: Number of decimals (6 for all supported stablecoins)
         name: Token name for EIP-712 domain (e.g., "USD Coin" or "USDC")
         version: Token version for EIP-712 domain
     """
@@ -300,7 +298,7 @@ def get_supported_tokens(network_name: str) -> List[TokenType]:
 
     Example:
         >>> tokens = get_supported_tokens('ethereum')
-        >>> print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd', 'gho', 'crvusd']
+        >>> print(tokens)  # ['usdc', 'eurc', 'ausd', 'pyusd']
     """
     network = get_network(network_name)
     if not network:

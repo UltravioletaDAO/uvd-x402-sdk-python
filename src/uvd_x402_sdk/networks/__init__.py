@@ -16,8 +16,6 @@ Multi-token support (EVM chains only):
 - EURC: Ethereum, Base, Avalanche
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad
 - PYUSD: Ethereum
-- GHO: Ethereum, Base, Arbitrum
-- crvUSD: Ethereum, Arbitrum
 
 You can register custom networks using `register_network()`.
 """
