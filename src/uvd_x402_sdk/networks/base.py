@@ -22,10 +22,11 @@ from typing import Dict, List, Literal, Optional, Any
 # - eurc: Euro Coin (Circle) - 6 decimals
 # - ausd: Agora USD (Agora Finance) - 6 decimals
 # - pyusd: PayPal USD (PayPal/Paxos) - 6 decimals
-TokenType = Literal["usdc", "eurc", "ausd", "pyusd"]
+# - usdt: Tether USD (USDT0 omnichain via LayerZero) - 6 decimals
+TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "usdt"]
 
 # All supported token types
-ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd"]
+ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "usdt"]
 
 
 @dataclass

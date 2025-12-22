@@ -7,7 +7,7 @@ Accept **gasless stablecoin payments** across **14 blockchain networks** with a 
 ## Features
 
 - **14 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
-- **4 Stablecoins**: USDC, EURC, AUSD, PYUSD (EVM chains)
+- **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
@@ -53,6 +53,7 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | EURC | Ethereum, Base, Avalanche | 6 |
 | AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad | 6 |
 | PYUSD | Ethereum | 6 |
+| USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |
 
 ## Installation
 
@@ -876,6 +877,11 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.3.4 (2025-12-22)
+
+- Added USDT support (USDT0 omnichain via LayerZero) on Ethereum, Arbitrum, Optimism, Avalanche, Polygon
+- SDK now supports 5 stablecoins: USDC, EURC, AUSD, PYUSD, USDT
 
 ### v0.3.3 (2025-12-22)
 

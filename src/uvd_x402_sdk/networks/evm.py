@@ -13,6 +13,7 @@ Multi-token support:
 - EURC: Ethereum, Base, Avalanche (6 decimals)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
+- USDT: Arbitrum, Optimism, Celo (6 decimals) - USDT0 omnichain via LayerZero
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -122,7 +123,7 @@ POLYGON = NetworkConfig(
     },
 )
 
-# Arbitrum One - supports USDC, AUSD
+# Arbitrum One - supports USDC, AUSD, USDT
 ARBITRUM = NetworkConfig(
     name="arbitrum",
     display_name="Arbitrum One",
@@ -147,10 +148,16 @@ ARBITRUM = NetworkConfig(
             name="Agora Dollar",
             version="1",
         ),
+        "usdt": TokenConfig(
+            address="0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+            decimals=6,
+            name="USD₮0",
+            version="1",
+        ),
     },
 )
 
-# Optimism
+# Optimism - supports USDC, USDT
 OPTIMISM = NetworkConfig(
     name="optimism",
     display_name="Optimism",
@@ -162,6 +169,20 @@ OPTIMISM = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://mainnet.optimism.io",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+        "usdt": TokenConfig(
+            address="0x01bff41798a0bcf287b996046ca68b395dbc1071",
+            decimals=6,
+            name="USD₮0",
+            version="1",
+        ),
+    },
 )
 
 # Avalanche C-Chain - supports USDC, EURC, AUSD
@@ -198,7 +219,7 @@ AVALANCHE = NetworkConfig(
     },
 )
 
-# Celo
+# Celo - supports USDC, USDT
 # NOTE: Celo uses 'USDC' (not 'USD Coin') for EIP-712 domain name
 CELO = NetworkConfig(
     name="celo",
@@ -211,6 +232,20 @@ CELO = NetworkConfig(
     usdc_domain_version="2",
     rpc_url="https://forno.celo.org",
     enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+            decimals=6,
+            name="USDC",  # Celo uses "USDC" not "USD Coin"
+            version="2",
+        ),
+        "usdt": TokenConfig(
+            address="0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",
+            decimals=6,
+            name="Tether USD",  # Celo USDT uses "Tether USD"
+            version="1",
+        ),
+    },
 )
 
 # HyperEVM (Hyperliquid)
