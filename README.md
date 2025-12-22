@@ -877,6 +877,11 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.3.3 (2025-12-22)
+
+- Fixed EIP-712 domain names: AUSD uses "Agora Dollar" (not "Agora USD")
+- Fixed EURC domain name on Ethereum/Avalanche: "Euro Coin" (not "EURC")
+
 ### v0.3.2 (2025-12-21)
 
 - Added critical implementation notes for multi-token support:

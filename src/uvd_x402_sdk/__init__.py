@@ -37,7 +37,7 @@ Supported Networks (14 total):
 - Stellar (1): Stellar
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
