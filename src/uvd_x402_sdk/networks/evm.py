@@ -76,13 +76,13 @@ ETHEREUM = NetworkConfig(
         "eurc": TokenConfig(
             address="0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
             decimals=6,
-            name="EURC",
+            name="Euro Coin",
             version="2",
         ),
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
-            name="Agora USD",
+            name="Agora Dollar",
             version="1",
         ),
         "pyusd": TokenConfig(
@@ -116,7 +116,7 @@ POLYGON = NetworkConfig(
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
-            name="Agora USD",
+            name="Agora Dollar",
             version="1",
         ),
     },
@@ -144,7 +144,7 @@ ARBITRUM = NetworkConfig(
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
-            name="Agora USD",
+            name="Agora Dollar",
             version="1",
         ),
     },
@@ -186,13 +186,13 @@ AVALANCHE = NetworkConfig(
         "eurc": TokenConfig(
             address="0xC891EB4cbdEFf6e073e859e987815Ed1505c2ACD",
             decimals=6,
-            name="EURC",
+            name="Euro Coin",
             version="2",
         ),
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
-            name="Agora USD",
+            name="Agora Dollar",
             version="1",
         ),
     },
@@ -266,7 +266,7 @@ MONAD = NetworkConfig(
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
-            name="Agora USD",
+            name="Agora Dollar",
             version="1",
         ),
     },

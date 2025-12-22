@@ -663,7 +663,7 @@ The same token may use **different EIP-712 domain names on different chains**. T
 |-------|----------|------|-----------|
 | EURC | `"Euro Coin"` | `"EURC"` | `"Euro Coin"` |
 | USDC | `"USD Coin"` | `"USD Coin"` | `"USD Coin"` |
-| AUSD | `"AUSD"` | N/A | `"AUSD"` |
+| AUSD | `"Agora Dollar"` | N/A | `"Agora Dollar"` |
 | PYUSD | `"PayPal USD"` | N/A | N/A |
 
 **Important:** Always use `get_token_config()` to get the correct domain name. Never hardcode domain names.
