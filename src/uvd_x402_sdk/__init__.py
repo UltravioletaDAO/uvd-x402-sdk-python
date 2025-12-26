@@ -41,7 +41,7 @@ Supported Networks (16 total):
 - Algorand (2): Algorand mainnet, Algorand testnet
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client

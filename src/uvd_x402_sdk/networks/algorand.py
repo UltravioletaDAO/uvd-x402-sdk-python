@@ -2,7 +2,7 @@
 Algorand network configurations for x402 payments.
 
 This module supports Algorand blockchain networks:
-- Algorand mainnet (network: "algorand-mainnet" or "algorand")
+- Algorand mainnet (network: "algorand")
 - Algorand testnet (network: "algorand-testnet")
 
 Algorand uses ASA (Algorand Standard Assets) for USDC:
@@ -23,7 +23,7 @@ Payload Format:
 {
     "x402Version": 1,
     "scheme": "exact",
-    "network": "algorand-mainnet",
+    "network": "algorand",
     "payload": {
         "paymentIndex": 1,
         "paymentGroup": [
@@ -96,7 +96,7 @@ ALGORAND = NetworkConfig(
         # Genesis hash (for CAIP-2)
         "genesis_hash": "wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=",
         # x402 network name (facilitator expects this format)
-        "x402_network": "algorand-mainnet",
+        "x402_network": "algorand",
     },
 )
 
@@ -301,21 +301,21 @@ def get_x402_network_name(network_name: str) -> str:
     """
     Get the x402 network name for an Algorand network.
 
-    The facilitator expects "algorand-mainnet" or "algorand-testnet".
+    The facilitator expects "algorand" or "algorand-testnet".
 
     Args:
         network_name: SDK network name ('algorand' or 'algorand-testnet')
 
     Returns:
-        x402 network name ('algorand-mainnet' or 'algorand-testnet')
+        x402 network name ('algorand' or 'algorand-testnet')
     """
     from uvd_x402_sdk.networks.base import get_network
 
     network = get_network(network_name)
     if not network:
-        # Default mapping
-        if network_name == "algorand":
-            return "algorand-mainnet"
+        # Default mapping - normalize "algorand-mainnet" to "algorand"
+        if network_name == "algorand-mainnet":
+            return "algorand"
         return network_name
 
     return network.extra_config.get("x402_network", network_name)
@@ -533,7 +533,7 @@ def create_private_key_signer(private_key: str) -> Callable:
 
 def build_x402_payment_request(
     payload: AlgorandPaymentPayload,
-    network: str = "algorand-mainnet",
+    network: str = "algorand",
     scheme: str = "exact",
     version: int = 1,
 ) -> Dict[str, Any]:
@@ -542,7 +542,7 @@ def build_x402_payment_request(
 
     Args:
         payload: AlgorandPaymentPayload from build_atomic_group()
-        network: Network name ("algorand-mainnet" or "algorand-testnet")
+        network: Network name ("algorand" or "algorand-testnet")
         scheme: Payment scheme (default "exact")
         version: x402 version (default 1)
 
