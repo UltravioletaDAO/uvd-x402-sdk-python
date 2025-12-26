@@ -5,6 +5,10 @@ This module supports all SVM-compatible chains:
 - Solana (mainnet)
 - Fogo (fast finality SVM)
 
+Supported Tokens:
+- USDC: Standard SPL Token (TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA)
+- AUSD: Token2022 (TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb)
+
 All SVM chains use the same payment flow:
 1. User creates a partially-signed VersionedTransaction
 2. Transaction contains SPL token TransferChecked instruction
@@ -14,7 +18,7 @@ All SVM chains use the same payment flow:
 Transaction Structure (flexible, facilitator v1.9.4+):
 - SetComputeUnitLimit instruction (recommended: 20,000 units)
 - SetComputeUnitPrice instruction (recommended: 100,000 microLamports)
-- TransferChecked (USDC transfer)
+- TransferChecked (SPL or Token2022 transfer)
 - Optional: CreateAssociatedTokenAccount (if recipient ATA doesn't exist)
 - Additional instructions may be added by wallets (e.g., Phantom memo)
 
@@ -30,6 +34,7 @@ from typing import Dict, Any, Optional
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
+    TokenConfig,
     register_network,
 )
 
@@ -50,9 +55,28 @@ SOLANA = NetworkConfig(
     usdc_domain_version="",
     rpc_url="https://api.mainnet-beta.solana.com",
     enabled=True,
+    tokens={
+        # USDC - Standard SPL Token
+        "usdc": TokenConfig(
+            address="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            decimals=6,
+            name="",  # Not applicable for SVM
+            version="",
+        ),
+        # AUSD - Token2022 (Agora USD)
+        # Uses Token2022 with extensions: PermanentDelegate, TransferHook, Metadata
+        "ausd": TokenConfig(
+            address="AUSD1jCcCyPLybk1YnvPWsHQSrZ46dxwoMniN4N2UEB9",
+            decimals=6,
+            name="",  # Not applicable for SVM
+            version="",
+        ),
+    },
     extra_config={
         # Token program ID (standard SPL token program)
         "token_program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        # Token2022 program ID (for AUSD and other Token2022 tokens)
+        "token_2022_program_id": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
         # Associated Token Account program
         "ata_program_id": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
         # Default compute units for transfer
@@ -280,3 +304,50 @@ DEFAULT_COMPUTE_UNITS = 20000
 # Use 100k microlamports/CU for fast landing on mainnet
 # Lower values (like 1) cause transactions to be deprioritized and time out
 DEFAULT_PRIORITY_FEE_MICROLAMPORTS = 100_000
+
+# =============================================================================
+# Token Program Constants
+# =============================================================================
+
+# Standard SPL Token Program (used by USDC)
+TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+# Token2022 Program (used by AUSD - has extensions like TransferHook)
+TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+
+# Associated Token Account Program (same for both SPL and Token2022)
+ATA_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+
+# Tokens that use Token2022 instead of standard SPL
+TOKEN_2022_TOKENS = {"ausd"}
+
+
+def get_token_program_id(token_type: str) -> str:
+    """
+    Get the token program ID for a given token type.
+
+    USDC uses standard SPL Token program.
+    AUSD uses Token2022 (with extensions like TransferHook).
+
+    Args:
+        token_type: Token type (e.g., 'usdc', 'ausd')
+
+    Returns:
+        Token program ID string
+    """
+    if token_type.lower() in TOKEN_2022_TOKENS:
+        return TOKEN_2022_PROGRAM_ID
+    return TOKEN_PROGRAM_ID
+
+
+def is_token_2022(token_type: str) -> bool:
+    """
+    Check if a token uses the Token2022 program.
+
+    Args:
+        token_type: Token type (e.g., 'usdc', 'ausd')
+
+    Returns:
+        True if token uses Token2022, False for standard SPL
+    """
+    return token_type.lower() in TOKEN_2022_TOKENS
