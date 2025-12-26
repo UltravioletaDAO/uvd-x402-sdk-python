@@ -60,6 +60,15 @@ STELLAR_FEE_PAYER_TESTNET = "GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2O
 
 
 # =============================================================================
+# EVM Facilitator Addresses (for reference - EVM uses EIP-3009, no fee payer needed)
+# =============================================================================
+
+# EVM facilitator wallet addresses (used for settlement, not fee payment)
+EVM_FACILITATOR_MAINNET = "0x103040545AC5031A11E8C03dd11324C7333a13C7"
+EVM_FACILITATOR_TESTNET = "0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8"
+
+
+# =============================================================================
 # Network to Fee Payer Mapping
 # =============================================================================
 

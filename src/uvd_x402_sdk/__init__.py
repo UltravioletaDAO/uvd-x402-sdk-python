@@ -41,7 +41,7 @@ Supported Networks (16 total):
 - Algorand (2): Algorand mainnet, Algorand testnet
 """
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -128,6 +128,9 @@ from uvd_x402_sdk.facilitator import (
     NEAR_FEE_PAYER_TESTNET,
     STELLAR_FEE_PAYER_MAINNET,
     STELLAR_FEE_PAYER_TESTNET,
+    # EVM facilitator addresses (for reference)
+    EVM_FACILITATOR_MAINNET,
+    EVM_FACILITATOR_TESTNET,
     # Helper functions
     get_fee_payer,
     get_facilitator_address,
@@ -221,6 +224,8 @@ __all__ = [
     "NEAR_FEE_PAYER_TESTNET",
     "STELLAR_FEE_PAYER_MAINNET",
     "STELLAR_FEE_PAYER_TESTNET",
+    "EVM_FACILITATOR_MAINNET",
+    "EVM_FACILITATOR_TESTNET",
     "get_fee_payer",
     "get_facilitator_address",
     "requires_fee_payer",
