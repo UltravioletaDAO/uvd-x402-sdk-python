@@ -56,6 +56,7 @@ class NetworkType(Enum):
     - SVM: Partially-signed VersionedTransaction (SPL token transfer) - Solana, Fogo
     - NEAR: NEP-366 SignedDelegateAction (meta-transaction)
     - STELLAR: Soroban Authorization Entry XDR
+    - ALGORAND: ASA (Algorand Standard Assets) transfer via signed transaction
 
     Note: SOLANA is deprecated, use SVM instead for Solana-compatible chains.
     """
@@ -65,6 +66,7 @@ class NetworkType(Enum):
     SOLANA = "solana"  # Deprecated: use SVM
     NEAR = "near"
     STELLAR = "stellar"
+    ALGORAND = "algorand"  # Algorand ASA transfers
 
     @classmethod
     def is_svm(cls, network_type: "NetworkType") -> bool:
@@ -369,6 +371,7 @@ _CAIP2_NAMESPACE_MAP = {
     "solana": NetworkType.SVM,
     "near": NetworkType.NEAR,
     "stellar": NetworkType.STELLAR,
+    "algorand": NetworkType.ALGORAND,
 }
 
 # Network name to CAIP-2 format
@@ -391,6 +394,9 @@ _NETWORK_TO_CAIP2 = {
     "near": "near:mainnet",
     # Stellar
     "stellar": "stellar:pubnet",
+    # Algorand
+    "algorand": "algorand:mainnet",
+    "algorand-testnet": "algorand:testnet",
 }
 
 # CAIP-2 to network name mapping (reverse of above)
@@ -444,6 +450,11 @@ def parse_caip2_network(caip2_id: str) -> Optional[str]:
         return "near"
     if namespace == "stellar" and reference in ("pubnet", "mainnet"):
         return "stellar"
+    if namespace == "algorand":
+        if reference == "mainnet":
+            return "algorand"
+        if reference == "testnet":
+            return "algorand-testnet"
 
     return None
 

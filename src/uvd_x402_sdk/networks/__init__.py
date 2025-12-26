@@ -4,12 +4,13 @@ Network configurations for x402 payments.
 This module provides configuration for all supported blockchain networks,
 including USDC contract addresses, RPC URLs, and network-specific parameters.
 
-The SDK supports 14 mainnet networks out of the box:
+The SDK supports 16 mainnet networks out of the box:
 - 10 EVM chains: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
                  Celo, HyperEVM, Unichain, Monad
 - 2 SVM chains: Solana, Fogo
 - 1 NEAR: NEAR Protocol
 - 1 Stellar: Stellar
+- 2 Algorand: Algorand mainnet and testnet
 
 Multi-token support (EVM chains only):
 - USDC: All chains
@@ -47,7 +48,7 @@ from uvd_x402_sdk.networks.base import (
 )
 
 # Import all default network configurations
-from uvd_x402_sdk.networks import evm, solana, near, stellar
+from uvd_x402_sdk.networks import evm, solana, near, stellar, algorand
 
 __all__ = [
     # Core
