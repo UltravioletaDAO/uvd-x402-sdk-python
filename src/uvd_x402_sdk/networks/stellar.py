@@ -19,6 +19,20 @@ from uvd_x402_sdk.networks.base import (
     register_network,
 )
 
+# Stellar fee payer addresses are defined in uvd_x402_sdk.facilitator
+# Import here for convenience
+try:
+    from uvd_x402_sdk.facilitator import (
+        STELLAR_FEE_PAYER_MAINNET,
+        STELLAR_FEE_PAYER_TESTNET,
+        get_fee_payer,
+    )
+except ImportError:
+    # Fallback if facilitator module not loaded yet
+    STELLAR_FEE_PAYER_MAINNET = "GCHPGXJT2WFFRFCA5TV4G4E3PMMXLNIDUH27PKDYA4QJ2XGYZWGFZNHB"
+    STELLAR_FEE_PAYER_TESTNET = "GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2OWFQ2Z"
+    get_fee_payer = None  # type: ignore
+
 # Stellar Mainnet
 STELLAR = NetworkConfig(
     name="stellar",
@@ -127,3 +141,35 @@ def calculate_expiration_ledger(current_ledger: int, validity_ledgers: int = 60)
         Expiration ledger number
     """
     return current_ledger + validity_ledgers
+
+
+def get_stellar_fee_payer(network_name: str = "stellar") -> str:
+    """
+    Get the fee payer address for a Stellar network.
+
+    The fee payer is the facilitator address that pays XLM transaction fees.
+    This address wraps the SorobanAuthorizationEntry in a fee-bump transaction.
+
+    Args:
+        network_name: Network name ('stellar' or 'stellar-testnet')
+
+    Returns:
+        Fee payer public key (G... address) for the specified network
+
+    Example:
+        >>> get_stellar_fee_payer("stellar")
+        'GCHPGXJT2WFFRFCA5TV4G4E3PMMXLNIDUH27PKDYA4QJ2XGYZWGFZNHB'
+        >>> get_stellar_fee_payer("stellar-testnet")
+        'GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2OWFQ2Z'
+    """
+    # Use facilitator module if available
+    if get_fee_payer is not None:
+        fee_payer = get_fee_payer(network_name)
+        if fee_payer:
+            return fee_payer
+
+    # Fallback to direct lookup
+    network_lower = network_name.lower()
+    if "testnet" in network_lower:
+        return STELLAR_FEE_PAYER_TESTNET
+    return STELLAR_FEE_PAYER_MAINNET

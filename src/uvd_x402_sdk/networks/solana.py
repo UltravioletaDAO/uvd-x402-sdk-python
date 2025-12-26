@@ -38,6 +38,24 @@ from uvd_x402_sdk.networks.base import (
     register_network,
 )
 
+# SVM fee payer addresses are defined in uvd_x402_sdk.facilitator
+# Import here for convenience
+try:
+    from uvd_x402_sdk.facilitator import (
+        SOLANA_FEE_PAYER_MAINNET,
+        SOLANA_FEE_PAYER_DEVNET,
+        FOGO_FEE_PAYER_MAINNET,
+        FOGO_FEE_PAYER_TESTNET,
+        get_fee_payer,
+    )
+except ImportError:
+    # Fallback if facilitator module not loaded yet
+    SOLANA_FEE_PAYER_MAINNET = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
+    SOLANA_FEE_PAYER_DEVNET = "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv"
+    FOGO_FEE_PAYER_MAINNET = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
+    FOGO_FEE_PAYER_TESTNET = "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv"
+    get_fee_payer = None  # type: ignore
+
 
 # =============================================================================
 # SVM Networks Configuration
@@ -351,3 +369,43 @@ def is_token_2022(token_type: str) -> bool:
         True if token uses Token2022, False for standard SPL
     """
     return token_type.lower() in TOKEN_2022_TOKENS
+
+
+def get_svm_fee_payer(network_name: str = "solana") -> str:
+    """
+    Get the fee payer address for an SVM network.
+
+    The fee payer is the facilitator address that pays transaction fees.
+    This address should be used as the fee payer in VersionedTransaction.
+
+    Args:
+        network_name: Network name ('solana', 'solana-devnet', 'fogo', 'fogo-testnet')
+
+    Returns:
+        Fee payer address for the specified network
+
+    Example:
+        >>> get_svm_fee_payer("solana")
+        'F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq'
+        >>> get_svm_fee_payer("solana-devnet")
+        '6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv'
+    """
+    # Use facilitator module if available
+    if get_fee_payer is not None:
+        fee_payer = get_fee_payer(network_name)
+        if fee_payer:
+            return fee_payer
+
+    # Fallback to direct lookup
+    network_lower = network_name.lower()
+    if "fogo" in network_lower:
+        if "testnet" in network_lower:
+            return FOGO_FEE_PAYER_TESTNET
+        return FOGO_FEE_PAYER_MAINNET
+    elif "devnet" in network_lower:
+        return SOLANA_FEE_PAYER_DEVNET
+    return SOLANA_FEE_PAYER_MAINNET
+
+
+# Alias for backward compatibility
+get_solana_fee_payer = get_svm_fee_payer

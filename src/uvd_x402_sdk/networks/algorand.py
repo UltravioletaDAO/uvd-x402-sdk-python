@@ -53,6 +53,20 @@ from uvd_x402_sdk.networks.base import (
     register_network,
 )
 
+# Algorand fee payer addresses are defined in uvd_x402_sdk.facilitator
+# Import here for convenience
+try:
+    from uvd_x402_sdk.facilitator import (
+        ALGORAND_FEE_PAYER_MAINNET,
+        ALGORAND_FEE_PAYER_TESTNET,
+        get_fee_payer,
+    )
+except ImportError:
+    # Fallback if facilitator module not loaded yet
+    ALGORAND_FEE_PAYER_MAINNET = "KIMS5H6QLCUDL65L5UBTOXDPWLMTS7N3AAC3I6B2NCONEI5QIVK7LH2C2I"
+    ALGORAND_FEE_PAYER_TESTNET = "5DPPDQNYUPCTXRZWRYSF3WPYU6RKAUR25F3YG4EKXQRHV5AUAI62H5GXL4"
+    get_fee_payer = None  # type: ignore
+
 
 # =============================================================================
 # Algorand Networks Configuration
@@ -548,3 +562,36 @@ def build_x402_payment_request(
         "network": network,
         "payload": payload.to_dict(),
     }
+
+
+def get_algorand_fee_payer(network_name: str = "algorand") -> str:
+    """
+    Get the fee payer address for an Algorand network.
+
+    The fee payer is the facilitator address that pays transaction fees
+    for the atomic group. This address is used to construct Transaction 0
+    (the fee payment transaction).
+
+    Args:
+        network_name: Network name ('algorand' or 'algorand-testnet')
+
+    Returns:
+        Fee payer address for the specified network
+
+    Example:
+        >>> get_algorand_fee_payer("algorand")
+        'KIMS5H6QLCUDL65L5UBTOXDPWLMTS7N3AAC3I6B2NCONEI5QIVK7LH2C2I'
+        >>> get_algorand_fee_payer("algorand-testnet")
+        '5DPPDQNYUPCTXRZWRYSF3WPYU6RKAUR25F3YG4EKXQRHV5AUAI62H5GXL4'
+    """
+    # Use facilitator module if available
+    if get_fee_payer is not None:
+        fee_payer = get_fee_payer(network_name)
+        if fee_payer:
+            return fee_payer
+
+    # Fallback to direct lookup
+    network_lower = network_name.lower()
+    if "testnet" in network_lower:
+        return ALGORAND_FEE_PAYER_TESTNET
+    return ALGORAND_FEE_PAYER_MAINNET

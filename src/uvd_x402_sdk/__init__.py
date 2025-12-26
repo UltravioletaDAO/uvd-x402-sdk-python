@@ -2,8 +2,11 @@
 uvd-x402-sdk: Python SDK for x402 payments via Ultravioleta DAO facilitator.
 
 This SDK enables developers to easily integrate x402 cryptocurrency payments
-into their Python applications with support for 14 blockchain networks across
-4 network types (EVM, SVM, NEAR, Stellar).
+into their Python applications with support for 16 blockchain networks across
+5 network types (EVM, SVM, NEAR, Stellar, Algorand).
+
+The SDK automatically handles facilitator configuration - users don't need to
+configure fee payer addresses or other facilitator details manually.
 
 Supports both x402 v1 and v2 protocols:
 - v1: network as string ("base", "solana")
@@ -29,15 +32,16 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (14 total):
+Supported Networks (16 total):
 - EVM (10): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
            HyperEVM, Unichain, Monad
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar
+- Algorand (2): Algorand mainnet, Algorand testnet
 """
 
-__version__ = "0.3.4"
+__version__ = "0.5.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -108,6 +112,28 @@ from uvd_x402_sdk.response import (
     create_402_headers_v2,
     payment_required_response_v2,
     Payment402BuilderV2,
+)
+from uvd_x402_sdk.facilitator import (
+    # Facilitator URL and constants
+    DEFAULT_FACILITATOR_URL,
+    get_facilitator_url,
+    # Fee payer addresses by chain
+    ALGORAND_FEE_PAYER_MAINNET,
+    ALGORAND_FEE_PAYER_TESTNET,
+    SOLANA_FEE_PAYER_MAINNET,
+    SOLANA_FEE_PAYER_DEVNET,
+    FOGO_FEE_PAYER_MAINNET,
+    FOGO_FEE_PAYER_TESTNET,
+    NEAR_FEE_PAYER_MAINNET,
+    NEAR_FEE_PAYER_TESTNET,
+    STELLAR_FEE_PAYER_MAINNET,
+    STELLAR_FEE_PAYER_TESTNET,
+    # Helper functions
+    get_fee_payer,
+    get_facilitator_address,
+    requires_fee_payer,
+    get_all_fee_payers,
+    build_payment_info,
 )
 
 __all__ = [
@@ -182,4 +208,22 @@ __all__ = [
     "create_402_headers_v2",
     "payment_required_response_v2",
     "Payment402BuilderV2",
+    # Facilitator constants and helpers
+    "DEFAULT_FACILITATOR_URL",
+    "get_facilitator_url",
+    "ALGORAND_FEE_PAYER_MAINNET",
+    "ALGORAND_FEE_PAYER_TESTNET",
+    "SOLANA_FEE_PAYER_MAINNET",
+    "SOLANA_FEE_PAYER_DEVNET",
+    "FOGO_FEE_PAYER_MAINNET",
+    "FOGO_FEE_PAYER_TESTNET",
+    "NEAR_FEE_PAYER_MAINNET",
+    "NEAR_FEE_PAYER_TESTNET",
+    "STELLAR_FEE_PAYER_MAINNET",
+    "STELLAR_FEE_PAYER_TESTNET",
+    "get_fee_payer",
+    "get_facilitator_address",
+    "requires_fee_payer",
+    "get_all_fee_payers",
+    "build_payment_info",
 ]

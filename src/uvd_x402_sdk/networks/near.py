@@ -32,6 +32,20 @@ from uvd_x402_sdk.networks.base import (
     register_network,
 )
 
+# NEAR fee payer addresses are defined in uvd_x402_sdk.facilitator
+# Import here for convenience
+try:
+    from uvd_x402_sdk.facilitator import (
+        NEAR_FEE_PAYER_MAINNET,
+        NEAR_FEE_PAYER_TESTNET,
+        get_fee_payer,
+    )
+except ImportError:
+    # Fallback if facilitator module not loaded yet
+    NEAR_FEE_PAYER_MAINNET = "uvd-facilitator.near"
+    NEAR_FEE_PAYER_TESTNET = "uvd-facilitator.testnet"
+    get_fee_payer = None  # type: ignore
+
 # NEP-366 hash prefix: (2^30 + 366) = 1073742190
 NEP366_PREFIX = ((2**30) + 366).to_bytes(4, 'little')
 
@@ -395,3 +409,35 @@ def is_valid_near_account_id(account_id: str) -> bool:
 
     allowed = set('abcdefghijklmnopqrstuvwxyz0123456789_-.')
     return all(c in allowed for c in account_id)
+
+
+def get_near_fee_payer(network_name: str = "near") -> str:
+    """
+    Get the fee payer account ID for a NEAR network.
+
+    The fee payer is the facilitator account that pays gas fees.
+    This account wraps the SignedDelegateAction and submits it.
+
+    Args:
+        network_name: Network name ('near' or 'near-testnet')
+
+    Returns:
+        Fee payer account ID for the specified network
+
+    Example:
+        >>> get_near_fee_payer("near")
+        'uvd-facilitator.near'
+        >>> get_near_fee_payer("near-testnet")
+        'uvd-facilitator.testnet'
+    """
+    # Use facilitator module if available
+    if get_fee_payer is not None:
+        fee_payer = get_fee_payer(network_name)
+        if fee_payer:
+            return fee_payer
+
+    # Fallback to direct lookup
+    network_lower = network_name.lower()
+    if "testnet" in network_lower:
+        return NEAR_FEE_PAYER_TESTNET
+    return NEAR_FEE_PAYER_MAINNET
