@@ -2,11 +2,13 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **14 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **16 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+
+**New in v0.5.0+**: The SDK now includes embedded facilitator addresses - no manual configuration needed!
 
 ## Features
 
-- **14 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, and Stellar
+- **16 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, Stellar, and Algorand
 - **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
@@ -44,6 +46,8 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
 | Stellar | Stellar | - | `stellar:pubnet` | Active |
+| Algorand | Algorand | - | `algorand:mainnet` | Active |
+| Algorand Testnet | Algorand | - | `algorand:testnet` | Active |
 
 ### Supported Tokens (EVM Chains)
 
@@ -66,6 +70,7 @@ pip install uvd-x402-sdk[flask]      # Flask integration
 pip install uvd-x402-sdk[fastapi]    # FastAPI/Starlette integration
 pip install uvd-x402-sdk[django]     # Django integration
 pip install uvd-x402-sdk[aws]        # AWS Lambda helpers
+pip install uvd-x402-sdk[algorand]   # Algorand atomic group helpers
 
 # All integrations
 pip install uvd-x402-sdk[all]
@@ -324,6 +329,65 @@ from uvd_x402_sdk.networks.near import validate_near_payload
 validate_near_payload(payload.payload)  # Raises ValueError if invalid
 ```
 
+### Algorand
+
+Algorand uses atomic groups with ASA (Algorand Standard Assets) transfers.
+
+```python
+from uvd_x402_sdk import X402Client, X402Config
+
+config = X402Config(
+    recipient_algorand="NCDSNUQ2QLXDMJXRALAW4CRUSSKG4IS37MVOFDQQPC45SE4EBZO42U6ZX4",
+    supported_networks=["algorand"],
+)
+
+client = X402Client(config=config)
+result = client.process_payment(x_payment_header, Decimal("1.00"))
+
+# Algorand uses atomic groups: [fee_tx, payment_tx]
+from uvd_x402_sdk.networks.algorand import (
+    validate_algorand_payload,
+    get_algorand_fee_payer,
+    build_atomic_group,
+)
+
+# Get the facilitator fee payer address
+fee_payer = get_algorand_fee_payer("algorand")
+print(f"Fee payer: {fee_payer}")  # KIMS5H6Q...
+
+# Validate payload structure
+payload = client.extract_payload(x_payment_header)
+validate_algorand_payload(payload.payload)  # Raises ValueError if invalid
+```
+
+#### Building Algorand Payments (requires `pip install uvd-x402-sdk[algorand]`)
+
+```python
+from uvd_x402_sdk.networks.algorand import (
+    build_atomic_group,
+    build_x402_payment_request,
+    get_algorand_fee_payer,
+)
+from algosdk.v2client import algod
+
+# Connect to Algorand node
+client = algod.AlgodClient("", "https://mainnet-api.algonode.cloud")
+
+# Build atomic group
+payload = build_atomic_group(
+    sender_address="YOUR_ADDRESS...",
+    recipient_address="MERCHANT_ADDRESS...",
+    amount=1000000,  # 1 USDC (6 decimals)
+    asset_id=31566704,  # USDC ASA ID on mainnet
+    facilitator_address=get_algorand_fee_payer("algorand"),
+    sign_transaction=lambda txn: txn.sign(private_key),
+    algod_client=client,
+)
+
+# Build x402 payment request
+request = build_x402_payment_request(payload, network="algorand")
+```
+
 ---
 
 ## x402 v1 vs v2
@@ -538,6 +602,94 @@ config = X402Config(
 
 # From environment
 config = X402Config.from_env()
+```
+
+---
+
+## Facilitator Addresses
+
+The SDK includes all facilitator addresses as embedded constants. You don't need to configure them manually.
+
+### Fee Payer Addresses (Non-EVM)
+
+Non-EVM chains require a fee payer address for gasless transactions:
+
+```python
+from uvd_x402_sdk import (
+    # Algorand
+    ALGORAND_FEE_PAYER_MAINNET,  # KIMS5H6QLCUDL65L5UBTOXDPWLMTS7N3AAC3I6B2NCONEI5QIVK7LH2C2I
+    ALGORAND_FEE_PAYER_TESTNET,  # 5DPPDQNYUPCTXRZWRYSF3WPYU6RKAUR25F3YG4EKXQRHV5AUAI62H5GXL4
+
+    # Solana
+    SOLANA_FEE_PAYER_MAINNET,    # F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq
+    SOLANA_FEE_PAYER_DEVNET,     # 6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv
+
+    # Fogo
+    FOGO_FEE_PAYER_MAINNET,      # F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq
+    FOGO_FEE_PAYER_TESTNET,      # 6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv
+
+    # NEAR
+    NEAR_FEE_PAYER_MAINNET,      # uvd-facilitator.near
+    NEAR_FEE_PAYER_TESTNET,      # uvd-facilitator.testnet
+
+    # Stellar
+    STELLAR_FEE_PAYER_MAINNET,   # GCHPGXJT2WFFRFCA5TV4G4E3PMMXLNIDUH27PKDYA4QJ2XGYZWGFZNHB
+    STELLAR_FEE_PAYER_TESTNET,   # GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2OWFQ2Z
+
+    # Helper function
+    get_fee_payer,               # Get fee payer for any network
+)
+
+# Get fee payer for any network
+fee_payer = get_fee_payer("algorand")  # Returns KIMS5H6Q...
+fee_payer = get_fee_payer("solana")    # Returns F742C4VfF...
+fee_payer = get_fee_payer("base")      # Returns None (EVM doesn't need fee payer)
+```
+
+### EVM Facilitator Addresses
+
+EVM chains use EIP-3009 transferWithAuthorization (gasless by design), but the facilitator wallet addresses are available for reference:
+
+```python
+from uvd_x402_sdk import (
+    EVM_FACILITATOR_MAINNET,  # 0x103040545AC5031A11E8C03dd11324C7333a13C7
+    EVM_FACILITATOR_TESTNET,  # 0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8
+)
+```
+
+### Helper Functions
+
+```python
+from uvd_x402_sdk import (
+    get_fee_payer,           # Get fee payer address for a network
+    requires_fee_payer,      # Check if network needs fee payer
+    get_all_fee_payers,      # Get all registered fee payers
+    build_payment_info,      # Build payment info with auto feePayer
+    DEFAULT_FACILITATOR_URL, # https://facilitator.ultravioletadao.xyz
+)
+
+# Check if network needs fee payer
+requires_fee_payer("algorand")  # True
+requires_fee_payer("base")      # False
+
+# Build payment info with automatic fee payer
+info = build_payment_info(
+    network="algorand",
+    pay_to="MERCHANT_ADDRESS...",
+    max_amount_required="1000000",
+    description="API access"
+)
+# info = {
+#     'network': 'algorand',
+#     'payTo': 'MERCHANT_ADDRESS...',
+#     'maxAmountRequired': '1000000',
+#     'description': 'API access',
+#     'asset': '31566704',
+#     'extra': {
+#         'token': 'usdc',
+#         'feePayer': 'KIMS5H6QLCUDL65L5UBTOXDPWLMTS7N3AAC3I6B2NCONEI5QIVK7LH2C2I'
+#     }
+# }
 ```
 
 ---
@@ -772,6 +924,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 | SVM | Partial transaction | Co-signs + submits transaction |
 | NEAR | DelegateAction (Borsh) | Wraps in `Action::Delegate` |
 | Stellar | Auth entry (XDR) | Wraps in fee-bump transaction |
+| Algorand | ASA transfer tx | Signs fee tx + submits atomic group |
 
 ---
 
@@ -877,6 +1030,46 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.5.2 (2025-12-26)
+
+- Added EVM facilitator addresses for reference
+  - `EVM_FACILITATOR_MAINNET`: 0x103040545AC5031A11E8C03dd11324C7333a13C7
+  - `EVM_FACILITATOR_TESTNET`: 0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8
+
+### v0.5.1 (2025-12-26)
+
+- Changed default Algorand mainnet network name from `algorand-mainnet` to `algorand`
+- Aligns with facilitator v1.9.5+ which now uses `algorand` as the primary network identifier
+
+### v0.5.0 (2025-12-26)
+
+- **Facilitator Module**: Added `facilitator.py` with all fee payer addresses embedded as constants
+- SDK users no longer need to configure facilitator addresses manually
+- Added constants: `ALGORAND_FEE_PAYER_MAINNET`, `SOLANA_FEE_PAYER_MAINNET`, `NEAR_FEE_PAYER_MAINNET`, `STELLAR_FEE_PAYER_MAINNET`, etc.
+- Added helper functions: `get_fee_payer()`, `requires_fee_payer()`, `build_payment_info()`
+- Network-specific helpers: `get_algorand_fee_payer()`, `get_svm_fee_payer()`, `get_near_fee_payer()`, `get_stellar_fee_payer()`
+
+### v0.4.2 (2025-12-26)
+
+- **Algorand Atomic Group Fix**: Rewrote Algorand payload format to use GoPlausible x402-avm atomic group spec
+- New `AlgorandPaymentPayload` dataclass with `paymentIndex` and `paymentGroup` fields
+- Added `build_atomic_group()` helper for constructing two-transaction atomic groups
+- Added `validate_algorand_payload()` for payload validation
+- Added `build_x402_payment_request()` for building complete x402 requests
+
+### v0.4.1 (2025-12-26)
+
+- Added AUSD (Agora USD) support on Solana using Token2022 program
+- Added `TOKEN_2022_PROGRAM_ID` constant
+- Added `get_token_program_id()` and `is_token_2022()` helpers
+
+### v0.4.0 (2025-12-26)
+
+- **Algorand Support**: Added Algorand mainnet and testnet networks
+- Added `ALGORAND` NetworkType
+- Added `algorand` optional dependency (`py-algorand-sdk>=2.0.0`)
+- SDK now supports 16 blockchain networks
 
 ### v0.3.4 (2025-12-22)
 
