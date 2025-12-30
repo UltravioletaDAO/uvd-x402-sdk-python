@@ -7,6 +7,7 @@ This module supports Sui blockchain for x402 payments using sponsored transactio
 
 Supported Tokens:
 - USDC: Native Sui USDC
+- AUSD: Agora USD (mainnet only)
 
 All Sui chains use the same payment flow:
 1. User creates a programmable transaction for token transfer
@@ -59,6 +60,9 @@ except ImportError:
 SUI_USDC_COIN_TYPE_MAINNET = "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC"
 SUI_USDC_COIN_TYPE_TESTNET = "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC"
 
+# AUSD (Agora USD) coin types on Sui
+SUI_AUSD_COIN_TYPE_MAINNET = "0x2053d08c1e2bd02791056171aab0fd12bd7cd7efad2ab8f6b9c8902f14df2ff2::ausd::AUSD"
+
 # Sui Mainnet
 SUI = NetworkConfig(
     name="sui",
@@ -78,10 +82,18 @@ SUI = NetworkConfig(
             name="",  # Not applicable for Sui
             version="",
         ),
+        "ausd": TokenConfig(
+            address=SUI_AUSD_COIN_TYPE_MAINNET,
+            decimals=6,
+            name="",  # Not applicable for Sui
+            version="",
+        ),
     },
     extra_config={
         # Coin type for USDC (package::module::type format)
         "usdc_coin_type": SUI_USDC_COIN_TYPE_MAINNET,
+        # Coin type for AUSD (Agora USD)
+        "ausd_coin_type": SUI_AUSD_COIN_TYPE_MAINNET,
         # Fee payer (facilitator) address
         "fee_payer": SUI_FEE_PAYER_MAINNET,
         # Block explorer
@@ -343,6 +355,31 @@ def get_sui_usdc_coin_type(network_name: str = "sui") -> str:
     if "testnet" in network_lower:
         return SUI_USDC_COIN_TYPE_TESTNET
     return SUI_USDC_COIN_TYPE_MAINNET
+
+
+def get_sui_ausd_coin_type(network_name: str = "sui") -> Optional[str]:
+    """
+    Get the AUSD (Agora USD) coin type for a Sui network.
+
+    Note: AUSD is only available on Sui mainnet.
+
+    Args:
+        network_name: Network name ('sui', 'sui-mainnet', 'sui-testnet')
+
+    Returns:
+        AUSD coin type in package::module::type format, or None if not available
+
+    Example:
+        >>> get_sui_ausd_coin_type("sui")
+        '0x2053d08c1e2bd02791056171aab0fd12bd7cd7efad2ab8f6b9c8902f14df2ff2::ausd::AUSD'
+        >>> get_sui_ausd_coin_type("sui-testnet")
+        None
+    """
+    network_lower = network_name.lower()
+    # AUSD is only available on Sui mainnet
+    if "testnet" in network_lower:
+        return None
+    return SUI_AUSD_COIN_TYPE_MAINNET
 
 
 # =============================================================================
