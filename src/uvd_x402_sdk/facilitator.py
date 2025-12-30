@@ -58,6 +58,10 @@ NEAR_FEE_PAYER_TESTNET = "uvd-facilitator.testnet"
 STELLAR_FEE_PAYER_MAINNET = "GCHPGXJT2WFFRFCA5TV4G4E3PMMXLNIDUH27PKDYA4QJ2XGYZWGFZNHB"
 STELLAR_FEE_PAYER_TESTNET = "GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2OWFQ2Z"
 
+# Sui fee payer addresses (sponsor wallets)
+SUI_FEE_PAYER_MAINNET = "0xe7bbf2b13f7d72714760aa16e024fa1b35a978793f9893d0568a4fbf356a764a"
+SUI_FEE_PAYER_TESTNET = "0xabbd16a2fab2a502c9cfe835195a6fc7d70bfc27cffb40b8b286b52a97006e67"
+
 
 # =============================================================================
 # EVM Facilitator Addresses (for reference - EVM uses EIP-3009, no fee payer needed)
@@ -95,6 +99,10 @@ _FEE_PAYER_BY_NETWORK: Dict[str, str] = {
     "stellar": STELLAR_FEE_PAYER_MAINNET,
     "stellar-mainnet": STELLAR_FEE_PAYER_MAINNET,
     "stellar-testnet": STELLAR_FEE_PAYER_TESTNET,
+    # Sui
+    "sui": SUI_FEE_PAYER_MAINNET,
+    "sui-mainnet": SUI_FEE_PAYER_MAINNET,
+    "sui-testnet": SUI_FEE_PAYER_TESTNET,
 }
 
 # CAIP-2 format mappings (x402 v2)
@@ -114,6 +122,9 @@ _FEE_PAYER_BY_CAIP2: Dict[str, str] = {
     # Stellar
     "stellar:pubnet": STELLAR_FEE_PAYER_MAINNET,
     "stellar:testnet": STELLAR_FEE_PAYER_TESTNET,
+    # Sui
+    "sui:mainnet": SUI_FEE_PAYER_MAINNET,
+    "sui:testnet": SUI_FEE_PAYER_TESTNET,
 }
 
 

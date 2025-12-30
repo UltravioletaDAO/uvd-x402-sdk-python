@@ -48,7 +48,7 @@ from uvd_x402_sdk.networks.base import (
 )
 
 # Import all default network configurations
-from uvd_x402_sdk.networks import evm, solana, near, stellar, algorand
+from uvd_x402_sdk.networks import evm, solana, near, stellar, algorand, sui
 
 __all__ = [
     # Core

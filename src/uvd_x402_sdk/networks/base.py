@@ -57,6 +57,7 @@ class NetworkType(Enum):
     - NEAR: NEP-366 SignedDelegateAction (meta-transaction)
     - STELLAR: Soroban Authorization Entry XDR
     - ALGORAND: ASA (Algorand Standard Assets) transfer via signed transaction
+    - SUI: Sui sponsored transactions (Move-based programmable transactions)
 
     Note: SOLANA is deprecated, use SVM instead for Solana-compatible chains.
     """
@@ -67,11 +68,17 @@ class NetworkType(Enum):
     NEAR = "near"
     STELLAR = "stellar"
     ALGORAND = "algorand"  # Algorand ASA transfers
+    SUI = "sui"  # Sui Move VM chains (sponsored transactions)
 
     @classmethod
     def is_svm(cls, network_type: "NetworkType") -> bool:
         """Check if network type is SVM-compatible (Solana, Fogo, etc.)."""
         return network_type in (cls.SVM, cls.SOLANA)
+
+    @classmethod
+    def is_sui(cls, network_type: "NetworkType") -> bool:
+        """Check if network type is Sui-based."""
+        return network_type == cls.SUI
 
 
 @dataclass
@@ -372,6 +379,7 @@ _CAIP2_NAMESPACE_MAP = {
     "near": NetworkType.NEAR,
     "stellar": NetworkType.STELLAR,
     "algorand": NetworkType.ALGORAND,
+    "sui": NetworkType.SUI,
 }
 
 # Network name to CAIP-2 format
@@ -397,6 +405,9 @@ _NETWORK_TO_CAIP2 = {
     # Algorand
     "algorand": "algorand:mainnet",
     "algorand-testnet": "algorand:testnet",
+    # Sui
+    "sui": "sui:mainnet",
+    "sui-testnet": "sui:testnet",
 }
 
 # CAIP-2 to network name mapping (reverse of above)
@@ -455,6 +466,11 @@ def parse_caip2_network(caip2_id: str) -> Optional[str]:
             return "algorand"
         if reference == "testnet":
             return "algorand-testnet"
+    if namespace == "sui":
+        if reference == "mainnet":
+            return "sui"
+        if reference == "testnet":
+            return "sui-testnet"
 
     return None
 

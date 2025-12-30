@@ -32,16 +32,17 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (16 total):
+Supported Networks (18 total):
 - EVM (10): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
            HyperEVM, Unichain, Monad
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar
 - Algorand (2): Algorand mainnet, Algorand testnet
+- Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.5.2"
+__version__ = "0.5.4"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -128,6 +129,8 @@ from uvd_x402_sdk.facilitator import (
     NEAR_FEE_PAYER_TESTNET,
     STELLAR_FEE_PAYER_MAINNET,
     STELLAR_FEE_PAYER_TESTNET,
+    SUI_FEE_PAYER_MAINNET,
+    SUI_FEE_PAYER_TESTNET,
     # EVM facilitator addresses (for reference)
     EVM_FACILITATOR_MAINNET,
     EVM_FACILITATOR_TESTNET,
@@ -224,6 +227,8 @@ __all__ = [
     "NEAR_FEE_PAYER_TESTNET",
     "STELLAR_FEE_PAYER_MAINNET",
     "STELLAR_FEE_PAYER_TESTNET",
+    "SUI_FEE_PAYER_MAINNET",
+    "SUI_FEE_PAYER_TESTNET",
     "EVM_FACILITATOR_MAINNET",
     "EVM_FACILITATOR_TESTNET",
     "get_fee_payer",

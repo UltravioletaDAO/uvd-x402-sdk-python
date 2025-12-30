@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.5.2"
-description = "Python SDK for x402 payments - gasless crypto payments across 16 blockchains with multi-stablecoin support (USDC, EURC, AUSD, PYUSD, USDT)"
+version = "0.5.4"
+description = "Python SDK for x402 payments - gasless crypto payments across 18 blockchains with multi-stablecoin support (USDC, EURC, AUSD, PYUSD, USDT)"
 readme = "README.md"
 requires-python = ">=3.9"
 authors = [
@@ -24,6 +24,7 @@ keywords = [
     "near",
     "stellar",
     "algorand",
+    "sui",
     "facilitator",
     "gasless",
     "eip-712",
