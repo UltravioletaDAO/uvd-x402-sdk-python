@@ -114,12 +114,59 @@ class StellarPayloadContent(BaseModel):
         populate_by_name = True
 
 
+class SuiPayloadContent(BaseModel):
+    """
+    Sui payment payload using sponsored transactions.
+
+    Contains a user-signed programmable transaction that the facilitator sponsors.
+    The facilitator pays gas (in SUI), user pays ZERO SUI.
+
+    Transaction Flow:
+    1. User creates a programmable transaction for token transfer
+    2. User signs the transaction (setSender + setGasOwner for sponsorship)
+    3. Transaction is sent to facilitator with sender signature
+    4. Facilitator adds sponsor signature and pays gas
+    5. Facilitator submits to Sui network
+
+    Required Fields (all mandatory for facilitator deserialization):
+    - transactionBytes: BCS-encoded TransactionData
+    - senderSignature: User's Ed25519 or Secp256k1 signature
+    - from: Sender Sui address (0x + 64 hex)
+    - to: Recipient Sui address (0x + 64 hex)
+    - amount: Transfer amount in base units
+    - coinObjectId: The Sui coin object ID used for the transfer (CRITICAL!)
+    """
+
+    transactionBytes: str = Field(
+        ..., description="Base64-encoded BCS serialized TransactionData"
+    )
+    senderSignature: str = Field(
+        ..., description="Base64-encoded user signature (Ed25519 or Secp256k1)"
+    )
+    from_address: str = Field(
+        ..., alias="from", description="Sender Sui address (0x + 64 hex chars)"
+    )
+    to: str = Field(
+        ..., description="Recipient Sui address (0x + 64 hex chars)"
+    )
+    amount: str = Field(
+        ..., description="Amount in token base units (e.g., '1000000' for 1 USDC)"
+    )
+    coinObjectId: str = Field(
+        ..., description="Sui coin object ID used for the transfer (REQUIRED by facilitator)"
+    )
+
+    class Config:
+        populate_by_name = True
+
+
 # Union type for all payload contents
 PayloadContent = Union[
     EVMPayloadContent,
     SVMPayloadContent,
     NEARPayloadContent,
     StellarPayloadContent,
+    SuiPayloadContent,
 ]
 
 
@@ -195,6 +242,10 @@ class PaymentPayload(BaseModel):
     def get_stellar_payload(self) -> StellarPayloadContent:
         """Parse payload as Stellar format."""
         return StellarPayloadContent(**self.payload)
+
+    def get_sui_payload(self) -> SuiPayloadContent:
+        """Parse payload as Sui format (sponsored transaction)."""
+        return SuiPayloadContent(**self.payload)
 
 
 class PaymentRequirements(BaseModel):

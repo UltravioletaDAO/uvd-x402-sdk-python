@@ -42,7 +42,7 @@ Supported Networks (18 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.5.5"
+__version__ = "0.5.6"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -67,6 +67,7 @@ from uvd_x402_sdk.models import (
     SolanaPayloadContent,  # Alias for backward compatibility
     NEARPayloadContent,
     StellarPayloadContent,
+    SuiPayloadContent,
     # Requirements models (v1)
     PaymentRequirements,
     # Requirements models (v2)
@@ -172,6 +173,7 @@ __all__ = [
     "SolanaPayloadContent",
     "NEARPayloadContent",
     "StellarPayloadContent",
+    "SuiPayloadContent",
     # Requirements models
     "PaymentRequirements",
     "PaymentOption",

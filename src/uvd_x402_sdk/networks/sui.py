@@ -259,6 +259,7 @@ def validate_sui_payload(payload: Dict[str, Any]) -> bool:
     - from: Sender address
     - to: Recipient address
     - amount: Transfer amount (string)
+    - coinObjectId: Sui coin object ID used for transfer (REQUIRED by facilitator)
 
     Args:
         payload: Payload dictionary from x402 payment
@@ -266,7 +267,8 @@ def validate_sui_payload(payload: Dict[str, Any]) -> bool:
     Returns:
         True if valid, raises ValueError if invalid
     """
-    required_fields = ["transactionBytes", "senderSignature", "from", "to", "amount"]
+    # CRITICAL: coinObjectId is REQUIRED by the facilitator for deserialization
+    required_fields = ["transactionBytes", "senderSignature", "from", "to", "amount", "coinObjectId"]
     for field in required_fields:
         if field not in payload:
             raise ValueError(f"Sui payload missing '{field}' field")
@@ -302,6 +304,11 @@ def validate_sui_payload(payload: Dict[str, Any]) -> bool:
             raise ValueError(f"Amount must be positive: {amount}")
     except (ValueError, TypeError) as e:
         raise ValueError(f"Invalid amount: {e}")
+
+    # Validate coinObjectId is a valid Sui object ID (66 chars: 0x + 64 hex)
+    coin_object_id = payload["coinObjectId"]
+    if not is_valid_sui_address(coin_object_id):
+        raise ValueError(f"Invalid coinObjectId: {coin_object_id} (expected 0x + 64 hex chars)")
 
     return True
 
