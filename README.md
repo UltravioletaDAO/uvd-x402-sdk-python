@@ -2,13 +2,13 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **16 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **18 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 **New in v0.5.0+**: The SDK now includes embedded facilitator addresses - no manual configuration needed!
 
 ## Features
 
-- **16 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, Stellar, and Algorand
+- **18 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, and Sui
 - **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
@@ -26,6 +26,124 @@ from uvd_x402_sdk import X402Client
 client = X402Client(recipient_address="0xYourWallet...")
 result = client.process_payment(request.headers["X-PAYMENT"], Decimal("10.00"))
 print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
+```
+
+## Complete Usage Example
+
+Here's a complete example showing the full x402 payment flow - returning a 402 response when no payment is provided, and processing the payment when it arrives:
+
+```python
+from decimal import Decimal
+from uvd_x402_sdk import (
+    X402Client,
+    X402Config,
+    create_402_response,
+    PaymentRequiredError,
+)
+
+# 1. Configure the client with your recipient addresses
+config = X402Config(
+    recipient_evm="0xYourEVMWallet...",           # For Base, Ethereum, etc.
+    recipient_solana="YourSolanaAddress...",      # For Solana, Fogo
+    recipient_near="your-account.near",           # For NEAR
+    recipient_stellar="G...YourStellarAddress",   # For Stellar
+    recipient_algorand="YOUR_ALGO_ADDRESS...",    # For Algorand
+    recipient_sui="0xYourSuiAddress...",          # For Sui
+)
+
+client = X402Client(config=config)
+
+def handle_api_request(request):
+    """
+    Handle an API request that requires payment.
+    """
+    price = Decimal("1.00")  # $1.00 USD
+
+    # Check if payment header exists
+    x_payment = request.headers.get("X-PAYMENT")
+
+    if not x_payment:
+        # No payment provided - return 402 Payment Required
+        return {
+            "status": 402,
+            "headers": {
+                "Content-Type": "application/json",
+            },
+            "body": create_402_response(
+                amount_usd=price,
+                config=config,
+                resource="/api/premium",
+                description="Premium API access",
+            )
+        }
+
+    # Payment provided - verify and settle
+    try:
+        result = client.process_payment(x_payment, price)
+
+        # Payment successful!
+        return {
+            "status": 200,
+            "body": {
+                "success": True,
+                "message": "Payment verified and settled!",
+                "payer": result.payer_address,
+                "network": result.network,
+                "transaction_hash": result.transaction_hash,
+                "amount_paid": str(result.amount),
+            }
+        }
+
+    except PaymentRequiredError as e:
+        # Payment verification failed
+        return {
+            "status": 402,
+            "body": {"error": str(e)}
+        }
+
+# The 402 response includes payment options for all configured networks:
+# {
+#     "x402Version": 1,
+#     "accepts": [
+#         {"network": "base", "asset": "0x833589fCD...", "amount": "1000000", "payTo": "0xYour..."},
+#         {"network": "solana", "asset": "EPjFWdd5...", "amount": "1000000", "payTo": "Your..."},
+#         {"network": "near", "asset": "17208628...", "amount": "1000000", "payTo": "your.near"},
+#         {"network": "stellar", "asset": "CCW67Q...", "amount": "10000000", "payTo": "G..."},
+#         {"network": "algorand", "asset": "31566704", "amount": "1000000", "payTo": "YOUR..."},
+#         {"network": "sui", "asset": "0xdba346...", "amount": "1000000", "payTo": "0xYour..."},
+#     ],
+#     "payTo": "0xYour...",
+#     "maxAmountRequired": "1000000",
+#     "resource": "/api/premium",
+#     "description": "Premium API access"
+# }
+```
+
+### Using the Decorator (Simpler)
+
+For even simpler integration, use the `@require_payment` decorator:
+
+```python
+from decimal import Decimal
+from uvd_x402_sdk import require_payment, configure_x402
+
+# Configure once at startup
+configure_x402(
+    recipient_address="0xYourEVMWallet...",
+    recipient_solana="YourSolanaAddress...",
+)
+
+@require_payment(amount_usd=Decimal("1.00"))
+def premium_endpoint(payment_result):
+    """
+    This function only runs if payment is verified.
+    Returns 402 automatically if no valid payment.
+    """
+    return {
+        "data": "Premium content here!",
+        "paid_by": payment_result.payer_address,
+        "tx": payment_result.transaction_hash,
+    }
 ```
 
 ## Supported Networks
@@ -48,14 +166,16 @@ print(f"Paid by {result.payer_address}, tx: {result.transaction_hash}")
 | Stellar | Stellar | - | `stellar:pubnet` | Active |
 | Algorand | Algorand | - | `algorand:mainnet` | Active |
 | Algorand Testnet | Algorand | - | `algorand:testnet` | Active |
+| Sui | Sui | - | `sui:mainnet` | Active |
+| Sui Testnet | Sui | - | `sui:testnet` | Active |
 
-### Supported Tokens (EVM Chains)
+### Supported Tokens
 
 | Token | Networks | Decimals |
 |-------|----------|----------|
-| USDC | All EVM chains | 6 |
+| USDC | All networks | 6 |
 | EURC | Ethereum, Base, Avalanche | 6 |
-| AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad | 6 |
+| AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui | 6 |
 | PYUSD | Ethereum | 6 |
 | USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |
 
@@ -388,6 +508,72 @@ payload = build_atomic_group(
 request = build_x402_payment_request(payload, network="algorand")
 ```
 
+### Sui
+
+Sui uses sponsored transactions with Move-based programmable transaction blocks.
+
+```python
+from uvd_x402_sdk import X402Client, X402Config
+
+config = X402Config(
+    recipient_sui="0xYourSuiAddress...",
+    supported_networks=["sui"],
+)
+
+client = X402Client(config=config)
+result = client.process_payment(x_payment_header, Decimal("1.00"))
+
+# Sui payload contains a user-signed PTB that the facilitator sponsors
+payload = client.extract_payload(x_payment_header)
+sui_data = payload.get_sui_payload()
+print(f"From: {sui_data.from_address}")
+print(f"To: {sui_data.to}")
+print(f"Amount: {sui_data.amount}")
+print(f"Coin Object ID: {sui_data.coinObjectId}")
+print(f"Transaction Bytes: {sui_data.transactionBytes[:50]}...")
+
+# Sui uses sponsored transactions (user pays ZERO SUI for gas)
+# Facilitator adds sponsor signature and pays gas fees
+```
+
+#### Sui-Specific Utilities
+
+```python
+from uvd_x402_sdk.networks.sui import (
+    validate_sui_payload,
+    is_valid_sui_address,
+    is_valid_sui_coin_type,
+    get_sui_fee_payer,
+    get_sui_usdc_coin_type,
+    get_sui_ausd_coin_type,
+    SUI_FEE_PAYER_MAINNET,
+    SUI_USDC_COIN_TYPE_MAINNET,
+    SUI_AUSD_COIN_TYPE_MAINNET,
+)
+
+# Validate Sui addresses (0x + 64 hex chars)
+assert is_valid_sui_address("0xe7bbf2b13f7d72714760aa16e024fa1b35a978793f9893d0568a4fbf356a764a")
+
+# Validate coin types (package::module::type format)
+assert is_valid_sui_coin_type(SUI_USDC_COIN_TYPE_MAINNET)
+
+# Get fee payer (sponsor) address
+fee_payer = get_sui_fee_payer("sui")  # Returns mainnet sponsor
+print(f"Sui sponsor: {fee_payer}")
+
+# Get USDC coin type
+usdc_type = get_sui_usdc_coin_type("sui")
+# '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC'
+
+# Get AUSD coin type (mainnet only)
+ausd_type = get_sui_ausd_coin_type("sui")
+# '0x2053d08c1e2bd02791056171aab0fd12bd7cd7efad2ab8f6b9c8902f14df2ff2::ausd::AUSD'
+
+# Validate Sui payment payload
+payload = client.extract_payload(x_payment_header)
+validate_sui_payload(payload.payload)  # Raises ValueError if invalid
+```
+
 ---
 
 ## x402 v1 vs v2
@@ -636,6 +822,10 @@ from uvd_x402_sdk import (
     STELLAR_FEE_PAYER_MAINNET,   # GCHPGXJT2WFFRFCA5TV4G4E3PMMXLNIDUH27PKDYA4QJ2XGYZWGFZNHB
     STELLAR_FEE_PAYER_TESTNET,   # GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2OWFQ2Z
 
+    # Sui
+    SUI_FEE_PAYER_MAINNET,       # 0xe7bbf2b13f7d72714760aa16e024fa1b35a978793f9893d0568a4fbf356a764a
+    SUI_FEE_PAYER_TESTNET,       # 0xabbd16a2fab2a502c9cfe835195a6fc7d70bfc27cffb40b8b286b52a97006e67
+
     # Helper function
     get_fee_payer,               # Get fee payer for any network
 )
@@ -643,6 +833,7 @@ from uvd_x402_sdk import (
 # Get fee payer for any network
 fee_payer = get_fee_payer("algorand")  # Returns KIMS5H6Q...
 fee_payer = get_fee_payer("solana")    # Returns F742C4VfF...
+fee_payer = get_fee_payer("sui")       # Returns 0xe7bbf2b...
 fee_payer = get_fee_payer("base")      # Returns None (EVM doesn't need fee payer)
 ```
 
@@ -925,6 +1116,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 | NEAR | DelegateAction (Borsh) | Wraps in `Action::Delegate` |
 | Stellar | Auth entry (XDR) | Wraps in fee-bump transaction |
 | Algorand | ASA transfer tx | Signs fee tx + submits atomic group |
+| Sui | Programmable tx block | Sponsors gas + submits transaction |
 
 ---
 
@@ -950,6 +1142,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 - **Solana/Fogo**: Users sign partial transactions (facilitator co-signs and submits)
 - **Stellar**: Users sign Soroban authorization entries only
 - **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
+- **Sui**: Users sign programmable transaction blocks (facilitator sponsors gas)
 - The facilitator submits and pays for all on-chain transactions
 - All signatures include expiration timestamps (`validBefore`) for replay protection
 - Nonces prevent double-spending of authorizations
@@ -1030,6 +1223,33 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.5.6 (2025-12-31)
+
+- Added `SuiPayloadContent` Pydantic model for Sui sponsored transactions
+- Added `coinObjectId` as required field (CRITICAL for facilitator deserialization)
+- Added `get_sui_payload()` method to `PaymentPayload`
+- Updated `validate_sui_payload()` to require `coinObjectId`
+
+### v0.5.5 (2025-12-30)
+
+- Added AUSD (Agora USD) support for Sui mainnet
+- Added `SUI_AUSD_COIN_TYPE_MAINNET` constant
+- Added `get_sui_ausd_coin_type()` helper function
+
+### v0.5.4 (2025-12-30)
+
+- **Sui Blockchain Support**: Added Sui mainnet and testnet networks
+- Added `NetworkType.SUI` for Sui Move VM chains
+- Added `SUI_FEE_PAYER_MAINNET` and `SUI_FEE_PAYER_TESTNET` sponsor addresses
+- Added CAIP-2 support for `sui:mainnet` and `sui:testnet`
+- Added Sui-specific utilities: `validate_sui_payload()`, `is_valid_sui_address()`, `is_valid_sui_coin_type()`
+- SDK now supports 18 blockchain networks
+
+### v0.5.3 (2025-12-27)
+
+- Documentation updates for Algorand support
+- Updated README with facilitator addresses and changelog
 
 ### v0.5.2 (2025-12-26)
 
