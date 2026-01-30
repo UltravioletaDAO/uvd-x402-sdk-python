@@ -2,8 +2,8 @@
 uvd-x402-sdk: Python SDK for x402 payments via Ultravioleta DAO facilitator.
 
 This SDK enables developers to easily integrate x402 cryptocurrency payments
-into their Python applications with support for 16 blockchain networks across
-5 network types (EVM, SVM, NEAR, Stellar, Algorand).
+into their Python applications with support for 21 blockchain networks across
+6 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui).
 
 The SDK automatically handles facilitator configuration - users don't need to
 configure fee payer addresses or other facilitator details manually.
@@ -11,6 +11,10 @@ configure fee payer addresses or other facilitator details manually.
 Supports both x402 v1 and v2 protocols:
 - v1: network as string ("base", "solana")
 - v2: network as CAIP-2 ("eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
+
+New features:
+- ERC-8004 Trustless Agents: Submit reputation feedback with proof of payment
+- Escrow & Refund: Hold payments in escrow with dispute resolution
 
 Example usage:
     from uvd_x402_sdk import X402Client, require_payment
@@ -32,9 +36,9 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (18 total):
-- EVM (10): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
-           HyperEVM, Unichain, Monad
+Supported Networks (21 total):
+- EVM (13): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
+            HyperEVM, Unichain, Monad, Scroll, SKALE, SKALE Testnet
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar
@@ -42,7 +46,7 @@ Supported Networks (18 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.5.6"
+__version__ = "0.6.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -143,6 +147,42 @@ from uvd_x402_sdk.facilitator import (
     build_payment_info,
 )
 
+# ERC-8004 Trustless Agents support
+from uvd_x402_sdk.erc8004 import (
+    Erc8004Client,
+    ERC8004_EXTENSION_ID,
+    ERC8004_CONTRACTS,
+    ProofOfPayment,
+    AgentIdentity,
+    AgentRegistrationFile,
+    ReputationSummary,
+    FeedbackEntry,
+    FeedbackParams,
+    FeedbackRequest,
+    FeedbackResponse,
+    ReputationResponse,
+    SettleResponseWithProof,
+    build_erc8004_payment_requirements,
+)
+
+# Escrow & Refund support
+from uvd_x402_sdk.escrow import (
+    EscrowClient,
+    EscrowPayment,
+    EscrowStatus,
+    RefundRequest,
+    RefundStatus,
+    Dispute,
+    DisputeOutcome,
+    ReleaseConditions,
+    RefundResponse,
+    EscrowListResponse,
+    can_release_escrow,
+    can_refund_escrow,
+    is_escrow_expired,
+    escrow_time_remaining,
+)
+
 __all__ = [
     # Version
     "__version__",
@@ -238,4 +278,34 @@ __all__ = [
     "requires_fee_payer",
     "get_all_fee_payers",
     "build_payment_info",
+    # ERC-8004 Trustless Agents
+    "Erc8004Client",
+    "ERC8004_EXTENSION_ID",
+    "ERC8004_CONTRACTS",
+    "ProofOfPayment",
+    "AgentIdentity",
+    "AgentRegistrationFile",
+    "ReputationSummary",
+    "FeedbackEntry",
+    "FeedbackParams",
+    "FeedbackRequest",
+    "FeedbackResponse",
+    "ReputationResponse",
+    "SettleResponseWithProof",
+    "build_erc8004_payment_requirements",
+    # Escrow & Refund
+    "EscrowClient",
+    "EscrowPayment",
+    "EscrowStatus",
+    "RefundRequest",
+    "RefundStatus",
+    "Dispute",
+    "DisputeOutcome",
+    "ReleaseConditions",
+    "RefundResponse",
+    "EscrowListResponse",
+    "can_release_escrow",
+    "can_refund_escrow",
+    "is_escrow_expired",
+    "escrow_time_remaining",
 ]

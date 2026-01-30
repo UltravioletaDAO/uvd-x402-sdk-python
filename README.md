@@ -2,13 +2,13 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **18 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.5.0+**: The SDK now includes embedded facilitator addresses - no manual configuration needed!
+**New in v0.6.0**: ERC-8004 Trustless Agents (on-chain reputation), Escrow & Refund support, Scroll and SKALE networks!
 
 ## Features
 
-- **18 Networks**: EVM chains (Base, Ethereum, Polygon, etc.), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, and Sui
+- **21 Networks**: EVM chains (13 including Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, and Sui
 - **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
@@ -16,6 +16,8 @@ Accept **gasless stablecoin payments** across **18 blockchain networks** with a 
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents
+- **Escrow & Refunds**: Hold payments in escrow with dispute resolution
 
 ## Quick Start (5 Lines)
 
@@ -160,6 +162,9 @@ def premium_endpoint(payment_result):
 | HyperEVM | EVM | 999 | `eip155:999` | Active |
 | Unichain | EVM | 130 | `eip155:130` | Active |
 | Monad | EVM | 143 | `eip155:143` | Active |
+| Scroll | EVM | 534352 | `eip155:534352` | Active |
+| SKALE | EVM | 1187947933 | `eip155:1187947933` | Active |
+| SKALE Testnet | EVM | 324705682 | `eip155:324705682` | Active |
 | Solana | SVM | - | `solana:5eykt...` | Active |
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
@@ -1091,6 +1096,69 @@ except X402Error as e:
 
 ---
 
+## ERC-8004 Trustless Agents
+
+Build verifiable on-chain reputation for AI agents and services.
+
+```python
+from uvd_x402_sdk import Erc8004Client
+
+async with Erc8004Client() as client:
+    # Get agent identity
+    identity = await client.get_identity("ethereum", 42)
+    print(f"Agent URI: {identity.agent_uri}")
+
+    # Get agent reputation
+    reputation = await client.get_reputation("ethereum", 42)
+    print(f"Score: {reputation.summary.summary_value}")
+
+    # Submit feedback after payment
+    result = await client.submit_feedback(
+        network="ethereum",
+        agent_id=42,
+        value=95,
+        tag1="quality",
+        proof=settle_response.proof_of_payment,
+    )
+
+    # Respond to feedback (agents only)
+    await client.append_response(
+        network="ethereum",
+        agent_id=42,
+        feedback_index=1,
+        response_text="Thank you for your feedback!",
+    )
+```
+
+---
+
+## Escrow & Refunds
+
+Hold payments in escrow with dispute resolution.
+
+```python
+from uvd_x402_sdk import EscrowClient
+
+async with EscrowClient() as client:
+    # Create escrow payment
+    escrow = await client.create_escrow(
+        payment_header=request.headers["X-PAYMENT"],
+        requirements=payment_requirements,
+        escrow_duration=86400,  # 24 hours
+    )
+
+    # Release after service delivery
+    await client.release(escrow.id)
+
+    # Or request refund if service failed
+    await client.request_refund(
+        escrow_id=escrow.id,
+        reason="Service not delivered",
+    )
+```
+
+---
+
 ## How x402 Works
 
 The x402 protocol enables gasless stablecoin payments (USDC, EURC, AUSD, PYUSD):
@@ -1223,6 +1291,22 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.6.0 (2026-01-30)
+
+- **ERC-8004 Trustless Agents**: Full client for on-chain reputation system
+  - `Erc8004Client` class with identity, reputation, and feedback methods
+  - `append_response()` method for agents to respond to feedback
+  - `ProofOfPayment` model for reputation submission authorization
+  - `build_erc8004_payment_requirements()` helper
+- **Escrow & Refund Support**: Complete escrow payment flow
+  - `EscrowClient` class with create, release, refund, dispute methods
+  - `EscrowPayment`, `RefundRequest`, `Dispute` models
+  - Helper functions: `can_release_escrow()`, `can_refund_escrow()`, etc.
+- **New Networks**: Scroll (534352) and SKALE (1187947933, testnet: 324705682)
+  - SKALE is gasless L3 with sFUEL
+  - Scroll is zkEVM Layer 2
+- SDK now supports 21 blockchain networks
 
 ### v0.5.6 (2025-12-31)
 

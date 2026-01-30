@@ -307,6 +307,73 @@ MONAD = NetworkConfig(
     },
 )
 
+# Scroll (zkEVM Layer 2)
+SCROLL = NetworkConfig(
+    name="scroll",
+    display_name="Scroll",
+    network_type=NetworkType.EVM,
+    chain_id=534352,
+    usdc_address="0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4",
+    usdc_decimals=6,
+    usdc_domain_name="USD Coin",
+    usdc_domain_version="2",
+    rpc_url="https://rpc.scroll.io",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+    },
+)
+
+# SKALE (L3 on Base, gasless with sFUEL)
+# NOTE: SKALE uses 'USDC' (not 'USD Coin') for EIP-712 domain name
+SKALE = NetworkConfig(
+    name="skale",
+    display_name="SKALE",
+    network_type=NetworkType.EVM,
+    chain_id=1187947933,
+    usdc_address="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+    usdc_decimals=6,
+    usdc_domain_name="USDC",  # SKALE uses "USDC"
+    usdc_domain_version="2",
+    rpc_url="https://mainnet.skalenodes.com/v1/honorable-steel-rasalhague",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+            decimals=6,
+            name="USDC",
+            version="2",
+        ),
+    },
+)
+
+# SKALE Testnet
+SKALE_TESTNET = NetworkConfig(
+    name="skale-testnet",
+    display_name="SKALE Testnet",
+    network_type=NetworkType.EVM,
+    chain_id=324705682,
+    usdc_address="0x2e08028E3C4c2356572E096d8EF835cD5C6030bD",
+    usdc_decimals=6,
+    usdc_domain_name="USDC",  # SKALE testnet uses "USDC"
+    usdc_domain_version="2",
+    rpc_url="https://testnet.skalenodes.com/v1/lanky-ill-funny-testnet",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x2e08028E3C4c2356572E096d8EF835cD5C6030bD",
+            decimals=6,
+            name="USDC",
+            version="2",
+        ),
+    },
+)
+
 # =============================================================================
 # Register all EVM networks
 # =============================================================================
@@ -322,6 +389,9 @@ _EVM_NETWORKS = [
     HYPEREVM,
     UNICHAIN,
     MONAD,
+    SCROLL,
+    SKALE,
+    SKALE_TESTNET,
 ]
 
 for network in _EVM_NETWORKS:
@@ -339,7 +409,7 @@ def get_usdc_domain_name(network_name: str) -> str:
         Domain name string ('USD Coin' or 'USDC')
     """
     # Networks that use 'USDC' instead of 'USD Coin'
-    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad"}
+    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad", "skale", "skale-testnet"}
 
     if network_name.lower() in usdc_domain_networks:
         return "USDC"

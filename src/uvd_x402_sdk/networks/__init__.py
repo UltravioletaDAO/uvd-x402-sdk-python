@@ -4,16 +4,16 @@ Network configurations for x402 payments.
 This module provides configuration for all supported blockchain networks,
 including USDC contract addresses, RPC URLs, and network-specific parameters.
 
-The SDK supports 17 mainnet networks across 6 blockchain families:
-- 10 EVM chains: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
-                 Celo, HyperEVM, Unichain, Monad
-- 2 SVM chains: Solana, Fogo
-- 1 NEAR: NEAR Protocol
-- 1 Stellar: Stellar
-- 1 Algorand: Algorand
-- 1 Sui: Sui (sponsored transactions)
+The SDK supports 21 blockchain networks across 6 network families:
+- 13 EVM networks: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
+                   Celo, HyperEVM, Unichain, Monad, Scroll, SKALE, SKALE Testnet
+- 2 SVM networks: Solana, Fogo
+- 1 NEAR network: NEAR Protocol
+- 1 Stellar network: Stellar
+- 2 Algorand networks: Algorand mainnet, Algorand testnet
+- 2 Sui networks: Sui mainnet, Sui testnet
 
-+ 15 testnets for development and testing.
+(12 EVM mainnets + 1 EVM testnet, 17 total mainnets)
 
 Multi-token support:
 - USDC: All chains
