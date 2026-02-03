@@ -183,6 +183,24 @@ from uvd_x402_sdk.escrow import (
     escrow_time_remaining,
 )
 
+# Advanced Escrow (PaymentOperator - on-chain escrow)
+# Requires: eth_abi, eth_account, web3, httpx
+try:
+    from uvd_x402_sdk.advanced_escrow import (
+        AdvancedEscrowClient,
+        PaymentInfo,
+        TaskTier,
+        AuthorizationResult,
+        TransactionResult,
+        TIER_TIMINGS,
+        BASE_MAINNET_CONTRACTS,
+        OPERATOR_ABI,
+        DEPOSIT_LIMIT_USDC,
+    )
+    ADVANCED_ESCROW_AVAILABLE = True
+except ImportError:
+    ADVANCED_ESCROW_AVAILABLE = False
+
 __all__ = [
     # Version
     "__version__",
@@ -308,4 +326,23 @@ __all__ = [
     "can_refund_escrow",
     "is_escrow_expired",
     "escrow_time_remaining",
+    # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
+    "ADVANCED_ESCROW_AVAILABLE",
+    "AdvancedEscrowClient",
+    "PaymentInfo",
+    "TaskTier",
+    "AuthorizationResult",
+    "TransactionResult",
+    "TIER_TIMINGS",
+    "BASE_MAINNET_CONTRACTS",
+    "OPERATOR_ABI",
 ]
+
+# Conditionally remove Advanced Escrow names from __all__ if not available
+if not ADVANCED_ESCROW_AVAILABLE:
+    _advanced_names = {
+        "AdvancedEscrowClient", "PaymentInfo", "TaskTier",
+        "AuthorizationResult", "TransactionResult", "TIER_TIMINGS",
+        "BASE_MAINNET_CONTRACTS", "OPERATOR_ABI",
+    }
+    __all__ = [n for n in __all__ if n not in _advanced_names]
