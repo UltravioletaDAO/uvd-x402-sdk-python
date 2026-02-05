@@ -42,8 +42,13 @@ from pydantic import BaseModel, Field
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
 
-# Supported networks for ERC-8004
-Erc8004Network = Literal["ethereum", "ethereum-sepolia", "base-mainnet"]
+# Supported networks for ERC-8004 (12 networks)
+Erc8004Network = Literal[
+    # Mainnets
+    "ethereum", "base-mainnet", "polygon", "arbitrum", "celo", "bsc", "monad",
+    # Testnets
+    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "celo-sepolia"
+]
 
 
 class Erc8004ContractAddresses(BaseModel):
@@ -54,21 +59,71 @@ class Erc8004ContractAddresses(BaseModel):
     validation_registry: Optional[str] = None
 
 
-# Contract addresses per network
+# Mainnet addresses (CREATE2 deterministic - same on all mainnets)
+_MAINNET_IDENTITY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
+_MAINNET_REPUTATION = "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
+
+# Testnet addresses (same on all testnets)
+_TESTNET_IDENTITY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
+_TESTNET_REPUTATION = "0x8004B663056A597Dffe9eCcC1965A193B7388713"
+_TESTNET_VALIDATION = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+
+# Contract addresses per network (12 networks)
 ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
+    # Mainnets (7)
     "ethereum": Erc8004ContractAddresses(
-        identity_registry="0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
-        reputation_registry="0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
     ),
-    "ethereum-sepolia": Erc8004ContractAddresses(
-        identity_registry="0x8004A818BFB912233c491871b3d84c89A494BD9e",
-        reputation_registry="0x8004B663056A597Dffe9eCcC1965A193B7388713",
-        validation_registry="0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
-    ),
-    # Base Mainnet - Same addresses as Ethereum (CREATE2 deterministic deployment)
     "base-mainnet": Erc8004ContractAddresses(
-        identity_registry="0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
-        reputation_registry="0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    "polygon": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    "arbitrum": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    "celo": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    "bsc": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    "monad": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    # Testnets (5)
+    "ethereum-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "base-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "polygon-amoy": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "arbitrum-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "celo-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
     ),
 }
 
