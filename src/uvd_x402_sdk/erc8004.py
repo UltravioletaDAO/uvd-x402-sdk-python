@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 ERC8004_EXTENSION_ID = "8004-reputation"
 
 # Supported networks for ERC-8004
-Erc8004Network = Literal["ethereum", "ethereum-sepolia"]
+Erc8004Network = Literal["ethereum", "ethereum-sepolia", "base-mainnet"]
 
 
 class Erc8004ContractAddresses(BaseModel):
@@ -64,6 +64,11 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         identity_registry="0x8004A818BFB912233c491871b3d84c89A494BD9e",
         reputation_registry="0x8004B663056A597Dffe9eCcC1965A193B7388713",
         validation_registry="0x8004Cb1BF31DAf7788923b405b754f57acEB4272",
+    ),
+    # Base Mainnet - Same addresses as Ethereum (CREATE2 deterministic deployment)
+    "base-mainnet": Erc8004ContractAddresses(
+        identity_registry="0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+        reputation_registry="0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
     ),
 }
 
