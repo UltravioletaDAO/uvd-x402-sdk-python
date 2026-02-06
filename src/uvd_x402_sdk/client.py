@@ -222,6 +222,7 @@ class X402Client:
         self,
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
     ) -> PaymentRequirements:
         """
         Build payment requirements for facilitator request.
@@ -246,8 +247,8 @@ class X402Client:
         # Convert USD to token amount
         expected_amount_wei = network_config.get_token_amount(float(expected_amount_usd))
 
-        # Get recipient for this network
-        recipient = self.config.get_recipient(normalized_network)
+        # Get recipient for this network (allow per-call override)
+        recipient = pay_to or self.config.get_recipient(normalized_network)
 
         # Build base requirements
         # Use original network format (v1 or v2) for facilitator
@@ -280,6 +281,7 @@ class X402Client:
         self,
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -289,6 +291,7 @@ class X402Client:
         Args:
             payload: Parsed payment payload
             expected_amount_usd: Expected payment amount in USD
+            pay_to: Override recipient address (must match auth.to in EIP-3009)
 
         Returns:
             VerifyResponse from facilitator
@@ -299,7 +302,7 @@ class X402Client:
             TimeoutError: If request times out
         """
         normalized_network = self.validate_network(payload.network)
-        requirements = self._build_payment_requirements(payload, expected_amount_usd)
+        requirements = self._build_payment_requirements(payload, expected_amount_usd, pay_to=pay_to)
 
         verify_request = {
             "x402Version": 1,
@@ -348,6 +351,7 @@ class X402Client:
         self,
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -357,6 +361,7 @@ class X402Client:
         Args:
             payload: Parsed payment payload
             expected_amount_usd: Expected payment amount in USD
+            pay_to: Override recipient address (must match auth.to in EIP-3009)
 
         Returns:
             SettleResponse from facilitator
@@ -367,7 +372,7 @@ class X402Client:
             TimeoutError: If request times out
         """
         normalized_network = self.validate_network(payload.network)
-        requirements = self._build_payment_requirements(payload, expected_amount_usd)
+        requirements = self._build_payment_requirements(payload, expected_amount_usd, pay_to=pay_to)
 
         settle_request = {
             "x402Version": 1,
@@ -421,6 +426,7 @@ class X402Client:
         self,
         x_payment_header: str,
         expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -434,6 +440,7 @@ class X402Client:
         Args:
             x_payment_header: X-PAYMENT header value (base64-encoded JSON)
             expected_amount_usd: Expected payment amount in USD
+            pay_to: Override recipient address (must match auth.to in EIP-3009)
 
         Returns:
             PaymentResult with payer address, transaction hash, etc.
@@ -451,10 +458,10 @@ class X402Client:
         logger.info(f"Processing payment: network={payload.network}, amount=${expected_amount_usd}")
 
         # Verify payment
-        verify_response = self.verify_payment(payload, expected_amount_usd)
+        verify_response = self.verify_payment(payload, expected_amount_usd, pay_to=pay_to)
 
         # Settle payment
-        settle_response = self.settle_payment(payload, expected_amount_usd)
+        settle_response = self.settle_payment(payload, expected_amount_usd, pay_to=pay_to)
 
         # Build result
         return PaymentResult(
@@ -509,6 +516,7 @@ class X402Client:
         self,
         x_payment_header: str,
         expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Verify payment without settling.
@@ -518,10 +526,11 @@ class X402Client:
         Args:
             x_payment_header: X-PAYMENT header value
             expected_amount_usd: Expected payment amount
+            pay_to: Override recipient address (must match auth.to in EIP-3009)
 
         Returns:
             Tuple of (is_valid, payer_address)
         """
         payload = self.extract_payload(x_payment_header)
-        verify_response = self.verify_payment(payload, expected_amount_usd)
+        verify_response = self.verify_payment(payload, expected_amount_usd, pay_to=pay_to)
         return verify_response.isValid, verify_response.payer or ""
