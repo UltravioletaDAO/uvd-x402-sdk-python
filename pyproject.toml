@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.8.1"
+version = "0.8.2"
 description = "Python SDK for x402 payments - gasless crypto payments across 21 blockchains (including Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT)"
 readme = "README.md"
 requires-python = ">=3.9"

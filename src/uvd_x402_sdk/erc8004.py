@@ -279,6 +279,51 @@ class FeedbackResponse(BaseModel):
         populate_by_name = True
 
 
+class MetadataEntryParam(BaseModel):
+    """Key-value metadata entry for agent registration."""
+
+    key: str
+    value: str
+
+
+class RegisterAgentResponse(BaseModel):
+    """Response from POST /register."""
+
+    success: bool
+    agent_id: Optional[int] = Field(None, alias="agentId")
+    transaction: Optional[str] = None
+    transfer_transaction: Optional[str] = Field(None, alias="transferTransaction")
+    owner: Optional[str] = None
+    error: Optional[str] = None
+    network: str
+
+    class Config:
+        populate_by_name = True
+
+
+class IdentityMetadataResponse(BaseModel):
+    """Response from GET /identity/{network}/{agent_id}/metadata/{key}."""
+
+    agent_id: int = Field(..., alias="agentId")
+    key: str
+    value_hex: str = Field(..., alias="valueHex")
+    value_utf8: Optional[str] = Field(None, alias="valueUtf8")
+    network: str
+
+    class Config:
+        populate_by_name = True
+
+
+class IdentityTotalSupplyResponse(BaseModel):
+    """Response from GET /identity/{network}/total-supply."""
+
+    total_supply: int = Field(..., alias="totalSupply")
+    network: str
+
+    class Config:
+        populate_by_name = True
+
+
 class SettleResponseWithProof(BaseModel):
     """Extended settle response with ERC-8004 proof of payment."""
 
@@ -660,6 +705,133 @@ class Erc8004Client:
                 error=str(e),
                 network=network,
             )
+
+    async def register_agent(
+        self,
+        network: Erc8004Network,
+        agent_uri: str,
+        *,
+        metadata: Optional[list[MetadataEntryParam]] = None,
+        recipient: Optional[str] = None,
+        x402_version: int = 1,
+    ) -> RegisterAgentResponse:
+        """
+        Register a new agent on the Identity Registry.
+
+        The facilitator pays gas fees. Optionally transfer the NFT to a
+        recipient address (gasless delegation).
+
+        Args:
+            network: Network where agent will be registered
+            agent_uri: URI pointing to agent registration file (IPFS, HTTPS)
+            metadata: Optional key-value metadata entries
+            recipient: If provided, NFT is transferred to this address after minting
+            x402_version: x402 protocol version
+
+        Returns:
+            Registration response with agent ID and transaction hash
+
+        Example:
+            >>> # Register agent owned by facilitator
+            >>> result = await client.register_agent(
+            ...     network="ethereum",
+            ...     agent_uri="ipfs://QmYourAgentFile",
+            ... )
+            >>> print(f"Agent #{result.agent_id} registered")
+            >>>
+            >>> # Register agent and transfer to user
+            >>> result = await client.register_agent(
+            ...     network="ethereum",
+            ...     agent_uri="ipfs://QmYourAgentFile",
+            ...     recipient="0xUserAddress...",
+            ... )
+            >>> print(f"Agent #{result.agent_id} transferred to user")
+        """
+        payload: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": network,
+            "agentUri": agent_uri,
+        }
+        if metadata:
+            payload["metadata"] = [m.model_dump() for m in metadata]
+        if recipient:
+            payload["recipient"] = recipient
+
+        url = f"{self.base_url}/register"
+        try:
+            response = await self._client.post(url, json=payload)
+            response.raise_for_status()
+            return RegisterAgentResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return RegisterAgentResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return RegisterAgentResponse(
+                success=False,
+                error=str(e),
+                network=network,
+            )
+
+    async def get_register_info(self) -> dict[str, Any]:
+        """
+        Get registration endpoint metadata.
+
+        Returns:
+            Endpoint information for POST /register
+        """
+        url = f"{self.base_url}/register"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return response.json()
+
+    async def get_identity_metadata(
+        self,
+        network: Erc8004Network,
+        agent_id: int,
+        key: str,
+    ) -> IdentityMetadataResponse:
+        """
+        Get a specific metadata entry for an agent.
+
+        Args:
+            network: Network where agent is registered
+            agent_id: Agent's tokenId
+            key: Metadata key to retrieve
+
+        Returns:
+            Metadata value (hex-encoded and UTF-8 decoded if possible)
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails
+        """
+        url = f"{self.base_url}/identity/{network}/{agent_id}/metadata/{key}"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return IdentityMetadataResponse.model_validate(response.json())
+
+    async def get_identity_total_supply(
+        self,
+        network: Erc8004Network,
+    ) -> IdentityTotalSupplyResponse:
+        """
+        Get total number of registered agents on a network.
+
+        Args:
+            network: Network to query
+
+        Returns:
+            Total supply count
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails
+        """
+        url = f"{self.base_url}/identity/{network}/total-supply"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return IdentityTotalSupplyResponse.model_validate(response.json())
 
 
 def build_erc8004_payment_requirements(
