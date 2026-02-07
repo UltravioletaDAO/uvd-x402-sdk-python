@@ -72,13 +72,156 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 # As of 2026-02-03, commerce-payments contracts enforce $100 max per deposit.
 DEPOSIT_LIMIT_USDC = 100_000_000  # $100 in atomic units (6 decimals)
 
-# Base Mainnet contract addresses (default)
+# ============================================================
+# Multi-chain Escrow Contract Registry
+# ============================================================
+# Contract addresses from x402r-sdk (A1igator/multichain-config).
+# Keys:
+#   escrow           - AuthCaptureEscrow contract
+#   operator_factory - PaymentOperatorFactory contract
+#   token_collector  - TokenCollector contract
+#   protocol_fee_config - ProtocolFeeConfig contract
+#   refund_request   - RefundRequest contract
+#   usdc             - USDC token address
+
+ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
+    # ----- Testnets -----
+    84532: {  # Base Sepolia
+        "escrow": "0x29025c0E9D4239d438e169570818dB9FE0A80873",
+        "operator_factory": "0x97d53e63A9CB97556c00BeFd325AF810c9b267B2",
+        "token_collector": "0x5cA789000070DF15b4663DB64a50AeF5D49c5Ee0",
+        "protocol_fee_config": "0x8F96C493bAC365E41f0315cf45830069EBbDCaCe",
+        "refund_request": "0x1C2Ab244aC8bDdDB74d43389FF34B118aF2E90F4",
+        "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    },
+    11155111: {  # Ethereum Sepolia
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    },
+    # ----- Mainnets -----
+    8453: {  # Base Mainnet
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "protocol_fee_config": "0x59314674BAbb1a24Eb2704468a9cCdD50668a1C6",
+        "refund_request": "0x35fb2EFEfAc3Ee9f6E52A9AAE5C9655bC08dEc00",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    },
+    1: {  # Ethereum Mainnet
+        "escrow": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "operator_factory": "0xed02d3E5167BCc9582D851885A89b050AB816a56",
+        "token_collector": "0xE78648e7af7B1BaDE717FF6E410B922F92adE80f",
+        "protocol_fee_config": "0xb33D6502EdBbC47201cd1E53C49d703EC0a660b8",
+        "refund_request": "0xc9BbA6A2CF9838e7Dd8c19BC8B3BAC620B9D8178",
+        "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    },
+    137: {  # Polygon
+        "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "operator_factory": "0xb33D6502EdBbC47201cd1E53C49d703EC0a660b8",
+        "token_collector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "protocol_fee_config": "0xE78648e7af7B1BaDE717FF6E410B922F92adE80f",
+        "refund_request": "0xed02d3E5167BCc9582D851885A89b050AB816a56",
+        "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    },
+    42161: {  # Arbitrum
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    },
+    42220: {  # Celo
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+    },
+    143: {  # Monad
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+    },
+    43114: {  # Avalanche
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+    },
+}
+
+# Human-readable chain names for diagnostics and error messages.
+ESCROW_CHAIN_NAMES: dict[int, str] = {
+    84532: "Base Sepolia",
+    11155111: "Ethereum Sepolia",
+    8453: "Base Mainnet",
+    1: "Ethereum Mainnet",
+    137: "Polygon",
+    42161: "Arbitrum",
+    42220: "Celo",
+    143: "Monad",
+    43114: "Avalanche",
+}
+
+# Base Mainnet contract addresses (default, backward-compatible).
+# NOTE: "operator" is a legacy key pointing to a previously deployed
+# PaymentOperator instance.  New integrations should use "operator_factory"
+# from ESCROW_CONTRACTS and deploy their own operator via the factory.
 BASE_MAINNET_CONTRACTS = {
     "operator": "0xa06958D93135BEd7e43893897C0d9fA931EF051C",
-    "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
-    "token_collector": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+    "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+    "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
+    "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+    "protocol_fee_config": "0x59314674BAbb1a24Eb2704468a9cCdD50668a1C6",
+    "refund_request": "0x35fb2EFEfAc3Ee9f6E52A9AAE5C9655bC08dEc00",
     "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 }
+
+
+def get_escrow_contracts(chain_id: int) -> dict[str, str]:
+    """
+    Look up escrow contract addresses for a given chain ID.
+
+    Args:
+        chain_id: EVM chain ID (e.g. 8453 for Base Mainnet)
+
+    Returns:
+        Dict of contract name -> address
+
+    Raises:
+        ValueError: If chain_id is not in the registry
+    """
+    if chain_id not in ESCROW_CONTRACTS:
+        supported = ", ".join(
+            f"{cid} ({ESCROW_CHAIN_NAMES.get(cid, 'unknown')})"
+            for cid in sorted(ESCROW_CONTRACTS)
+        )
+        raise ValueError(
+            f"No escrow contracts for chain {chain_id}. "
+            f"Supported chains: {supported}"
+        )
+    return ESCROW_CONTRACTS[chain_id]
+
+
+def get_supported_escrow_chains() -> list[int]:
+    """Return sorted list of chain IDs that have escrow contracts deployed."""
+    return sorted(ESCROW_CONTRACTS.keys())
+
+
+def is_escrow_supported(chain_id: int) -> bool:
+    """Check whether escrow contracts are deployed on the given chain."""
+    return chain_id in ESCROW_CONTRACTS
 
 # PaymentOperator ABI (minimal, for the 5 functions we need)
 OPERATOR_ABI = [
@@ -286,13 +429,60 @@ class AdvancedEscrowClient:
         rpc_url: str = "https://mainnet.base.org",
         chain_id: int = 8453,
         contracts: Optional[dict] = None,
+        operator_address: Optional[str] = None,
         gas_limit: int = 300000,
     ):
+        """
+        Initialize the Advanced Escrow client.
+
+        Args:
+            private_key: Hex-encoded private key for signing
+            facilitator_url: Facilitator endpoint URL
+            rpc_url: JSON-RPC endpoint for the target chain
+            chain_id: EVM chain ID (e.g. 8453 for Base, 1 for Ethereum)
+            contracts: Explicit contract address dict (overrides registry lookup).
+                       Must contain at least "operator", "escrow", "token_collector", "usdc".
+            operator_address: PaymentOperator instance address. Required when using
+                              the multi-chain registry (which only provides the factory).
+                              Ignored when explicit ``contracts`` dict is passed.
+            gas_limit: Gas limit for on-chain transactions
+        """
         self.private_key = private_key
         self.facilitator_url = facilitator_url.rstrip("/")
         self.chain_id = chain_id
         self.gas_limit = gas_limit
-        self.contracts = contracts or BASE_MAINNET_CONTRACTS
+
+        if contracts is not None:
+            # Caller supplied an explicit contracts dict - use as-is.
+            self.contracts = contracts
+        elif chain_id in ESCROW_CONTRACTS:
+            # Resolve from the multi-chain registry.
+            registry = ESCROW_CONTRACTS[chain_id]
+            if operator_address is None and chain_id == 8453:
+                # Backward-compatible default: use the legacy Base Mainnet
+                # PaymentOperator instance when no operator is specified.
+                operator_address = BASE_MAINNET_CONTRACTS["operator"]
+            if operator_address is None:
+                chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
+                raise ValueError(
+                    f"operator_address is required for chain {chain_name} "
+                    f"(chain_id={chain_id}). Deploy a PaymentOperator via the "
+                    f"factory at {registry['operator_factory']} and pass its "
+                    f"address here."
+                )
+            self.contracts = {
+                "operator": operator_address,
+                "escrow": registry["escrow"],
+                "operator_factory": registry["operator_factory"],
+                "token_collector": registry["token_collector"],
+                "protocol_fee_config": registry["protocol_fee_config"],
+                "refund_request": registry["refund_request"],
+                "usdc": registry["usdc"],
+            }
+        else:
+            # Fall back to the legacy Base Mainnet default.
+            self.contracts = BASE_MAINNET_CONTRACTS
+
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         self.account = Account.from_key(private_key)
         self.payer = self.account.address

@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -198,8 +198,13 @@ try:
         TransactionResult,
         TIER_TIMINGS,
         BASE_MAINNET_CONTRACTS,
+        ESCROW_CONTRACTS,
+        ESCROW_CHAIN_NAMES,
         OPERATOR_ABI,
         DEPOSIT_LIMIT_USDC,
+        get_escrow_contracts,
+        get_supported_escrow_chains,
+        is_escrow_supported,
     )
     ADVANCED_ESCROW_AVAILABLE = True
 except ImportError:
@@ -339,7 +344,13 @@ __all__ = [
     "TransactionResult",
     "TIER_TIMINGS",
     "BASE_MAINNET_CONTRACTS",
+    "ESCROW_CONTRACTS",
+    "ESCROW_CHAIN_NAMES",
     "OPERATOR_ABI",
+    "DEPOSIT_LIMIT_USDC",
+    "get_escrow_contracts",
+    "get_supported_escrow_chains",
+    "is_escrow_supported",
 ]
 
 # Conditionally remove Advanced Escrow names from __all__ if not available
@@ -347,6 +358,9 @@ if not ADVANCED_ESCROW_AVAILABLE:
     _advanced_names = {
         "AdvancedEscrowClient", "PaymentInfo", "TaskTier",
         "AuthorizationResult", "TransactionResult", "TIER_TIMINGS",
-        "BASE_MAINNET_CONTRACTS", "OPERATOR_ABI",
+        "BASE_MAINNET_CONTRACTS", "ESCROW_CONTRACTS", "ESCROW_CHAIN_NAMES",
+        "OPERATOR_ABI", "DEPOSIT_LIMIT_USDC",
+        "get_escrow_contracts", "get_supported_escrow_chains",
+        "is_escrow_supported",
     }
     __all__ = [n for n in __all__ if n not in _advanced_names]
