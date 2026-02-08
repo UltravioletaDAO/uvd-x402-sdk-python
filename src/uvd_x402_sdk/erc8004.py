@@ -445,6 +445,7 @@ class Erc8004Client:
         tag1: Optional[str] = None,
         tag2: Optional[str] = None,
         include_feedback: bool = False,
+        client_addresses: Optional[str] = None,
     ) -> ReputationResponse:
         """
         Get agent reputation from the Reputation Registry.
@@ -455,6 +456,8 @@ class Erc8004Client:
             tag1: Filter by primary tag
             tag2: Filter by secondary tag
             include_feedback: Include individual feedback entries
+            client_addresses: Comma-separated client addresses to filter by.
+                If omitted, the facilitator auto-discovers all clients via getClients().
 
         Returns:
             Reputation summary and optionally individual feedback entries
@@ -469,6 +472,8 @@ class Erc8004Client:
             params["tag2"] = tag2
         if include_feedback:
             params["includeFeedback"] = "true"
+        if client_addresses:
+            params["clientAddresses"] = client_addresses
 
         url = f"{self.base_url}/reputation/{network}/{agent_id}"
         response = await self._client.get(url, params=params or None)
