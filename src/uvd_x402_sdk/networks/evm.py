@@ -13,7 +13,7 @@ Multi-token support:
 - EURC: Ethereum, Base, Avalanche (6 decimals)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
-- USDT: Arbitrum, Optimism, Celo (6 decimals) - USDT0 omnichain via LayerZero
+- USDT: Arbitrum, Optimism, Celo, Monad (6 decimals) - USDT0 omnichain via LayerZero
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -278,7 +278,7 @@ UNICHAIN = NetworkConfig(
     enabled=True,
 )
 
-# Monad - supports USDC, AUSD
+# Monad - supports USDC, AUSD, USDT0
 # NOTE: Monad uses 'USDC' (not 'USD Coin') for EIP-712 domain name
 MONAD = NetworkConfig(
     name="monad",
@@ -302,6 +302,12 @@ MONAD = NetworkConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
             decimals=6,
             name="Agora Dollar",
+            version="1",
+        ),
+        "usdt": TokenConfig(
+            address="0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
+            decimals=6,
+            name="USD\u20ae0",  # USD₮0 (USDT0 omnichain via LayerZero)
             version="1",
         ),
     },
