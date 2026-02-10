@@ -42,12 +42,12 @@ from pydantic import BaseModel, Field
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
 
-# Supported networks for ERC-8004 (12 networks)
+# Supported networks for ERC-8004 (16 networks)
 Erc8004Network = Literal[
     # Mainnets
-    "ethereum", "base-mainnet", "polygon", "arbitrum", "celo", "bsc", "monad",
+    "ethereum", "base-mainnet", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
     # Testnets
-    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "celo-sepolia"
+    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji"
 ]
 
 
@@ -68,9 +68,9 @@ _TESTNET_IDENTITY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 _TESTNET_REPUTATION = "0x8004B663056A597Dffe9eCcC1965A193B7388713"
 _TESTNET_VALIDATION = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
 
-# Contract addresses per network (12 networks)
+# Contract addresses per network (16 networks)
 ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
-    # Mainnets (7)
+    # Mainnets (9)
     "ethereum": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
@@ -87,6 +87,10 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
     ),
+    "optimism": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
     "celo": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
@@ -99,7 +103,11 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
     ),
-    # Testnets (5)
+    "avalanche": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    # Testnets (7)
     "ethereum-sepolia": Erc8004ContractAddresses(
         identity_registry=_TESTNET_IDENTITY,
         reputation_registry=_TESTNET_REPUTATION,
@@ -120,7 +128,17 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         reputation_registry=_TESTNET_REPUTATION,
         validation_registry=_TESTNET_VALIDATION,
     ),
+    "optimism-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
     "celo-sepolia": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "avalanche-fuji": Erc8004ContractAddresses(
         identity_registry=_TESTNET_IDENTITY,
         reputation_registry=_TESTNET_REPUTATION,
         validation_registry=_TESTNET_VALIDATION,
