@@ -1,12 +1,20 @@
 """
 Advanced Escrow client for x402 PaymentOperator integration.
 
-This module provides the 5 Advanced Escrow flows via the PaymentOperator contract:
+This module provides the 5 Advanced Escrow flows via the PaymentOperator contract,
+plus 3 gasless facilitator-proxied methods for release, refund, and state queries:
+
+On-chain flows (require gas + operator private key):
 1. AUTHORIZE  - Lock funds in escrow (via facilitator)
 2. RELEASE    - Capture escrowed funds to receiver (on-chain)
 3. REFUND IN ESCROW - Return escrowed funds to payer (on-chain)
 4. CHARGE     - Direct instant payment without escrow (on-chain)
 5. REFUND POST ESCROW - Dispute refund after release (NOT FUNCTIONAL - tokenCollector not implemented)
+
+Gasless facilitator-proxied flows (facilitator pays gas, v1.32.0+):
+6. RELEASE VIA FACILITATOR    - Gasless release through POST /settle action:"release"
+7. REFUND VIA FACILITATOR     - Gasless refund through POST /settle action:"refundInEscrow"
+8. QUERY ESCROW STATE         - Read-only escrow state via POST /escrow/state (no gas)
 
 Contract deposit limit: $100 USDC per deposit (enforced on-chain).
 Dispute resolution: use refund_in_escrow() (keep funds in escrow, arbiter decides).
@@ -38,11 +46,15 @@ Example:
     >>> # Lock funds in escrow
     >>> auth = client.authorize(pi)
     >>>
-    >>> # After work is done, release to worker
-    >>> tx = client.release(auth.payment_info)
+    >>> # After work is done, release to worker (GASLESS)
+    >>> tx = client.release_via_facilitator(auth.payment_info)
     >>>
-    >>> # Or cancel and refund
-    >>> tx = client.refund_in_escrow(auth.payment_info)
+    >>> # Or cancel and refund (GASLESS)
+    >>> tx = client.refund_via_facilitator(auth.payment_info)
+    >>>
+    >>> # Query escrow state (read-only, no gas)
+    >>> state = client.query_escrow_state(auth.payment_info)
+    >>> print(state["capturableAmount"], state["refundableAmount"])
 """
 
 import secrets
@@ -413,12 +425,17 @@ class AdvancedEscrowClient:
     """
     Client for x402 Advanced Escrow (PaymentOperator) operations.
 
-    Provides the 5 escrow flows:
+    Provides the 5 on-chain escrow flows:
     - authorize(): Lock funds in escrow via facilitator
-    - release(): Capture escrowed funds to receiver
-    - refund_in_escrow(): Return escrowed funds to payer
-    - charge(): Direct instant payment (no escrow)
-    - refund_post_escrow(): Dispute refund after release
+    - release(): Capture escrowed funds to receiver (requires gas)
+    - refund_in_escrow(): Return escrowed funds to payer (requires gas)
+    - charge(): Direct instant payment (no escrow, requires gas)
+    - refund_post_escrow(): Dispute refund after release (requires gas)
+
+    Plus 3 gasless facilitator-proxied flows (v1.32.0+):
+    - release_via_facilitator(): Gasless release through the facilitator
+    - refund_via_facilitator(): Gasless refund through the facilitator
+    - query_escrow_state(): Read-only escrow state query (no gas)
     """
 
     def __init__(
@@ -749,6 +766,170 @@ class AdvancedEscrowClient:
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
         return self._send_tx(self.operator_contract.functions.refundInEscrow(pt, amt))
+
+    # ----------------------------------------------------------------
+    # Gasless facilitator-proxied methods (v1.32.0+)
+    # ----------------------------------------------------------------
+
+    def _payment_info_to_camel_dict(self, pi: PaymentInfo) -> dict:
+        """Convert a PaymentInfo dataclass to a camelCase dict for the facilitator API."""
+        return {
+            "operator": pi.operator,
+            "receiver": pi.receiver,
+            "token": pi.token,
+            "maxAmount": str(pi.max_amount),
+            "preApprovalExpiry": pi.pre_approval_expiry,
+            "authorizationExpiry": pi.authorization_expiry,
+            "refundExpiry": pi.refund_expiry,
+            "minFeeBps": pi.min_fee_bps,
+            "maxFeeBps": pi.max_fee_bps,
+            "feeReceiver": pi.fee_receiver,
+            "salt": pi.salt,
+        }
+
+    def _settle_via_facilitator(
+        self, action: str, payment_info: PaymentInfo, amount: Optional[int] = None
+    ) -> TransactionResult:
+        """
+        Internal: send a gasless settle request to the facilitator.
+
+        Args:
+            action: The settle action ("release" or "refundInEscrow")
+            payment_info: PaymentInfo from the authorize step
+            amount: Amount in atomic units (defaults to max_amount)
+        """
+        amt = amount if amount is not None else payment_info.max_amount
+
+        payload = {
+            "x402Version": 2,
+            "scheme": "escrow",
+            "action": action,
+            "payload": {
+                "paymentInfo": self._payment_info_to_camel_dict(payment_info),
+                "payer": self.payer,
+                "amount": str(amt),
+            },
+            "paymentRequirements": {
+                "scheme": "escrow",
+                "network": f"eip155:{self.chain_id}",
+                "extra": {
+                    "escrowAddress": self.contracts["escrow"],
+                    "operatorAddress": self.contracts["operator"],
+                    "tokenCollector": self.contracts["token_collector"],
+                },
+            },
+        }
+
+        try:
+            response = httpx.post(
+                f"{self.facilitator_url}/settle",
+                json=payload,
+                timeout=120,
+            )
+            result = response.json()
+
+            if result.get("success"):
+                return TransactionResult(
+                    success=True,
+                    transaction_hash=result.get("transaction"),
+                )
+            else:
+                return TransactionResult(
+                    success=False,
+                    error=result.get("errorReason", result.get("error", "Unknown error")),
+                )
+        except Exception as e:
+            return TransactionResult(success=False, error=str(e))
+
+    def release_via_facilitator(
+        self, payment_info: PaymentInfo, amount: Optional[int] = None
+    ) -> TransactionResult:
+        """
+        RELEASE via facilitator (GASLESS) - Send escrowed funds to receiver.
+
+        Unlike release() which requires gas + operator private key, this method
+        goes through the facilitator which pays all gas fees.
+
+        Requires facilitator v1.32.0+ with escrow settle support.
+
+        Args:
+            payment_info: PaymentInfo from the authorize step
+            amount: Amount to release in atomic units (defaults to max_amount)
+
+        Returns:
+            TransactionResult with the on-chain transaction hash
+        """
+        return self._settle_via_facilitator("release", payment_info, amount)
+
+    def refund_via_facilitator(
+        self, payment_info: PaymentInfo, amount: Optional[int] = None
+    ) -> TransactionResult:
+        """
+        REFUND via facilitator (GASLESS) - Return escrowed funds to payer.
+
+        Unlike refund_in_escrow() which requires gas + operator private key, this
+        method goes through the facilitator which pays all gas fees.
+
+        Requires facilitator v1.32.0+ with escrow settle support.
+
+        Args:
+            payment_info: PaymentInfo from the authorize step
+            amount: Amount to refund in atomic units (defaults to max_amount)
+
+        Returns:
+            TransactionResult with the on-chain transaction hash
+        """
+        return self._settle_via_facilitator("refundInEscrow", payment_info, amount)
+
+    def query_escrow_state(self, payment_info: PaymentInfo) -> dict:
+        """
+        Query escrow state from the AuthCaptureEscrow contract (read-only, no gas).
+
+        Calls the facilitator's POST /escrow/state endpoint which reads on-chain
+        state without submitting a transaction.
+
+        Requires facilitator v1.32.0+ with escrow state query support.
+
+        Args:
+            payment_info: PaymentInfo from the authorize step
+
+        Returns:
+            Dict with escrow state fields, e.g.::
+
+                {
+                    "capturableAmount": "5000000",
+                    "refundableAmount": "5000000",
+                    "hasCollectedPayment": false
+                }
+
+        Raises:
+            RuntimeError: If the facilitator returns an error
+            httpx.HTTPError: On network/transport errors
+        """
+        payload = {
+            "paymentInfo": self._payment_info_to_camel_dict(payment_info),
+            "payer": self.payer,
+            "network": f"eip155:{self.chain_id}",
+            "extra": {
+                "escrowAddress": self.contracts["escrow"],
+                "operatorAddress": self.contracts["operator"],
+                "tokenCollector": self.contracts["token_collector"],
+            },
+        }
+
+        response = httpx.post(
+            f"{self.facilitator_url}/escrow/state",
+            json=payload,
+            timeout=30,
+        )
+        result = response.json()
+
+        if "error" in result or "errorReason" in result:
+            raise RuntimeError(
+                f"Escrow state query failed: {result.get('errorReason', result.get('error'))}"
+            )
+
+        return result
 
     def charge(self, payment_info: PaymentInfo, amount: Optional[int] = None) -> TransactionResult:
         """

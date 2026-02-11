@@ -151,3 +151,6 @@ Thumbs.db
 *.local
 .env.*
 !.env.example
+
+# Local scratch / chat logs
+.unused/
