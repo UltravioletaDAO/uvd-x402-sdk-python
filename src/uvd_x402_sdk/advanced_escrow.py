@@ -543,7 +543,8 @@ class AdvancedEscrowClient:
             ["uint256", "address", "bytes32"],
             [self.chain_id, Web3.to_checksum_address(self.contracts["escrow"]), pi_hash],
         )
-        return "0x" + Web3.keccak(final_encoded).hex()
+        raw = Web3.keccak(final_encoded)
+        return "0x" + raw.hex().removeprefix("0x")
 
     def _sign_erc3009(self, auth: dict) -> str:
         """Sign ReceiveWithAuthorization for ERC-3009."""
@@ -563,17 +564,24 @@ class AdvancedEscrowClient:
                 {"name": "nonce", "type": "bytes32"},
             ],
         }
+        # Convert nonce hex string to bytes for bytes32 encoding
+        # (eth_account >= 0.10 / eth_abi >= 5.x requires bytes, not hex str)
+        nonce_raw = auth["nonce"]
+        if isinstance(nonce_raw, str):
+            nonce_raw = bytes.fromhex(nonce_raw.removeprefix("0x"))
+
         message = {
             "from": Web3.to_checksum_address(auth["from"]),
             "to": Web3.to_checksum_address(auth["to"]),
             "value": int(auth["value"]),
             "validAfter": int(auth["validAfter"]),
             "validBefore": int(auth["validBefore"]),
-            "nonce": auth["nonce"],
+            "nonce": nonce_raw,
         }
         signable = encode_typed_data(domain_data=domain, message_types=types, message_data=message)
         signed = self.account.sign_message(signable)
-        return "0x" + signed.signature.hex()
+        sig_hex = signed.signature.hex()
+        return sig_hex if sig_hex.startswith("0x") else "0x" + sig_hex
 
     def _build_tuple(self, pi: PaymentInfo) -> tuple:
         """Build the on-chain PaymentInfo tuple."""
