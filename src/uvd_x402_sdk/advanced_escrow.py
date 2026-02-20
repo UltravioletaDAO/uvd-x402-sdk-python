@@ -69,6 +69,8 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 from web3 import Web3
 
+from uvd_x402_sdk.networks import get_network_by_chain_id
+
 
 # ============================================================
 # Constants
@@ -131,6 +133,14 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
         "refund_request": "0xc9BbA6A2CF9838e7Dd8c19BC8B3BAC620B9D8178",
         "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     },
+    10: {  # Optimism
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x0DdF51E62DDD41B5f67BEaF2DCE9F2e99E2C5aF5",
+        "protocol_fee_config": "0xe968AA7530b9C3336FED14FD5D5D4dD3Cf82655D",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+    },
     137: {  # Polygon
         "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
         "operator_factory": "0xb33D6502EdBbC47201cd1E53C49d703EC0a660b8",
@@ -179,6 +189,7 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     11155111: "Ethereum Sepolia",
     8453: "Base Mainnet",
     1: "Ethereum Mainnet",
+    10: "Optimism",
     137: "Polygon",
     42161: "Arbitrum",
     42220: "Celo",
@@ -548,9 +559,16 @@ class AdvancedEscrowClient:
 
     def _sign_erc3009(self, auth: dict) -> str:
         """Sign ReceiveWithAuthorization for ERC-3009."""
+        network_config = get_network_by_chain_id(self.chain_id)
+        if network_config is not None:
+            domain_name = network_config.usdc_domain_name
+            domain_version = network_config.usdc_domain_version
+        else:
+            domain_name = "USD Coin"
+            domain_version = "2"
         domain = {
-            "name": "USD Coin",
-            "version": "2",
+            "name": domain_name,
+            "version": domain_version,
             "chainId": self.chain_id,
             "verifyingContract": Web3.to_checksum_address(self.contracts["usdc"]),
         }
