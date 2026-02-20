@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.9.0"
+__version__ = "0.14.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
