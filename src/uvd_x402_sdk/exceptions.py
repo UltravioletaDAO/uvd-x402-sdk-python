@@ -234,7 +234,8 @@ class TimeoutError(X402Error):
     """
     Raised when a facilitator request times out.
 
-    Settlement operations can take up to 55 seconds on congested networks.
+    Per-network timeouts: Ethereum L1 = 900s, L2s = 90s (default).
+    The SDK attempts an on-chain fallback check before raising this error.
     """
 
     def __init__(

@@ -111,6 +111,7 @@ class NetworkConfig:
     usdc_domain_version: str = "2"
     rpc_url: str = ""
     enabled: bool = True
+    settle_timeout_seconds: float = 90.0  # Per-network settle timeout (Eth L1=900, L2s=90)
     tokens: Dict[TokenType, TokenConfig] = field(default_factory=dict)
     extra_config: Dict[str, Any] = field(default_factory=dict)
 

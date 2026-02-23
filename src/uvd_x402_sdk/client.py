@@ -165,6 +165,28 @@ class X402Client:
             raise InvalidPayloadError(f"Failed to parse payload: {e}")
 
     # =========================================================================
+    # Per-Network Timeout
+    # =========================================================================
+
+    def _get_settle_timeout(self, network: str) -> float:
+        """
+        Get settle timeout for a specific network.
+
+        Uses the network's settle_timeout_seconds if available,
+        otherwise falls back to config.settle_timeout.
+        Ethereum L1 uses 900s; L2s use 90s (default).
+        """
+        try:
+            normalized = normalize_network(network)
+        except ValueError:
+            return self.config.settle_timeout
+
+        network_config = get_network(normalized)
+        if network_config and network_config.settle_timeout_seconds > 0:
+            return network_config.settle_timeout_seconds
+        return self.config.settle_timeout
+
+    # =========================================================================
     # Network Validation
     # =========================================================================
 
@@ -380,7 +402,12 @@ class X402Client:
             "paymentRequirements": requirements.model_dump(by_alias=True, exclude_none=True),
         }
 
-        logger.info(f"Settling payment on {payload.network} for ${expected_amount_usd}")
+        # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
+        settle_timeout = self._get_settle_timeout(payload.network)
+        logger.info(
+            f"Settling payment on {payload.network} for ${expected_amount_usd} "
+            f"(timeout={settle_timeout}s)"
+        )
         logger.debug(f"Settle request: {json.dumps(settle_request, indent=2)}")
 
         try:
@@ -389,7 +416,7 @@ class X402Client:
                 f"{self.config.facilitator_url}/settle",
                 json=settle_request,
                 headers={"Content-Type": "application/json"},
-                timeout=self.config.settle_timeout,
+                timeout=settle_timeout,
             )
 
             if response.status_code != 200:
@@ -414,9 +441,59 @@ class X402Client:
             return settle_response
 
         except httpx.TimeoutException:
-            raise X402TimeoutError(operation="settle", timeout_seconds=self.config.settle_timeout)
+            # ACCION 2: On-chain fallback - check if payment succeeded despite timeout
+            logger.warning(
+                f"Settle timed out after {settle_timeout}s on {payload.network}, "
+                f"checking on-chain state..."
+            )
+            fallback = self._check_settle_fallback(settle_request, settle_timeout)
+            if fallback:
+                return fallback
+            raise X402TimeoutError(operation="settle", timeout_seconds=settle_timeout)
         except httpx.RequestError as e:
             raise FacilitatorError(message=f"Facilitator request failed: {e}")
+
+    def _check_settle_fallback(
+        self,
+        settle_request: Dict[str, Any],
+        settle_timeout: float,
+    ) -> Optional[SettleResponse]:
+        """
+        Check on-chain state after a settle timeout.
+
+        When the HTTP request times out, the on-chain transaction may still
+        have succeeded. This queries the facilitator's /settle endpoint again
+        with a short timeout to check if the transaction was confirmed.
+
+        Returns:
+            SettleResponse if payment was confirmed on-chain, None otherwise.
+        """
+        try:
+            client = self._get_http_client()
+            response = client.post(
+                f"{self.config.facilitator_url}/settle",
+                json=settle_request,
+                headers={"Content-Type": "application/json"},
+                timeout=30.0,  # Short timeout for fallback check
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                settle_response = SettleResponse(**data)
+                if settle_response.success:
+                    tx_hash = settle_response.get_transaction_hash()
+                    logger.info(
+                        f"Fallback confirmed payment on-chain! "
+                        f"TX: {tx_hash}, Payer: {settle_response.payer}"
+                    )
+                    return settle_response
+
+            logger.warning("Fallback check: payment not confirmed on-chain")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Fallback check failed: {e}")
+            return None
 
     # =========================================================================
     # Main Processing Method

@@ -66,6 +66,7 @@ ETHEREUM = NetworkConfig(
     usdc_domain_name="USD Coin",
     usdc_domain_version="2",
     rpc_url="https://eth.llamarpc.com",
+    settle_timeout_seconds=900.0,  # Ethereum L1: ~12s blocks, can take 5-6 min under congestion
     enabled=True,
     tokens={
         "usdc": TokenConfig(
