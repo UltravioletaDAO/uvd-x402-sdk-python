@@ -544,6 +544,47 @@ class EscrowClient:
         response.raise_for_status()
         return EscrowListResponse.model_validate(response.json())
 
+    async def get_escrow_state(
+        self,
+        network: str,
+        payer: str,
+        recipient: str,
+        nonce: str,
+    ) -> dict[str, Any]:
+        """
+        Query on-chain escrow state from the facilitator.
+
+        This calls POST /escrow/state to read the current escrow state
+        without performing any settlement. Useful for checking if an
+        escrow exists, its status, and remaining balance.
+
+        Args:
+            network: Network identifier (e.g., "base-mainnet" or "eip155:8453")
+            payer: Payer address
+            recipient: Recipient address
+            nonce: Escrow nonce (from the original payment authorization)
+
+        Returns:
+            Dict with on-chain escrow state (status, balance, timestamps)
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails
+        """
+        url = f"{self.base_url}/escrow/state"
+        payload = {
+            "network": network,
+            "payer": payer,
+            "recipient": recipient,
+            "nonce": nonce,
+        }
+        response = await self._client.post(
+            url,
+            json=payload,
+            headers=self._get_headers(),
+        )
+        response.raise_for_status()
+        return response.json()
+
     async def health_check(self) -> bool:
         """
         Check Escrow API health.

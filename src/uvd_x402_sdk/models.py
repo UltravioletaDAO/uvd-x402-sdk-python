@@ -72,6 +72,29 @@ class SVMPayloadContent(BaseModel):
 SolanaPayloadContent = SVMPayloadContent
 
 
+class SettlementAccountPayload(BaseModel):
+    """
+    Settlement account payload for Crossmint and other custodial wallets
+    that can only sendTransaction (not signTransaction).
+
+    In this mode, the client already submitted the transaction on-chain.
+    The facilitator verifies the on-chain tx, then sweeps USDC from the
+    settlement account to the payTo address.
+
+    Used by: Crossmint smart wallets, custodial wallets via @faremeter/wallet-crossmint
+    """
+
+    transactionSignature: str = Field(
+        ..., description="On-chain transaction signature (already submitted)"
+    )
+    settleSecretKey: Optional[str] = Field(
+        None, description="Base58 secret key for sweeping settlement account"
+    )
+    settlementRentDestination: Optional[str] = Field(
+        None, description="Address to receive rent from closed settlement ATA"
+    )
+
+
 class NEARPayloadContent(BaseModel):
     """
     NEAR payment payload using NEP-366 meta-transactions.

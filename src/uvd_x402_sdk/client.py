@@ -550,6 +550,176 @@ class X402Client:
         )
 
     # =========================================================================
+    # Accepts Negotiation (Faremeter middleware compatibility)
+    # =========================================================================
+
+    def negotiate_accepts(
+        self,
+        payment_requirements: list[Dict[str, Any]],
+        *,
+        x402_version: int = 2,
+    ) -> list[Dict[str, Any]]:
+        """
+        Negotiate payment requirements with the facilitator via POST /accepts.
+
+        Sends merchant payment requirements to the facilitator, which matches
+        them against its supported capabilities and returns enriched requirements
+        with facilitator data (feePayer, tokens, escrow configuration).
+
+        This is used by Faremeter middleware and clients that need to discover
+        what the facilitator can settle before constructing payment authorizations.
+
+        Args:
+            payment_requirements: List of payment requirement objects
+            x402_version: x402 protocol version (default: 2)
+
+        Returns:
+            List of enriched payment requirements with facilitator extras
+
+        Raises:
+            FacilitatorError: If the facilitator returns an error
+
+        Example:
+            >>> requirements = [
+            ...     {
+            ...         "scheme": "exact",
+            ...         "network": "base-mainnet",
+            ...         "maxAmountRequired": "1000000",
+            ...         "resource": "https://api.example.com/data",
+            ...         "payTo": "0xMerchant...",
+            ...     }
+            ... ]
+            >>> enriched = client.negotiate_accepts(requirements)
+            >>> # enriched[0]["extra"]["feePayer"] is now set
+        """
+        url = f"{self.config.facilitator_url}/accepts"
+        payload = {
+            "x402Version": x402_version,
+            "accepts": payment_requirements,
+        }
+
+        try:
+            client = self._get_http_client()
+            response = client.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=self.config.verify_timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("accepts", [])
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"Facilitator /accepts error: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except httpx.TimeoutException:
+            raise X402TimeoutError(operation="accepts", timeout_seconds=self.config.verify_timeout)
+        except Exception as e:
+            raise FacilitatorError(message=f"Facilitator /accepts error: {e}")
+
+    # =========================================================================
+    # Facilitator Info Methods
+    # =========================================================================
+
+    def get_version(self) -> Dict[str, Any]:
+        """
+        Get the facilitator version info.
+
+        Returns:
+            Dict with version information (e.g., {"version": "1.37.0"})
+
+        Raises:
+            FacilitatorError: If the request fails
+        """
+        try:
+            client = self._get_http_client()
+            response = client.get(f"{self.config.facilitator_url}/version")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"GET /version failed: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except Exception as e:
+            raise FacilitatorError(message=f"GET /version failed: {e}")
+
+    def get_supported(self) -> Dict[str, Any]:
+        """
+        Get the facilitator's supported networks and payment schemes.
+
+        Returns:
+            Dict with 'kinds' array of supported network/scheme combos
+
+        Example:
+            >>> supported = client.get_supported()
+            >>> for kind in supported["kinds"]:
+            ...     print(f"{kind['network']} - {kind['scheme']}")
+
+        Raises:
+            FacilitatorError: If the request fails
+        """
+        try:
+            client = self._get_http_client()
+            response = client.get(f"{self.config.facilitator_url}/supported")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"GET /supported failed: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except Exception as e:
+            raise FacilitatorError(message=f"GET /supported failed: {e}")
+
+    def get_blacklist(self) -> Dict[str, Any]:
+        """
+        Get the facilitator's blocked/sanctioned addresses.
+
+        Returns:
+            Dict with blacklist info (totalBlocked, loadedAtStartup, addresses)
+
+        Example:
+            >>> bl = client.get_blacklist()
+            >>> print(f"Blocked: {bl['totalBlocked']} addresses")
+
+        Raises:
+            FacilitatorError: If the request fails
+        """
+        try:
+            client = self._get_http_client()
+            response = client.get(f"{self.config.facilitator_url}/blacklist")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"GET /blacklist failed: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except Exception as e:
+            raise FacilitatorError(message=f"GET /blacklist failed: {e}")
+
+    def health_check(self) -> bool:
+        """
+        Check facilitator health.
+
+        Returns:
+            True if the facilitator is healthy
+        """
+        try:
+            client = self._get_http_client()
+            response = client.get(f"{self.config.facilitator_url}/health")
+            return response.is_success
+        except Exception:
+            return False
+
+    # =========================================================================
     # Convenience Methods
     # =========================================================================
 

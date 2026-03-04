@@ -34,7 +34,7 @@ Example:
 """
 
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 
 import httpx
 from pydantic import BaseModel, Field
@@ -42,12 +42,17 @@ from pydantic import BaseModel, Field
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
 
-# Supported networks for ERC-8004 (16 networks)
+# Agent ID type: EVM uses sequential uint256, Solana uses base58 pubkey strings
+AgentId = Union[int, str]
+
+# Supported networks for ERC-8004 (18 networks: 16 EVM + 2 Solana)
 Erc8004Network = Literal[
-    # Mainnets
+    # EVM Mainnets
     "ethereum", "base-mainnet", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
-    # Testnets
-    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji"
+    # EVM Testnets
+    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji",
+    # Solana (uses QuantuLabs 8004-solana Anchor program + ATOM Engine)
+    "solana", "solana-devnet",
 ]
 
 
@@ -57,16 +62,23 @@ class Erc8004ContractAddresses(BaseModel):
     identity_registry: Optional[str] = None
     reputation_registry: Optional[str] = None
     validation_registry: Optional[str] = None
+    # Solana-specific program IDs
+    agent_registry_program: Optional[str] = None
+    atom_engine_program: Optional[str] = None
 
 
-# Mainnet addresses (CREATE2 deterministic - same on all mainnets)
+# EVM Mainnet addresses (CREATE2 deterministic - same on all mainnets)
 _MAINNET_IDENTITY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 _MAINNET_REPUTATION = "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
 
-# Testnet addresses (same on all testnets)
+# EVM Testnet addresses (same on all testnets)
 _TESTNET_IDENTITY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
 _TESTNET_REPUTATION = "0x8004B663056A597Dffe9eCcC1965A193B7388713"
 _TESTNET_VALIDATION = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+
+# Solana program IDs (QuantuLabs 8004-solana)
+_SOLANA_AGENT_REGISTRY = "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+_SOLANA_ATOM_ENGINE = "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb"
 
 # Contract addresses per network (16 networks)
 ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
@@ -143,6 +155,15 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         reputation_registry=_TESTNET_REPUTATION,
         validation_registry=_TESTNET_VALIDATION,
     ),
+    # Solana (2) - uses QuantuLabs 8004-solana Anchor program + ATOM Engine
+    "solana": Erc8004ContractAddresses(
+        agent_registry_program=_SOLANA_AGENT_REGISTRY,
+        atom_engine_program=_SOLANA_ATOM_ENGINE,
+    ),
+    "solana-devnet": Erc8004ContractAddresses(
+        agent_registry_program=_SOLANA_AGENT_REGISTRY,
+        atom_engine_program=_SOLANA_ATOM_ENGINE,
+    ),
 }
 
 
@@ -179,7 +200,7 @@ class AgentService(BaseModel):
 class AgentRegistration(BaseModel):
     """Agent registration reference."""
 
-    agent_id: int = Field(..., alias="agentId")
+    agent_id: AgentId = Field(..., alias="agentId")
     agent_registry: str = Field(..., alias="agentRegistry")
 
     class Config:
@@ -187,9 +208,13 @@ class AgentRegistration(BaseModel):
 
 
 class AgentIdentity(BaseModel):
-    """Agent identity information from the Identity Registry."""
+    """Agent identity information from the Identity Registry.
 
-    agent_id: int = Field(..., alias="agentId")
+    On EVM networks, agent_id is a sequential uint256 (int).
+    On Solana, agent_id is a base58 Pubkey string (the NFT asset address).
+    """
+
+    agent_id: AgentId = Field(..., alias="agentId")
     owner: str
     agent_uri: str = Field(..., alias="agentUri")
     agent_wallet: Optional[str] = Field(None, alias="agentWallet")
@@ -217,9 +242,13 @@ class AgentRegistrationFile(BaseModel):
 
 
 class ReputationSummary(BaseModel):
-    """Reputation summary for an agent."""
+    """Reputation summary for an agent.
 
-    agent_id: int = Field(..., alias="agentId")
+    On Solana, reputation is derived from on-chain ATOM Engine stats
+    (trust tier 0-4, HyperLogLog unique callers, EMA scoring).
+    """
+
+    agent_id: AgentId = Field(..., alias="agentId")
     count: int
     summary_value: int = Field(..., alias="summaryValue")
     summary_value_decimals: int = Field(..., alias="summaryValueDecimals")
@@ -247,7 +276,7 @@ class FeedbackEntry(BaseModel):
 class ReputationResponse(BaseModel):
     """Reputation query response."""
 
-    agent_id: int = Field(..., alias="agentId")
+    agent_id: AgentId = Field(..., alias="agentId")
     summary: ReputationSummary
     feedback: Optional[list[FeedbackEntry]] = None
     network: str
@@ -259,7 +288,7 @@ class ReputationResponse(BaseModel):
 class FeedbackParams(BaseModel):
     """Parameters for submitting reputation feedback."""
 
-    agent_id: int = Field(..., alias="agentId")
+    agent_id: AgentId = Field(..., alias="agentId")
     value: int
     value_decimals: int = Field(0, alias="valueDecimals")
     tag1: str = ""
@@ -308,7 +337,7 @@ class RegisterAgentResponse(BaseModel):
     """Response from POST /register."""
 
     success: bool
-    agent_id: Optional[int] = Field(None, alias="agentId")
+    agent_id: Optional[AgentId] = Field(None, alias="agentId")
     transaction: Optional[str] = None
     transfer_transaction: Optional[str] = Field(None, alias="transferTransaction")
     owner: Optional[str] = None
@@ -322,7 +351,7 @@ class RegisterAgentResponse(BaseModel):
 class IdentityMetadataResponse(BaseModel):
     """Response from GET /identity/{network}/{agent_id}/metadata/{key}."""
 
-    agent_id: int = Field(..., alias="agentId")
+    agent_id: AgentId = Field(..., alias="agentId")
     key: str
     value_hex: str = Field(..., alias="valueHex")
     value_utf8: Optional[str] = Field(None, alias="valueUtf8")
@@ -412,7 +441,7 @@ class Erc8004Client:
     async def get_identity(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
     ) -> AgentIdentity:
         """
         Get agent identity from the Identity Registry.
@@ -458,7 +487,7 @@ class Erc8004Client:
     async def get_reputation(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
         *,
         tag1: Optional[str] = None,
         tag2: Optional[str] = None,
@@ -501,7 +530,7 @@ class Erc8004Client:
     async def submit_feedback(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
         value: int,
         *,
         value_decimals: int = 0,
@@ -584,9 +613,10 @@ class Erc8004Client:
     async def revoke_feedback(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
         feedback_index: int,
         *,
+        seal_hash: Optional[str] = None,
         x402_version: int = 1,
     ) -> FeedbackResponse:
         """
@@ -604,16 +634,16 @@ class Erc8004Client:
             Revocation result
         """
         url = f"{self.base_url}/feedback/revoke"
+        payload: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": network,
+            "agentId": agent_id,
+            "feedbackIndex": feedback_index,
+        }
+        if seal_hash:
+            payload["sealHash"] = seal_hash
         try:
-            response = await self._client.post(
-                url,
-                json={
-                    "x402Version": x402_version,
-                    "network": network,
-                    "agentId": agent_id,
-                    "feedbackIndex": feedback_index,
-                },
-            )
+            response = await self._client.post(url, json=payload)
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -668,11 +698,12 @@ class Erc8004Client:
     async def append_response(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
         feedback_index: int,
         response_text: str,
         *,
         response_uri: Optional[str] = None,
+        seal_hash: Optional[str] = None,
         x402_version: int = 1,
     ) -> FeedbackResponse:
         """
@@ -711,6 +742,8 @@ class Erc8004Client:
         }
         if response_uri:
             payload["responseUri"] = response_uri
+        if seal_hash:
+            payload["sealHash"] = seal_hash
 
         try:
             response = await self._client.post(url, json=payload)
@@ -813,7 +846,7 @@ class Erc8004Client:
     async def get_identity_metadata(
         self,
         network: Erc8004Network,
-        agent_id: int,
+        agent_id: AgentId,
         key: str,
     ) -> IdentityMetadataResponse:
         """

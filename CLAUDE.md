@@ -11,18 +11,23 @@ x402 Python SDK for backend payment verification and settlement. Used by servers
 ```
 src/uvd_x402_sdk/
 ├── __init__.py              # Main exports
-├── client.py                # X402Client - payment processing
+├── client.py                # X402Client - payment processing + negotiate_accepts()
 ├── config.py                # Configuration management
 ├── models.py                # Pydantic data models
 ├── exceptions.py            # Custom exceptions
 ├── response.py              # 402 response helpers
+├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
+├── escrow.py                # Escrow & Refund support
+├── advanced_escrow.py       # PaymentOperator on-chain escrow
+├── facilitator.py           # Facilitator addresses and fee payers
 ├── networks/
 │   ├── __init__.py          # Network registry
 │   ├── base.py              # NetworkConfig, TokenType, helpers
-│   ├── evm.py               # 10 EVM networks
+│   ├── evm.py               # 13 EVM networks
 │   ├── solana.py            # Solana, Fogo
 │   ├── near.py              # NEAR Protocol
-│   └── stellar.py           # Stellar
+│   ├── stellar.py           # Stellar
+│   └── algorand.py          # Algorand
 └── integrations/
     ├── fastapi_integration.py
     ├── flask_integration.py
@@ -33,7 +38,7 @@ src/uvd_x402_sdk/
 ## Multi-Stablecoin Support
 
 ### Supported Tokens
-- USDC, EURC, AUSD, PYUSD, GHO, crvUSD
+- USDC, EURC, AUSD, PYUSD, USDT
 
 ### CRITICAL: EIP-712 Domain Names Vary by Chain
 
@@ -108,6 +113,19 @@ payment_requirements = {
     },
 }
 ```
+
+## Key Features
+
+### ERC-8004 Trustless Agents (erc8004.py)
+- Supports 18 networks: 16 EVM + Solana + Solana-devnet
+- `AgentId = Union[int, str]` - EVM uses int, Solana uses base58 pubkey string
+- `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
+- Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
+
+### /accepts Negotiation (client.py)
+- `X402Client.negotiate_accepts()` - POST /accepts to facilitator
+- Faremeter middleware compatibility
+- Returns enriched requirements with feePayer, tokens, escrow config
 
 ## Known Limitations
 

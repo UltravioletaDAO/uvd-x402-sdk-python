@@ -4,7 +4,7 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.6.0**: ERC-8004 Trustless Agents (on-chain reputation), Escrow & Refund support, Scroll and SKALE networks!
+**New in v0.15.0**: ERC-8004 Solana support (QuantuLabs 8004-solana + ATOM Engine), `/accepts` negotiation endpoint, Solana smart wallet support!
 
 ## Features
 
@@ -16,8 +16,9 @@ Accept **gasless stablecoin payments** across **21 blockchain networks** with a 
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
-- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (EVM + Solana)
 - **Escrow & Refunds**: Hold payments in escrow with dispute resolution
+- **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 
 ## Quick Start (5 Lines)
 
@@ -1098,14 +1099,20 @@ except X402Error as e:
 
 ## ERC-8004 Trustless Agents
 
-Build verifiable on-chain reputation for AI agents and services.
+Build verifiable on-chain reputation for AI agents and services. Supports **18 networks** (16 EVM + Solana + Solana devnet).
+
+On EVM networks, agent IDs are sequential `uint256` integers. On Solana, agent IDs are base58 pubkey strings (NFT asset addresses). The `AgentId` type (`Union[int, str]`) handles both.
 
 ```python
-from uvd_x402_sdk import Erc8004Client
+from uvd_x402_sdk import Erc8004Client, AgentId
 
 async with Erc8004Client() as client:
-    # Get agent identity
+    # EVM: agent_id is an integer
     identity = await client.get_identity("ethereum", 42)
+    print(f"Agent URI: {identity.agent_uri}")
+
+    # Solana: agent_id is a base58 pubkey string
+    identity = await client.get_identity("solana", "8oo4dC4JvBLwy5...")
     print(f"Agent URI: {identity.agent_uri}")
 
     # Get agent reputation
@@ -1122,12 +1129,35 @@ async with Erc8004Client() as client:
     )
 
     # Respond to feedback (agents only)
+    # seal_hash is required for Solana, optional for EVM
     await client.append_response(
         network="ethereum",
         agent_id=42,
         feedback_index=1,
         response_text="Thank you for your feedback!",
     )
+```
+
+## `/accepts` Negotiation
+
+Discover what the facilitator can settle before constructing payment authorizations. Used by Faremeter middleware and clients.
+
+```python
+from uvd_x402_sdk import X402Client
+
+client = X402Client(recipient_address="0xMerchant...")
+
+# Ask facilitator what it can settle
+enriched = client.negotiate_accepts([
+    {
+        "scheme": "exact",
+        "network": "base-mainnet",
+        "maxAmountRequired": "1000000",
+        "resource": "https://api.example.com/data",
+        "payTo": "0xMerchant...",
+    }
+])
+# enriched[0]["extra"] now has feePayer, tokens, escrow config
 ```
 
 ---
@@ -1291,6 +1321,20 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.15.0 (2026-03-03)
+
+- **ERC-8004 Solana Support**: Full integration with QuantuLabs 8004-solana Anchor program + ATOM Engine
+  - `AgentId` type alias (`Union[int, str]`) for dual EVM/Solana agent IDs
+  - Solana and Solana-devnet added to `Erc8004Network` (18 networks total)
+  - Solana program ID constants (`agent_registry_program`, `atom_engine_program`)
+  - All ERC-8004 methods now accept `AgentId` (int for EVM, string for Solana)
+  - `seal_hash` parameter added to `revoke_feedback()` and `append_response()` (SEAL v1 support)
+- **`/accepts` Negotiation**: New `negotiate_accepts()` method on `X402Client`
+  - Sends merchant payment requirements to facilitator POST `/accepts`
+  - Returns enriched requirements with feePayer, tokens, escrow config
+  - Faremeter middleware compatibility
+- **Solana Smart Wallet Support**: Transparent CPI inner instruction scanning on server side
 
 ### v0.6.0 (2026-01-30)
 

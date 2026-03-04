@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.14.1"
+__version__ = "0.16.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -69,6 +69,7 @@ from uvd_x402_sdk.models import (
     EVMPayloadContent,
     SVMPayloadContent,
     SolanaPayloadContent,  # Alias for backward compatibility
+    SettlementAccountPayload,  # Crossmint custodial wallets
     NEARPayloadContent,
     StellarPayloadContent,
     SuiPayloadContent,
@@ -152,6 +153,7 @@ from uvd_x402_sdk.erc8004 import (
     Erc8004Client,
     ERC8004_EXTENSION_ID,
     ERC8004_CONTRACTS,
+    AgentId,
     ProofOfPayment,
     AgentIdentity,
     AgentRegistrationFile,
@@ -185,6 +187,13 @@ from uvd_x402_sdk.escrow import (
     can_refund_escrow,
     is_escrow_expired,
     escrow_time_remaining,
+)
+
+# Bazaar Discovery
+from uvd_x402_sdk.discovery import (
+    BazaarClient,
+    DiscoveryResource,
+    DiscoveryResponse,
 )
 
 # Advanced Escrow (PaymentOperator - on-chain escrow)
@@ -238,6 +247,7 @@ __all__ = [
     "EVMPayloadContent",
     "SVMPayloadContent",
     "SolanaPayloadContent",
+    "SettlementAccountPayload",
     "NEARPayloadContent",
     "StellarPayloadContent",
     "SuiPayloadContent",
@@ -309,6 +319,7 @@ __all__ = [
     "Erc8004Client",
     "ERC8004_EXTENSION_ID",
     "ERC8004_CONTRACTS",
+    "AgentId",
     "ProofOfPayment",
     "AgentIdentity",
     "AgentRegistrationFile",
@@ -335,6 +346,10 @@ __all__ = [
     "can_refund_escrow",
     "is_escrow_expired",
     "escrow_time_remaining",
+    # Bazaar Discovery
+    "BazaarClient",
+    "DiscoveryResource",
+    "DiscoveryResponse",
     # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
     "ADVANCED_ESCROW_AVAILABLE",
     "AdvancedEscrowClient",
