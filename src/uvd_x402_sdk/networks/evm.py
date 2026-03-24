@@ -7,6 +7,7 @@ Each chain uses ERC-3009 TransferWithAuthorization for USDC transfers.
 Important EIP-712 domain considerations:
 - Most chains use 'USD Coin' as the domain name
 - Celo, HyperEVM, Unichain, Monad use 'USDC' as the domain name
+- SKALE Base uses 'Bridged USDC (SKALE Bridge)' as the domain name
 
 Multi-token support:
 - USDC: All chains (6 decimals)
@@ -336,46 +337,48 @@ SCROLL = NetworkConfig(
     },
 )
 
-# SKALE (L3 on Base, gasless with sFUEL)
-# NOTE: SKALE uses 'USDC' (not 'USD Coin') for EIP-712 domain name
+# SKALE Base (L3 on Base, gasless with CREDIT token)
+# NOTE: SKALE uses 'Bridged USDC (SKALE Bridge)' for EIP-712 domain name
+# EIP-1559 NOT supported (legacy tx only). No escrow support (Cancun EVM compat).
 SKALE = NetworkConfig(
-    name="skale",
-    display_name="SKALE",
+    name="skale-base",
+    display_name="SKALE Base",
     network_type=NetworkType.EVM,
     chain_id=1187947933,
     usdc_address="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
     usdc_decimals=6,
-    usdc_domain_name="USDC",  # SKALE uses "USDC"
+    usdc_domain_name="Bridged USDC (SKALE Bridge)",  # On-chain verified domain name
     usdc_domain_version="2",
-    rpc_url="https://mainnet.skalenodes.com/v1/honorable-steel-rasalhague",
+    rpc_url="https://skale-base.skalenodes.com/v1/base",
     enabled=True,
     tokens={
         "usdc": TokenConfig(
             address="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
             decimals=6,
-            name="USDC",
+            name="Bridged USDC (SKALE Bridge)",
             version="2",
         ),
     },
 )
 
-# SKALE Testnet
+# SKALE Base Sepolia (testnet)
+# Same EIP-712 domain as mainnet
 SKALE_TESTNET = NetworkConfig(
-    name="skale-testnet",
-    display_name="SKALE Testnet",
+    name="skale-base-sepolia",
+    display_name="SKALE Base Sepolia",
     network_type=NetworkType.EVM,
     chain_id=324705682,
     usdc_address="0x2e08028E3C4c2356572E096d8EF835cD5C6030bD",
     usdc_decimals=6,
-    usdc_domain_name="USDC",  # SKALE testnet uses "USDC"
+    usdc_domain_name="Bridged USDC (SKALE Bridge)",  # Same domain as mainnet
     usdc_domain_version="2",
-    rpc_url="https://testnet.skalenodes.com/v1/lanky-ill-funny-testnet",
+    rpc_url="https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
     enabled=True,
     tokens={
         "usdc": TokenConfig(
             address="0x2e08028E3C4c2356572E096d8EF835cD5C6030bD",
             decimals=6,
-            name="USDC",
+            name="Bridged USDC (SKALE Bridge)",
             version="2",
         ),
     },
@@ -416,8 +419,13 @@ def get_usdc_domain_name(network_name: str) -> str:
         Domain name string ('USD Coin' or 'USDC')
     """
     # Networks that use 'USDC' instead of 'USD Coin'
-    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad", "skale", "skale-testnet"}
+    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad"}
 
+    # SKALE Base uses bridged USDC with a unique domain name
+    skale_domain_networks = {"skale-base", "skale-base-sepolia"}
+
+    if network_name.lower() in skale_domain_networks:
+        return "Bridged USDC (SKALE Bridge)"
     if network_name.lower() in usdc_domain_networks:
         return "USDC"
     return "USD Coin"

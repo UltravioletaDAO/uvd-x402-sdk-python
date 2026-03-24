@@ -397,8 +397,8 @@ _NETWORK_TO_CAIP2 = {
     "unichain": "eip155:130",
     "monad": "eip155:143",
     "scroll": "eip155:534352",
-    "skale": "eip155:1187947933",
-    "skale-testnet": "eip155:324705682",
+    "skale-base": "eip155:1187947933",
+    "skale-base-sepolia": "eip155:324705682",
     # SVM chains (solana:genesisHash first 32 chars)
     "solana": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
     "fogo": "solana:fogo",  # Placeholder - update when known

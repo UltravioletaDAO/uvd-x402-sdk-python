@@ -38,7 +38,7 @@ Example usage:
 
 Supported Networks (21 total):
 - EVM (13): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
-            HyperEVM, Unichain, Monad, Scroll, SKALE, SKALE Testnet
+            HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar
@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client

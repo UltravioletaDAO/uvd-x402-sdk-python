@@ -6,7 +6,7 @@ including USDC contract addresses, RPC URLs, and network-specific parameters.
 
 The SDK supports 21 blockchain networks across 6 network families:
 - 13 EVM networks: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
-                   Celo, HyperEVM, Unichain, Monad, Scroll, SKALE, SKALE Testnet
+                   Celo, HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia
 - 2 SVM networks: Solana, Fogo
 - 1 NEAR network: NEAR Protocol
 - 1 Stellar network: Stellar
