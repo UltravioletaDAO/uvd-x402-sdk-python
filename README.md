@@ -4,7 +4,7 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.15.0**: ERC-8004 Solana support (QuantuLabs 8004-solana + ATOM Engine), `/accepts` negotiation endpoint, Solana smart wallet support!
+**New in v0.16.0**: Bazaar Discovery, facilitator info endpoints (`get_version`, `get_supported`, `get_blacklist`), escrow state queries, bug fixes.
 
 ## Features
 
@@ -19,6 +19,8 @@ Accept **gasless stablecoin payments** across **21 blockchain networks** with a 
 - **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (EVM + Solana)
 - **Escrow & Refunds**: Hold payments in escrow with dispute resolution
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
+- **Bazaar Discovery**: Register and discover paid resources across the x402 network
+- **Facilitator Info**: Query version, supported networks, blacklist, and health
 
 ## Quick Start (5 Lines)
 
@@ -1189,6 +1191,84 @@ async with EscrowClient() as client:
 
 ---
 
+## Bazaar Discovery
+
+Register and discover paid x402 resources across the network.
+
+```python
+from uvd_x402_sdk import BazaarClient
+
+async with BazaarClient() as bazaar:
+    # List available resources
+    resources = await bazaar.list_resources(category="finance", network="base-mainnet")
+    for r in resources.items:
+        print(f"{r.url} - {r.description}")
+
+    # Register your own resource
+    await bazaar.register_resource(
+        url="https://api.example.com/data",
+        resource_type="http",
+        description="Premium data API",
+        accepts=[{
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amount": "10000",
+            "payTo": "0xYourWallet...",
+        }],
+        metadata={"category": "finance", "tags": ["market-data"]},
+    )
+```
+
+---
+
+## Facilitator Info
+
+Query the facilitator for version, supported networks, blacklist, and health.
+
+```python
+from uvd_x402_sdk import X402Client
+
+client = X402Client(recipient_address="0xYourWallet...")
+
+# Check version
+version = client.get_version()
+print(f"Facilitator: v{version['version']}")
+
+# List supported networks
+supported = client.get_supported()
+for kind in supported["kinds"]:
+    print(f"  {kind['network']} - {kind['scheme']}")
+
+# Check blacklist
+bl = client.get_blacklist()
+print(f"Blocked addresses: {bl['totalBlocked']}")
+
+# Health check
+is_healthy = client.health_check()
+```
+
+---
+
+## Escrow State Queries
+
+Query on-chain escrow state without performing settlement.
+
+```python
+from uvd_x402_sdk import EscrowClient
+
+async with EscrowClient() as escrow:
+    state = await escrow.get_escrow_state(
+        network="base-mainnet",
+        payer="0xPayer...",
+        recipient="0xRecipient...",
+        nonce="0x1234...",
+    )
+    print(f"Status: {state['status']}, Balance: {state.get('balance')}")
+```
+
+---
+
 ## How x402 Works
 
 The x402 protocol enables gasless stablecoin payments (USDC, EURC, AUSD, PYUSD):
@@ -1321,6 +1401,23 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.16.0 (2026-03-03)
+
+- **Bazaar Discovery**: New `BazaarClient` for resource registration and discovery
+  - `list_resources()` with pagination, category, and network filtering
+  - `register_resource()` for publishing paid resources to the Bazaar
+  - `DiscoveryResource` and `DiscoveryResponse` Pydantic models
+- **Facilitator Info Endpoints**: New methods on `X402Client`
+  - `get_version()` - query facilitator version (`GET /version`)
+  - `get_supported()` - list supported networks/schemes (`GET /supported`)
+  - `get_blacklist()` - check blocked/sanctioned addresses (`GET /blacklist`)
+  - `health_check()` - check facilitator availability (`GET /health`)
+- **Escrow State Queries**: New `get_escrow_state()` method on `EscrowClient`
+  - Query on-chain escrow state via `POST /escrow/state`
+  - Read status, balance, timestamps without settlement
+- **Bug Fix**: Fixed `negotiate_accepts()` referencing undefined `self.facilitator_url` and `self.timeout`
+  - Now correctly uses `self.config.facilitator_url` and the HTTP client pool
 
 ### v0.15.0 (2026-03-03)
 

@@ -11,13 +11,14 @@ x402 Python SDK for backend payment verification and settlement. Used by servers
 ```
 src/uvd_x402_sdk/
 ├── __init__.py              # Main exports
-├── client.py                # X402Client - payment processing + negotiate_accepts()
+├── client.py                # X402Client - payment processing, negotiate_accepts(), facilitator info
 ├── config.py                # Configuration management
-├── models.py                # Pydantic data models
+├── models.py                # Pydantic data models (PaymentPayload, SettlementAccountPayload, etc.)
 ├── exceptions.py            # Custom exceptions
 ├── response.py              # 402 response helpers
+├── discovery.py             # BazaarClient - resource registration and discovery
 ├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
-├── escrow.py                # Escrow & Refund support
+├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
 ├── facilitator.py           # Facilitator addresses and fee payers
 ├── networks/
@@ -126,6 +127,25 @@ payment_requirements = {
 - `X402Client.negotiate_accepts()` - POST /accepts to facilitator
 - Faremeter middleware compatibility
 - Returns enriched requirements with feePayer, tokens, escrow config
+
+### Facilitator Info (client.py)
+- `X402Client.get_version()` - GET /version
+- `X402Client.get_supported()` - GET /supported (networks + schemes)
+- `X402Client.get_blacklist()` - GET /blacklist (sanctioned addresses)
+- `X402Client.health_check()` - GET /health
+
+### Bazaar Discovery (discovery.py)
+- `BazaarClient.list_resources()` - GET /discovery/resources (with pagination, filtering)
+- `BazaarClient.register_resource()` - POST /discovery/register
+- `DiscoveryResource`, `DiscoveryResponse` Pydantic models
+
+### Escrow State Queries (escrow.py)
+- `EscrowClient.get_escrow_state()` - POST /escrow/state
+- Reads on-chain escrow state without settlement
+
+### Settlement Account Payload (models.py)
+- `SettlementAccountPayload` - For Crossmint/custodial wallets that sendTransaction (not signTransaction)
+- Fields: `transactionSignature`, `settleSecretKey`, `settlementRentDestination`
 
 ## Known Limitations
 
