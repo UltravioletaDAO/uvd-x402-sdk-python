@@ -11,6 +11,8 @@ This module provides the X402Client class which handles:
 import base64
 import json
 import logging
+import os
+import time
 from decimal import Decimal
 from typing import Optional, Tuple, Dict, Any
 
@@ -97,6 +99,11 @@ class X402Client:
 
         # HTTP client for facilitator requests
         self._http_client: Optional[httpx.Client] = None
+
+        # Client-side signer (set via connect_with_private_key)
+        self._signer: Any = None  # eth_account.Account when connected
+        self._signer_address: Optional[str] = None
+        self._connected_chain: Optional[str] = None
 
     def _get_http_client(self) -> httpx.Client:
         """Get or create HTTP client."""
@@ -781,3 +788,263 @@ class X402Client:
         payload = self.extract_payload(x_payment_header)
         verify_response = self.verify_payment(payload, expected_amount_usd, pay_to=pay_to)
         return verify_response.isValid, verify_response.payer or ""
+
+    # =========================================================================
+    # Client-Side Signing (Server-side signer without browser wallet)
+    # =========================================================================
+
+    def connect_with_private_key(
+        self,
+        private_key: str,
+        chain_name: Optional[str] = None,
+    ) -> str:
+        """
+        Connect a wallet using a private key for server-side signing.
+
+        Creates an EVM signer from the private key, enabling the client to
+        create signed EIP-3009 TransferWithAuthorization payloads without
+        a browser wallet.
+
+        Requires: pip install uvd-x402-sdk[signer]
+
+        Args:
+            private_key: Hex-encoded private key (with or without 0x prefix)
+            chain_name: Network to connect to (e.g., 'skale-base', 'base').
+                        If None, must be specified when creating authorizations.
+
+        Returns:
+            The wallet address derived from the private key
+
+        Raises:
+            ImportError: If eth-account is not installed
+            UnsupportedNetworkError: If chain_name is not a valid EVM network
+            ValueError: If private key is invalid
+
+        Example:
+            >>> client = X402Client(recipient_address="0xMerchant...")
+            >>> address = client.connect_with_private_key(
+            ...     os.environ['PRIVATE_KEY'],
+            ...     'skale-base'
+            ... )
+            >>> print(f"Connected: {address}")
+        """
+        try:
+            from eth_account import Account
+        except ImportError:
+            raise ImportError(
+                "eth-account is required for connect_with_private_key. "
+                "Install it with: pip install uvd-x402-sdk[signer]"
+            )
+
+        # Validate chain if provided
+        if chain_name:
+            try:
+                normalized = normalize_network(chain_name)
+            except ValueError:
+                raise UnsupportedNetworkError(
+                    network=chain_name,
+                    supported_networks=get_supported_network_names(),
+                )
+            network_config = get_network(normalized)
+            if not network_config:
+                raise UnsupportedNetworkError(
+                    network=chain_name,
+                    supported_networks=get_supported_network_names(),
+                )
+            if network_config.network_type != NetworkType.EVM:
+                raise UnsupportedNetworkError(
+                    network=chain_name,
+                    supported_networks=[
+                        n for n in get_supported_network_names()
+                        if get_network(n) and get_network(n).network_type == NetworkType.EVM
+                    ],
+                )
+            self._connected_chain = normalized
+        else:
+            self._connected_chain = None
+
+        # Create account from private key
+        self._signer = Account.from_key(private_key)
+        self._signer_address = self._signer.address
+
+        logger.info(f"Connected wallet {self._signer_address}"
+                     + (f" on {self._connected_chain}" if self._connected_chain else ""))
+
+        return self._signer_address
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if a signer is connected."""
+        return self._signer is not None
+
+    @property
+    def address(self) -> Optional[str]:
+        """Get the connected wallet address."""
+        return self._signer_address
+
+    @property
+    def connected_chain(self) -> Optional[str]:
+        """Get the connected chain name."""
+        return self._connected_chain
+
+    def create_authorization(
+        self,
+        pay_to: str,
+        amount_usd: Decimal,
+        *,
+        chain_name: Optional[str] = None,
+        valid_duration: int = 3600,
+        token_type: str = "usdc",
+    ) -> str:
+        """
+        Create a signed EIP-3009 payment authorization (X-PAYMENT header value).
+
+        Signs a TransferWithAuthorization message and returns a base64-encoded
+        payload ready to be sent as the X-PAYMENT header.
+
+        Args:
+            pay_to: Recipient address
+            amount_usd: Payment amount in USD
+            chain_name: Network name (uses connected chain if not specified)
+            valid_duration: Authorization validity in seconds (default: 1 hour)
+            token_type: Token to pay with (default: 'usdc')
+
+        Returns:
+            Base64-encoded X-PAYMENT header value
+
+        Raises:
+            RuntimeError: If no signer is connected
+            ImportError: If eth-account is not installed
+            UnsupportedNetworkError: If chain is invalid
+
+        Example:
+            >>> header = client.create_authorization(
+            ...     pay_to="0xRecipient...",
+            ...     amount_usd=Decimal("0.01"),
+            ... )
+            >>> response = httpx.get(
+            ...     "https://api.example.com/data",
+            ...     headers={"X-PAYMENT": header}
+            ... )
+        """
+        if not self._signer:
+            raise RuntimeError(
+                "No signer connected. Call connect_with_private_key() first."
+            )
+
+        try:
+            from eth_account.messages import encode_typed_data
+        except ImportError:
+            raise ImportError(
+                "eth-account is required for create_authorization. "
+                "Install it with: pip install uvd-x402-sdk[signer]"
+            )
+
+        # Resolve chain
+        chain = chain_name or self._connected_chain
+        if not chain:
+            raise ValueError(
+                "No chain specified. Pass chain_name or connect with a chain."
+            )
+        try:
+            normalized = normalize_network(chain)
+        except ValueError:
+            raise UnsupportedNetworkError(
+                network=chain,
+                supported_networks=get_supported_network_names(),
+            )
+        network_config = get_network(normalized)
+        if not network_config:
+            raise UnsupportedNetworkError(
+                network=chain,
+                supported_networks=get_supported_network_names(),
+            )
+
+        # Get token config
+        from uvd_x402_sdk.networks.base import get_token_config
+        token_config = get_token_config(normalized, token_type)
+        if not token_config:
+            raise ValueError(
+                f"Token '{token_type}' not supported on {normalized}"
+            )
+
+        # Convert amount to base units
+        amount_base = int(Decimal(str(amount_usd)) * (10 ** token_config.decimals))
+
+        # Build EIP-3009 TransferWithAuthorization
+        now = int(time.time())
+        valid_after = 0
+        valid_before = now + valid_duration
+        nonce = "0x" + os.urandom(32).hex()
+
+        # EIP-712 domain
+        domain_data = {
+            "name": token_config.name,
+            "version": token_config.version,
+            "chainId": network_config.chain_id,
+            "verifyingContract": token_config.address,
+        }
+
+        # EIP-3009 types
+        types = {
+            "TransferWithAuthorization": [
+                {"name": "from", "type": "address"},
+                {"name": "to", "type": "address"},
+                {"name": "value", "type": "uint256"},
+                {"name": "validAfter", "type": "uint256"},
+                {"name": "validBefore", "type": "uint256"},
+                {"name": "nonce", "type": "bytes32"},
+            ],
+        }
+
+        # Message
+        message = {
+            "from": self._signer_address,
+            "to": pay_to,
+            "value": amount_base,
+            "validAfter": valid_after,
+            "validBefore": valid_before,
+            "nonce": nonce,
+        }
+
+        # Sign: encode_typed_data + sign_message (proven method from x402r SDK)
+        signable = encode_typed_data(
+            domain_data=domain_data,
+            message_types=types,
+            message_data=message,
+        )
+        signed = self._signer.sign_message(signable)
+        signature = signed.signature.hex()
+
+        # Build x402 payload
+        payload = {
+            "x402Version": 1,
+            "scheme": "exact",
+            "network": network_config.name,
+            "payload": {
+                "signature": "0x" + signature,
+                "authorization": {
+                    "from": self._signer_address,
+                    "to": pay_to,
+                    "value": str(amount_base),
+                    "validAfter": str(valid_after),
+                    "validBefore": str(valid_before),
+                    "nonce": nonce,
+                },
+            },
+        }
+
+        # Add token info for non-USDC tokens
+        if token_type != "usdc":
+            payload["payload"]["token"] = {
+                "address": token_config.address,
+                "symbol": token_type.upper(),
+                "eip712": {
+                    "name": token_config.name,
+                    "version": token_config.version,
+                },
+            }
+
+        # Encode to base64
+        json_bytes = json.dumps(payload).encode("utf-8")
+        return base64.b64encode(json_bytes).decode("utf-8")
