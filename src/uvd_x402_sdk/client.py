@@ -959,6 +959,14 @@ class X402Client:
                 network=chain,
                 supported_networks=get_supported_network_names(),
             )
+        if network_config.network_type != NetworkType.EVM:
+            raise UnsupportedNetworkError(
+                network=chain,
+                supported_networks=[
+                    n for n in get_supported_network_names()
+                    if get_network(n) and get_network(n).network_type == NetworkType.EVM
+                ],
+            )
 
         # Get token config
         from uvd_x402_sdk.networks.base import get_token_config

@@ -11,7 +11,7 @@ x402 Python SDK for backend payment verification and settlement. Used by servers
 ```
 src/uvd_x402_sdk/
 ├── __init__.py              # Main exports
-├── client.py                # X402Client - payment processing, negotiate_accepts(), facilitator info
+├── client.py                # X402Client - payment processing, negotiate_accepts(), facilitator info, connect_with_private_key()
 ├── config.py                # Configuration management
 ├── models.py                # Pydantic data models (PaymentPayload, SettlementAccountPayload, etc.)
 ├── exceptions.py            # Custom exceptions
@@ -28,7 +28,8 @@ src/uvd_x402_sdk/
 │   ├── solana.py            # Solana, Fogo
 │   ├── near.py              # NEAR Protocol
 │   ├── stellar.py           # Stellar
-│   └── algorand.py          # Algorand
+│   ├── algorand.py          # Algorand
+│   └── sui.py               # Sui
 └── integrations/
     ├── fastapi_integration.py
     ├── flask_integration.py
@@ -116,6 +117,19 @@ payment_requirements = {
 ```
 
 ## Key Features
+
+### Client-Side Signing (client.py)
+- `X402Client.connect_with_private_key(private_key, chain_name)` - Server-side EVM signer without browser wallet
+- `X402Client.create_authorization(pay_to, amount_usd)` - Create signed EIP-3009 X-PAYMENT headers
+- Uses `encode_typed_data()` + `sign_message()` (proven two-step signing method)
+- Requires `pip install uvd-x402-sdk[signer]` (only `eth-account`, not full `web3`)
+- EVM-only: validates chain is EVM type before signing
+
+### SKALE Base Network
+- Mainnet: `skale-base` (chainId 1187947933), Testnet: `skale-base-sepolia` (chainId 324705682)
+- EIP-712 domain name: `Bridged USDC (SKALE Bridge)` (NOT "USDC" or "USD Coin")
+- Gasless transactions (CREDIT gas token), legacy tx only (no EIP-1559)
+- No escrow support (blocked on Cancun EVM compatibility)
 
 ### ERC-8004 Trustless Agents (erc8004.py)
 - Supports 18 networks: 16 EVM + Solana + Solana-devnet
