@@ -257,29 +257,32 @@ def is_escrow_supported(chain_id: int) -> bool:
     return chain_id in ESCROW_CONTRACTS
 
 # PaymentOperator ABI (minimal, for the 5 functions we need)
+# Chain IDs using CREATE3-deployed operators (new ABI with bytes data param).
+# Existing chains (Base, Ethereum, etc.) use legacy operators with old ABI.
+CREATE3_CHAIN_IDS: set[int] = {1187947933}  # SKALE Base
+
+# PaymentInfo tuple components (shared between ABI versions)
+_PAYMENT_INFO_COMPONENTS = [
+    {"name": "operator", "type": "address"},
+    {"name": "payer", "type": "address"},
+    {"name": "receiver", "type": "address"},
+    {"name": "token", "type": "address"},
+    {"name": "maxAmount", "type": "uint120"},
+    {"name": "preApprovalExpiry", "type": "uint48"},
+    {"name": "authorizationExpiry", "type": "uint48"},
+    {"name": "refundExpiry", "type": "uint48"},
+    {"name": "minFeeBps", "type": "uint16"},
+    {"name": "maxFeeBps", "type": "uint16"},
+    {"name": "feeReceiver", "type": "address"},
+    {"name": "salt", "type": "uint256"},
+]
+
 OPERATOR_ABI = [
     {
         "type": "function",
         "name": "release",
         "inputs": [
-            {
-                "name": "paymentInfo",
-                "type": "tuple",
-                "components": [
-                    {"name": "operator", "type": "address"},
-                    {"name": "payer", "type": "address"},
-                    {"name": "receiver", "type": "address"},
-                    {"name": "token", "type": "address"},
-                    {"name": "maxAmount", "type": "uint120"},
-                    {"name": "preApprovalExpiry", "type": "uint48"},
-                    {"name": "authorizationExpiry", "type": "uint48"},
-                    {"name": "refundExpiry", "type": "uint48"},
-                    {"name": "minFeeBps", "type": "uint16"},
-                    {"name": "maxFeeBps", "type": "uint16"},
-                    {"name": "feeReceiver", "type": "address"},
-                    {"name": "salt", "type": "uint256"},
-                ],
-            },
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
             {"name": "amount", "type": "uint256"},
         ],
         "outputs": [],
@@ -289,24 +292,7 @@ OPERATOR_ABI = [
         "type": "function",
         "name": "refundInEscrow",
         "inputs": [
-            {
-                "name": "paymentInfo",
-                "type": "tuple",
-                "components": [
-                    {"name": "operator", "type": "address"},
-                    {"name": "payer", "type": "address"},
-                    {"name": "receiver", "type": "address"},
-                    {"name": "token", "type": "address"},
-                    {"name": "maxAmount", "type": "uint120"},
-                    {"name": "preApprovalExpiry", "type": "uint48"},
-                    {"name": "authorizationExpiry", "type": "uint48"},
-                    {"name": "refundExpiry", "type": "uint48"},
-                    {"name": "minFeeBps", "type": "uint16"},
-                    {"name": "maxFeeBps", "type": "uint16"},
-                    {"name": "feeReceiver", "type": "address"},
-                    {"name": "salt", "type": "uint256"},
-                ],
-            },
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
             {"name": "amount", "type": "uint120"},
         ],
         "outputs": [],
@@ -371,6 +357,62 @@ OPERATOR_ABI = [
         "stateMutability": "nonpayable",
     },
 ]
+
+# CREATE3 ABI (v2): release() and refundInEscrow() take extra 'bytes data' param.
+# Used on SKALE and future CREATE3 chains. Pass empty bytes (b"") for data.
+OPERATOR_ABI_V2 = [
+    {
+        "type": "function",
+        "name": "release",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint256"},
+            {"name": "data", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "function",
+        "name": "refundInEscrow",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint120"},
+            {"name": "data", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "function",
+        "name": "charge",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint256"},
+            {"name": "tokenCollector", "type": "address"},
+            {"name": "collectorData", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "function",
+        "name": "refundPostEscrow",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint256"},
+            {"name": "tokenCollector", "type": "address"},
+            {"name": "collectorData", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+]
+
+
+def get_operator_abi(chain_id: int) -> list:
+    """Return the correct operator ABI for a chain (v2 for CREATE3, v1 for legacy)."""
+    return OPERATOR_ABI_V2 if chain_id in CREATE3_CHAIN_IDS else OPERATOR_ABI
 
 
 # ============================================================
@@ -529,9 +571,10 @@ class AdvancedEscrowClient:
         self.account = Account.from_key(private_key)
         self.payer = self.account.address
 
+        self._is_create3 = chain_id in CREATE3_CHAIN_IDS
         self.operator_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(self.contracts["operator"]),
-            abi=OPERATOR_ABI,
+            abi=get_operator_abi(chain_id),
         )
 
     def _compute_nonce(self, payment_info: PaymentInfo) -> str:
@@ -791,6 +834,8 @@ class AdvancedEscrowClient:
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
+        if self._is_create3:
+            return self._send_tx(self.operator_contract.functions.release(pt, amt, b""))
         return self._send_tx(self.operator_contract.functions.release(pt, amt))
 
     def refund_in_escrow(self, payment_info: PaymentInfo, amount: Optional[int] = None) -> TransactionResult:
@@ -805,6 +850,8 @@ class AdvancedEscrowClient:
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
+        if self._is_create3:
+            return self._send_tx(self.operator_contract.functions.refundInEscrow(pt, amt, b""))
         return self._send_tx(self.operator_contract.functions.refundInEscrow(pt, amt))
 
     # ----------------------------------------------------------------

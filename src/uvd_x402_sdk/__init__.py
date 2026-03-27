@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.19.1"
+__version__ = "0.19.2"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -210,6 +210,9 @@ try:
         ESCROW_CONTRACTS,
         ESCROW_CHAIN_NAMES,
         OPERATOR_ABI,
+        OPERATOR_ABI_V2,
+        CREATE3_CHAIN_IDS,
+        get_operator_abi,
         DEPOSIT_LIMIT_USDC,
         get_escrow_contracts,
         get_supported_escrow_chains,
@@ -362,6 +365,9 @@ __all__ = [
     "ESCROW_CONTRACTS",
     "ESCROW_CHAIN_NAMES",
     "OPERATOR_ABI",
+    "OPERATOR_ABI_V2",
+    "CREATE3_CHAIN_IDS",
+    "get_operator_abi",
     "DEPOSIT_LIMIT_USDC",
     "get_escrow_contracts",
     "get_supported_escrow_chains",
@@ -374,7 +380,8 @@ if not ADVANCED_ESCROW_AVAILABLE:
         "AdvancedEscrowClient", "PaymentInfo", "TaskTier",
         "AuthorizationResult", "TransactionResult", "TIER_TIMINGS",
         "BASE_MAINNET_CONTRACTS", "ESCROW_CONTRACTS", "ESCROW_CHAIN_NAMES",
-        "OPERATOR_ABI", "DEPOSIT_LIMIT_USDC",
+        "OPERATOR_ABI", "OPERATOR_ABI_V2", "CREATE3_CHAIN_IDS",
+        "get_operator_abi", "DEPOSIT_LIMIT_USDC",
         "get_escrow_contracts", "get_supported_escrow_chains",
         "is_escrow_supported",
     }
