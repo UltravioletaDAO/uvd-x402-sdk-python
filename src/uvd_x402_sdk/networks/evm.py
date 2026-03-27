@@ -339,7 +339,7 @@ SCROLL = NetworkConfig(
 
 # SKALE Base (L3 on Base, gasless with CREDIT token)
 # NOTE: SKALE uses 'Bridged USDC (SKALE Bridge)' for EIP-712 domain name
-# EIP-1559 NOT supported (legacy tx only). No escrow support (Cancun EVM compat).
+# EIP-1559 NOT supported (legacy tx only). Escrow via CREATE3 contracts (v1.40.3+).
 SKALE = NetworkConfig(
     name="skale-base",
     display_name="SKALE Base",

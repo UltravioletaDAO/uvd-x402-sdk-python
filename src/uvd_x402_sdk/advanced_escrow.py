@@ -181,6 +181,15 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
         "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
         "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
     },
+    # ----- CREATE3 Networks (new deployments) -----
+    1187947933: {  # SKALE Base (gasless L3, CREDIT gas token)
+        "escrow": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+        "operator_factory": "0x3Cd5c76Fefe46CB07788Ee8f80B93B20D81941D4",
+        "token_collector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+        "protocol_fee_config": "0xf62788834C99B2E85a6891C0b46D1EB996f8f596",
+        "refund_request": "0x69e9BF2b40Ed472b55E47e9D4205d93Ed673093F",
+        "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+    },
 }
 
 # Human-readable chain names for diagnostics and error messages.
@@ -195,6 +204,7 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     42220: "Celo",
     143: "Monad",
     43114: "Avalanche",
+    1187947933: "SKALE Base",
 }
 
 # Base Mainnet contract addresses (default, backward-compatible).
@@ -490,6 +500,9 @@ class AdvancedEscrowClient:
                 # Backward-compatible default: use the legacy Base Mainnet
                 # PaymentOperator instance when no operator is specified.
                 operator_address = BASE_MAINNET_CONTRACTS["operator"]
+            if operator_address is None and chain_id == 1187947933:
+                # SKALE Base: marketplace operator (7d escrow, facilitator-as-arbiter)
+                operator_address = "0x942cDC281F5Bd7bF3fAE8973253fd708f23ef442"
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
