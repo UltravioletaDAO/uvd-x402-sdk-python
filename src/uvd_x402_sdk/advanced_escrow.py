@@ -501,8 +501,9 @@ class AdvancedEscrowClient:
                 # PaymentOperator instance when no operator is specified.
                 operator_address = BASE_MAINNET_CONTRACTS["operator"]
             if operator_address is None and chain_id == 1187947933:
-                # SKALE Base: marketplace operator (7d escrow, facilitator-as-arbiter)
-                operator_address = "0x942cDC281F5Bd7bF3fAE8973253fd708f23ef442"
+                # SKALE Base: EM operator (1300bps fee, 7d escrow, facilitator-as-arbiter)
+                # Deployed via CREATE3 factory by Execution Market (2026-03-27)
+                operator_address = "0x28c23AE8f55aDe5Ea10a5353FC40418D0c1B3d33"
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
