@@ -505,11 +505,18 @@ def is_caip2_format(network: str) -> bool:
     return ":" in network
 
 
+_NETWORK_ALIASES: dict[str, str] = {
+    "skale": "skale-base",
+    "skale-testnet": "skale-base-sepolia",
+}
+
+
 def normalize_network(network: str) -> str:
     """
     Normalize a network identifier to v1 format (network name).
 
-    Handles both v1 ("base") and v2 CAIP-2 ("eip155:8453") formats.
+    Handles both v1 ("base") and v2 CAIP-2 ("eip155:8453") formats,
+    plus common aliases (e.g. "skale" -> "skale-base").
 
     Args:
         network: Network identifier in either format
@@ -525,4 +532,5 @@ def normalize_network(network: str) -> str:
         if normalized is None:
             raise ValueError(f"Unknown CAIP-2 network: {network}")
         return normalized
-    return network.lower()
+    lowered = network.lower()
+    return _NETWORK_ALIASES.get(lowered, lowered)

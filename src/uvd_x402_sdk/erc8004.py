@@ -45,12 +45,14 @@ ERC8004_EXTENSION_ID = "8004-reputation"
 # Agent ID type: EVM uses sequential uint256, Solana uses base58 pubkey strings
 AgentId = Union[int, str]
 
-# Supported networks for ERC-8004 (18 networks: 16 EVM + 2 Solana)
+# Supported networks for ERC-8004 (20 networks: 18 EVM + 2 Solana)
 Erc8004Network = Literal[
     # EVM Mainnets
     "ethereum", "base-mainnet", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
+    "skale-base",
     # EVM Testnets
     "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji",
+    "skale-base-sepolia",
     # Solana (uses QuantuLabs 8004-solana Anchor program + ATOM Engine)
     "solana", "solana-devnet",
 ]
@@ -80,9 +82,9 @@ _TESTNET_VALIDATION = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
 _SOLANA_AGENT_REGISTRY = "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
 _SOLANA_ATOM_ENGINE = "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb"
 
-# Contract addresses per network (16 networks)
+# Contract addresses per network (20 networks: 18 EVM + 2 Solana)
 ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
-    # Mainnets (9)
+    # Mainnets (10)
     "ethereum": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
@@ -119,7 +121,11 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
     ),
-    # Testnets (7)
+    "skale-base": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+    ),
+    # Testnets (8)
     "ethereum-sepolia": Erc8004ContractAddresses(
         identity_registry=_TESTNET_IDENTITY,
         reputation_registry=_TESTNET_REPUTATION,
@@ -151,6 +157,11 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         validation_registry=_TESTNET_VALIDATION,
     ),
     "avalanche-fuji": Erc8004ContractAddresses(
+        identity_registry=_TESTNET_IDENTITY,
+        reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
+    ),
+    "skale-base-sepolia": Erc8004ContractAddresses(
         identity_registry=_TESTNET_IDENTITY,
         reputation_registry=_TESTNET_REPUTATION,
         validation_registry=_TESTNET_VALIDATION,

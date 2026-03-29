@@ -132,7 +132,7 @@ payment_requirements = {
 - No escrow support (blocked on Cancun EVM compatibility)
 
 ### ERC-8004 Trustless Agents (erc8004.py)
-- Supports 18 networks: 16 EVM + Solana + Solana-devnet
+- Supports 20 networks: 18 EVM + Solana + Solana-devnet
 - `AgentId = Union[int, str]` - EVM uses int, Solana uses base58 pubkey string
 - `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
 - Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
