@@ -372,6 +372,19 @@ class IdentityMetadataResponse(BaseModel):
         populate_by_name = True
 
 
+class IdentityByOwnerResponse(BaseModel):
+    """Response from GET /identity/{network}/owner/{address}."""
+
+    agent_id: AgentId = Field(..., alias="agentId")
+    owner: str
+    agent_uri: str = Field(..., alias="agentUri")
+    network: str
+    balance: str
+
+    class Config:
+        populate_by_name = True
+
+
 class IdentityTotalSupplyResponse(BaseModel):
     """Response from GET /identity/{network}/total-supply."""
 
@@ -471,6 +484,29 @@ class Erc8004Client:
         response = await self._client.get(url)
         response.raise_for_status()
         return AgentIdentity.model_validate(response.json())
+
+    async def get_identity_by_owner(
+        self,
+        network: Erc8004Network,
+        address: str,
+    ) -> IdentityByOwnerResponse:
+        """
+        Get the first agent identity owned by an address.
+
+        Args:
+            network: Network to query
+            address: Owner wallet address
+
+        Returns:
+            Identity info including agentId, agentUri, and balance
+
+        Raises:
+            httpx.HTTPStatusError: 404 if address owns no agents
+        """
+        url = f"{self.base_url}/identity/{network}/owner/{address}"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return IdentityByOwnerResponse.model_validate(response.json())
 
     async def resolve_agent_uri(self, agent_uri: str) -> AgentRegistrationFile:
         """
@@ -783,8 +819,10 @@ class Erc8004Client:
         x402_version: int = 1,
     ) -> RegisterAgentResponse:
         """
-        Register a new agent on the Identity Registry.
+        Register an agent on the Identity Registry.
 
+        Idempotent: if the recipient already owns an agent on the target
+        network, the existing agent is returned instead of minting a new one.
         The facilitator pays gas fees. Optionally transfer the NFT to a
         recipient address (gasless delegation).
 

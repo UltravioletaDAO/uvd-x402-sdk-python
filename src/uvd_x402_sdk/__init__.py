@@ -166,6 +166,7 @@ from uvd_x402_sdk.erc8004 import (
     SettleResponseWithProof,
     MetadataEntryParam,
     RegisterAgentResponse,
+    IdentityByOwnerResponse,
     IdentityMetadataResponse,
     IdentityTotalSupplyResponse,
     build_erc8004_payment_requirements,
