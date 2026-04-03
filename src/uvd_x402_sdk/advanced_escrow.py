@@ -61,7 +61,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import httpx
 from eth_abi import encode
@@ -70,6 +70,9 @@ from eth_account.messages import encode_typed_data
 from web3 import Web3
 
 from uvd_x402_sdk.networks import get_network_by_chain_id
+
+if TYPE_CHECKING:
+    from uvd_x402_sdk.wallet import WalletAdapter
 
 
 # ============================================================
@@ -503,8 +506,9 @@ class AdvancedEscrowClient:
 
     def __init__(
         self,
-        private_key: str,
+        private_key: Optional[str] = None,
         *,
+        wallet: Optional["WalletAdapter"] = None,
         facilitator_url: str = "https://facilitator.ultravioletadao.xyz",
         rpc_url: str = "https://mainnet.base.org",
         chain_id: int = 8453,
@@ -515,8 +519,17 @@ class AdvancedEscrowClient:
         """
         Initialize the Advanced Escrow client.
 
+        Provide exactly one of ``private_key`` or ``wallet``:
+
+        * ``private_key`` -- raw hex key (backward-compatible, existing behavior).
+        * ``wallet`` -- any :class:`~uvd_x402_sdk.wallet.WalletAdapter` instance
+          (e.g. ``EnvKeyAdapter``, ``OWSWalletAdapter``). When provided, all
+          signing operations are delegated to the adapter.
+
         Args:
-            private_key: Hex-encoded private key for signing
+            private_key: Hex-encoded private key for signing (mutually exclusive with wallet)
+            wallet: A WalletAdapter instance for signing (mutually exclusive with private_key).
+                    When provided, all signing goes through the adapter.
             facilitator_url: Facilitator endpoint URL
             rpc_url: JSON-RPC endpoint for the target chain
             chain_id: EVM chain ID (e.g. 8453 for Base, 1 for Ethereum)
@@ -526,8 +539,36 @@ class AdvancedEscrowClient:
                               the multi-chain registry (which only provides the factory).
                               Ignored when explicit ``contracts`` dict is passed.
             gas_limit: Gas limit for on-chain transactions
+
+        Raises:
+            ValueError: If neither ``private_key`` nor ``wallet`` is provided,
+                        or if both are provided simultaneously.
         """
-        self.private_key = private_key
+        # ------------------------------------------------------------------
+        # Resolve signing strategy: raw key vs WalletAdapter
+        # ------------------------------------------------------------------
+        if private_key and wallet:
+            raise ValueError(
+                "Provide either 'private_key' or 'wallet', not both."
+            )
+        if not private_key and not wallet:
+            raise ValueError(
+                "Either 'private_key' or 'wallet' must be provided."
+            )
+
+        self._wallet: Optional["WalletAdapter"] = wallet
+
+        if private_key:
+            self.private_key: Optional[str] = private_key
+            self.account: Optional[Account] = Account.from_key(private_key)
+            self.payer: str = self.account.address
+        else:
+            # WalletAdapter mode -- no raw key stored on the client.
+            self.private_key = None
+            self.account = None
+            assert wallet is not None  # mypy guard
+            self.payer = wallet.get_address()
+
         self.facilitator_url = facilitator_url.rstrip("/")
         self.chain_id = chain_id
         self.gas_limit = gas_limit
@@ -568,8 +609,6 @@ class AdvancedEscrowClient:
             self.contracts = BASE_MAINNET_CONTRACTS
 
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
-        self.account = Account.from_key(private_key)
-        self.payer = self.account.address
 
         self._is_create3 = chain_id in CREATE3_CHAIN_IDS
         self.operator_contract = self.w3.eth.contract(
@@ -615,7 +654,11 @@ class AdvancedEscrowClient:
         return "0x" + raw.hex().removeprefix("0x")
 
     def _sign_erc3009(self, auth: dict) -> str:
-        """Sign ReceiveWithAuthorization for ERC-3009."""
+        """Sign ReceiveWithAuthorization for ERC-3009.
+
+        Uses the WalletAdapter.sign_typed_data() when a wallet is configured,
+        otherwise falls back to the raw eth_account signing path.
+        """
         network_config = get_network_by_chain_id(self.chain_id)
         if network_config is not None:
             domain_name = network_config.usdc_domain_name
@@ -653,6 +696,18 @@ class AdvancedEscrowClient:
             "validBefore": int(auth["validBefore"]),
             "nonce": nonce_raw,
         }
+
+        # --- WalletAdapter path ---
+        if self._wallet is not None:
+            result = self._wallet.sign_typed_data({
+                "domain": domain,
+                "types": types,
+                "message": message,
+            })
+            return result["signature"]
+
+        # --- Legacy raw-key path ---
+        assert self.account is not None
         signable = encode_typed_data(domain_data=domain, message_types=types, message_data=message)
         signed = self.account.sign_message(signable)
         sig_hex = signed.signature.hex()
@@ -682,7 +737,11 @@ class AdvancedEscrowClient:
         )
 
     def _send_tx(self, func_call) -> TransactionResult:
-        """Build, sign, and send a transaction."""
+        """Build, sign, and send a transaction.
+
+        Signing is delegated to the WalletAdapter when configured,
+        otherwise uses the raw private key via web3.eth.account.
+        """
         try:
             gas_price = self.w3.eth.gas_price
             tx = func_call.build_transaction({
@@ -692,8 +751,20 @@ class AdvancedEscrowClient:
                 "maxFeePerGas": gas_price * 2,
                 "maxPriorityFeePerGas": gas_price,
             })
-            signed = self.w3.eth.account.sign_transaction(tx, self.private_key)
-            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+
+            # --- WalletAdapter path ---
+            if self._wallet is not None:
+                raw_hex = self._wallet.sign_transaction(tx)
+                raw_bytes = bytes.fromhex(raw_hex.removeprefix("0x"))
+                tx_hash = self.w3.eth.send_raw_transaction(raw_bytes)
+            else:
+                # --- Legacy raw-key path ---
+                assert self.private_key is not None
+                signed = self.w3.eth.account.sign_transaction(tx, self.private_key)
+                # web3 >= 7 uses raw_transaction, older versions use rawTransaction
+                raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+                tx_hash = self.w3.eth.send_raw_transaction(raw)
+
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
             if receipt["status"] != 1:

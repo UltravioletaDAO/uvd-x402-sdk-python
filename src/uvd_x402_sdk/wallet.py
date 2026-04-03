@@ -199,6 +199,23 @@ class WalletAdapter(Protocol):
         """
         ...
 
+    def sign_transaction(self, tx: dict) -> str:
+        """
+        Sign a raw EVM transaction and return the signed raw transaction hex.
+
+        The wallet receives an unsigned transaction dict (with fields like
+        ``to``, ``value``, ``data``, ``nonce``, ``gas``, ``maxFeePerGas``, etc.)
+        and returns the RLP-encoded signed transaction as a hex string,
+        ready to be sent via ``eth_sendRawTransaction``.
+
+        Args:
+            tx: Unsigned transaction dict (web3.py format).
+
+        Returns:
+            Hex-encoded signed raw transaction (0x-prefixed).
+        """
+        ...
+
 
 # =============================================================================
 # EnvKeyAdapter
@@ -310,6 +327,22 @@ class EnvKeyAdapter:
             r="0x" + signed.r.to_bytes(32, "big").hex(),
             s="0x" + signed.s.to_bytes(32, "big").hex(),
         )
+
+    def sign_transaction(self, tx: dict) -> str:
+        """
+        Sign a raw EVM transaction.
+
+        Args:
+            tx: Unsigned transaction dict (web3.py format).
+
+        Returns:
+            Hex-encoded signed raw transaction (0x-prefixed).
+        """
+        signed = self._account.sign_transaction(tx)
+        # eth-account >= 0.12 uses raw_transaction, older versions use rawTransaction
+        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+        raw_hex = raw.hex()
+        return raw_hex if raw_hex.startswith("0x") else "0x" + raw_hex
 
     def sign_eip3009(self, params: EIP3009Params) -> EIP3009Authorization:
         """
@@ -520,6 +553,26 @@ class OWSWalletAdapter:
             r=result.r,
             s=result.s,
         )
+
+    def sign_transaction(self, tx: dict) -> str:
+        """
+        Sign a raw EVM transaction via OWS.
+
+        Delegates transaction signing to the OWS vault. The private key is
+        decrypted in memory, used to sign, then immediately wiped.
+
+        Args:
+            tx: Unsigned transaction dict (web3.py format).
+
+        Returns:
+            Hex-encoded signed raw transaction (0x-prefixed).
+        """
+        result = self._ows.sign_transaction(
+            wallet_name=self._wallet_name,
+            transaction=tx,
+            passphrase=self._passphrase,
+        )
+        return result.raw_transaction
 
     def sign_eip3009(self, params: EIP3009Params) -> EIP3009Authorization:
         """
