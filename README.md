@@ -4,7 +4,7 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.16.0**: Bazaar Discovery, facilitator info endpoints (`get_version`, `get_supported`, `get_blacklist`), escrow state queries, bug fixes.
+**New in v0.20.0**: WalletAdapter protocol (`EnvKeyAdapter`, `OWSWalletAdapter`), `[wallet]` install extra, eth-account bumped to >=0.11.0.
 
 ## Features
 
@@ -21,6 +21,7 @@ Accept **gasless stablecoin payments** across **21 blockchain networks** with a 
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 - **Bazaar Discovery**: Register and discover paid resources across the x402 network
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
+- **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
 
 ## Quick Start (5 Lines)
 
@@ -192,6 +193,10 @@ def premium_endpoint(payment_result):
 ```bash
 # Core SDK (minimal dependencies)
 pip install uvd-x402-sdk
+
+# With wallet signing support (EIP-3009)
+pip install uvd-x402-sdk[wallet]     # WalletAdapter + EnvKeyAdapter
+pip install uvd-x402-sdk[signer]     # Alias for wallet (backward compat)
 
 # With framework support
 pip install uvd-x402-sdk[flask]      # Flask integration
@@ -1222,6 +1227,58 @@ async with BazaarClient() as bazaar:
 
 ---
 
+## WalletAdapter
+
+Abstract wallet interface for signing EIP-3009 authorizations. Use `EnvKeyAdapter` for raw private keys or `OWSWalletAdapter` for Open Wallet Standard (future).
+
+```bash
+pip install uvd-x402-sdk[wallet]
+```
+
+```python
+from uvd_x402_sdk import EnvKeyAdapter
+
+# Reads WALLET_PRIVATE_KEY or PRIVATE_KEY from env
+wallet = EnvKeyAdapter()
+print(wallet.get_address())  # 0x...
+
+# Sign an EIP-3009 ReceiveWithAuthorization
+auth = wallet.sign_eip3009({
+    "to": "0xRecipient...",
+    "amount_usdc": 0.10,
+    "network": "base",
+})
+print(auth["signature"])  # Use as X-PAYMENT header
+
+# Sign arbitrary EIP-712 typed data
+result = wallet.sign_typed_data({
+    "domain": {"name": "MyDapp", "version": "1", "chainId": 8453},
+    "types": {"Message": [{"name": "content", "type": "string"}]},
+    "message": {"content": "Hello"},
+})
+
+# Sign a personal message (EIP-191)
+sig = wallet.sign_message("Hello, world!")
+```
+
+### Custom WalletAdapter
+
+Any class implementing the `WalletAdapter` protocol can be used:
+
+```python
+from uvd_x402_sdk import WalletAdapter
+
+class MyWallet:
+    def get_address(self) -> str: ...
+    def sign_message(self, message: str) -> str: ...
+    def sign_typed_data(self, typed_data: dict) -> "SignedTypedData": ...
+    def sign_eip3009(self, params: "EIP3009Params") -> "EIP3009Authorization": ...
+
+assert isinstance(MyWallet(), WalletAdapter)  # True (runtime_checkable)
+```
+
+---
+
 ## Facilitator Info
 
 Query the facilitator for version, supported networks, blacklist, and health.
@@ -1401,6 +1458,18 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.20.0 (2026-04-02)
+
+- **WalletAdapter Protocol**: Abstract wallet interface for signing operations (`wallet.py`)
+  - `WalletAdapter` - runtime-checkable Protocol for any wallet backend
+  - `EnvKeyAdapter` - raw private key from env var or direct param
+  - `OWSWalletAdapter` - stub for Open Wallet Standard (not yet on PyPI)
+  - `EIP3009Params`, `EIP3009Authorization`, `SignedTypedData` TypedDict types
+  - Auto-detects USDC contract addresses and EIP-712 domain names per network
+  - Uses proven `encode_typed_data()` + `sign_message()` signing pattern
+- **New `[wallet]` install extra**: `pip install uvd-x402-sdk[wallet]` (eth-account>=0.11.0)
+- **eth-account bumped** to `>=0.11.0` across all extras (`signer`, `wallet`, `web3`)
 
 ### v0.16.0 (2026-03-03)
 

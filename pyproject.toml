@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.19.4"
+version = "0.20.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 21 blockchains (including Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -56,11 +56,14 @@ dependencies = [
 
 [project.optional-dependencies]
 signer = [
-    "eth-account>=0.10.0",
+    "eth-account>=0.11.0",
+]
+wallet = [
+    "eth-account>=0.11.0",
 ]
 web3 = [
     "web3>=6.0.0",
-    "eth-account>=0.10.0",
+    "eth-account>=0.11.0",
 ]
 flask = [
     "flask>=2.0.0",
@@ -79,7 +82,7 @@ algorand = [
     "py-algorand-sdk>=2.0.0",
 ]
 all = [
-    "uvd-x402-sdk[signer,web3,flask,fastapi,django,aws,algorand]",
+    "uvd-x402-sdk[signer,wallet,web3,flask,fastapi,django,aws,algorand]",
 ]
 dev = [
     "pytest>=7.0.0",

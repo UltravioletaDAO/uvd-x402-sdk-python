@@ -46,7 +46,7 @@ Supported Networks (21 total):
 - Sui (2): Sui mainnet, Sui testnet
 """
 
-__version__ = "0.19.2"
+__version__ = "0.20.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -195,6 +195,16 @@ from uvd_x402_sdk.discovery import (
     BazaarClient,
     DiscoveryResource,
     DiscoveryResponse,
+)
+
+# Wallet Adapters
+from uvd_x402_sdk.wallet import (
+    WalletAdapter,
+    EnvKeyAdapter,
+    OWSWalletAdapter,
+    EIP3009Params,
+    EIP3009Authorization,
+    SignedTypedData,
 )
 
 # Advanced Escrow (PaymentOperator - on-chain escrow)
@@ -354,6 +364,13 @@ __all__ = [
     "BazaarClient",
     "DiscoveryResource",
     "DiscoveryResponse",
+    # Wallet Adapters
+    "WalletAdapter",
+    "EnvKeyAdapter",
+    "OWSWalletAdapter",
+    "EIP3009Params",
+    "EIP3009Authorization",
+    "SignedTypedData",
     # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
     "ADVANCED_ESCROW_AVAILABLE",
     "AdvancedEscrowClient",

@@ -12,6 +12,7 @@ x402 Python SDK for backend payment verification and settlement. Used by servers
 src/uvd_x402_sdk/
 ├── __init__.py              # Main exports
 ├── client.py                # X402Client - payment processing, negotiate_accepts(), facilitator info, connect_with_private_key()
+├── wallet.py                # WalletAdapter Protocol + EnvKeyAdapter + OWSWalletAdapter
 ├── config.py                # Configuration management
 ├── models.py                # Pydantic data models (PaymentPayload, SettlementAccountPayload, etc.)
 ├── exceptions.py            # Custom exceptions
@@ -117,6 +118,15 @@ payment_requirements = {
 ```
 
 ## Key Features
+
+### WalletAdapter Protocol (wallet.py)
+- `WalletAdapter` - Abstract Protocol interface for any wallet backend
+- `EnvKeyAdapter` - Uses raw private key from env var or direct param
+- `OWSWalletAdapter` - Stub for Open Wallet Standard (not yet on PyPI)
+- `EIP3009Params` / `EIP3009Authorization` / `SignedTypedData` - TypedDict types
+- Requires `pip install uvd-x402-sdk[wallet]` or `uvd-x402-sdk[signer]`
+- Auto-detects USDC contract addresses and EIP-712 domain names per network
+- Uses same proven `encode_typed_data()` + `sign_message()` pattern as advanced_escrow.py
 
 ### Client-Side Signing (client.py)
 - `X402Client.connect_with_private_key(private_key, chain_name)` - Server-side EVM signer without browser wallet
