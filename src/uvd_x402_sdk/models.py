@@ -209,8 +209,8 @@ class PaymentPayload(BaseModel):
     """
 
     x402Version: int = Field(default=1, description="x402 protocol version (1 or 2)")
-    scheme: Literal["exact"] = Field(
-        default="exact", description="Payment scheme (only 'exact' supported)"
+    scheme: Literal["exact", "escrow", "commerce"] = Field(
+        default="exact", description="Payment scheme"
     )
     network: str = Field(..., description="Network identifier (v1: 'base', v2: 'eip155:8453')")
     payload: Dict[str, Any] = Field(..., description="Network-specific payload content")
@@ -225,8 +225,8 @@ class PaymentPayload(BaseModel):
     @field_validator("scheme")
     @classmethod
     def validate_scheme(cls, v: str) -> str:
-        if v != "exact":
-            raise ValueError(f"Unsupported scheme: {v}. Only 'exact' is supported")
+        if v not in {"exact", "escrow", "commerce"}:
+            raise ValueError(f"Unsupported scheme: {v}. Supported: exact, escrow, commerce")
         return v
 
     def is_v2(self) -> bool:
@@ -279,7 +279,7 @@ class PaymentRequirements(BaseModel):
     Supports both x402 v1 and v2 formats.
     """
 
-    scheme: Literal["exact"] = Field(default="exact")
+    scheme: Literal["exact", "escrow", "commerce"] = Field(default="exact")
     network: str = Field(..., description="Network identifier (v1 or CAIP-2)")
     maxAmountRequired: str = Field(..., description="Expected amount in token base units")
     resource: str = Field(..., description="Resource being purchased (URL or description)")
@@ -323,7 +323,7 @@ class PaymentRequirementsV2(BaseModel):
     """
 
     x402Version: int = Field(default=2, description="Protocol version (must be 2)")
-    scheme: Literal["exact"] = Field(default="exact")
+    scheme: Literal["exact", "escrow", "commerce"] = Field(default="exact")
     resource: str = Field(..., description="Resource being purchased")
     description: str = Field(..., description="Human-readable description")
     mimeType: str = Field(default="application/json")

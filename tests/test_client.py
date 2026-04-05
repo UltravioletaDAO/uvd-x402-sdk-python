@@ -269,3 +269,55 @@ class TestResponseHelpers:
         assert response["amount"] == "10.00"
         assert response["message"] == "Premium access required"
         assert response["customField"] == "customValue"
+
+
+class TestSchemeValidation:
+    """Tests for scheme validation (exact, escrow, commerce)."""
+
+    def test_commerce_scheme_accepted(self):
+        """Commerce scheme should pass validation."""
+        payload = PaymentPayload(
+            x402Version=1,
+            scheme="commerce",
+            network="base",
+            payload={"signature": "0x", "authorization": {
+                "from": "0x1", "to": "0x2", "value": "1000000",
+                "validAfter": "0", "validBefore": "9999999999", "nonce": "0x1",
+            }},
+        )
+        assert payload.scheme == "commerce"
+
+    def test_escrow_scheme_accepted(self):
+        """Escrow scheme should pass validation."""
+        payload = PaymentPayload(
+            x402Version=1,
+            scheme="escrow",
+            network="base",
+            payload={"signature": "0x", "authorization": {
+                "from": "0x1", "to": "0x2", "value": "1000000",
+                "validAfter": "0", "validBefore": "9999999999", "nonce": "0x1",
+            }},
+        )
+        assert payload.scheme == "escrow"
+
+    def test_exact_scheme_still_default(self):
+        """Default scheme should remain 'exact'."""
+        payload = PaymentPayload(
+            network="base",
+            payload={"signature": "0x", "authorization": {
+                "from": "0x1", "to": "0x2", "value": "1000000",
+                "validAfter": "0", "validBefore": "9999999999", "nonce": "0x1",
+            }},
+        )
+        assert payload.scheme == "exact"
+
+    def test_invalid_scheme_rejected(self):
+        """Unknown schemes should fail validation."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            PaymentPayload(
+                x402Version=1,
+                scheme="unknown",
+                network="base",
+                payload={},
+            )
