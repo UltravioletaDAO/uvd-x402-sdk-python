@@ -4,7 +4,7 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.20.0**: WalletAdapter protocol (`EnvKeyAdapter`, `OWSWalletAdapter`), `[wallet]` install extra, eth-account bumped to >=0.11.0.
+**New in v0.22.0**: Commerce scheme support (`"exact"`, `"escrow"`, `"commerce"`), AdvancedEscrowClient WalletAdapter, server-side signing via `connect_with_private_key()`, ERC-8004 expanded to 20 networks.
 
 ## Features
 
@@ -16,8 +16,10 @@ Accept **gasless stablecoin payments** across **21 blockchain networks** with a 
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
-- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (EVM + Solana)
-- **Escrow & Refunds**: Hold payments in escrow with dispute resolution
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (20 networks: 18 EVM + Solana + Solana-devnet)
+- **Escrow & Refunds**: Hold payments in escrow with dispute resolution (11 EVM chains + SKALE via CREATE3)
+- **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
+- **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 - **Bazaar Discovery**: Register and discover paid resources across the x402 network
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
@@ -1106,7 +1108,7 @@ except X402Error as e:
 
 ## ERC-8004 Trustless Agents
 
-Build verifiable on-chain reputation for AI agents and services. Supports **18 networks** (16 EVM + Solana + Solana devnet).
+Build verifiable on-chain reputation for AI agents and services. Supports **20 networks** (18 EVM + Solana + Solana devnet).
 
 On EVM networks, agent IDs are sequential `uint256` integers. On Solana, agent IDs are base58 pubkey strings (NFT asset addresses). The `AgentId` type (`Union[int, str]`) handles both.
 
@@ -1144,6 +1146,48 @@ async with Erc8004Client() as client:
         response_text="Thank you for your feedback!",
     )
 ```
+
+## Server-Side Signing
+
+Create signed EIP-3009 payment headers from your backend without a browser wallet. Useful for server-to-server x402 payments, automated agents, and testing.
+
+```bash
+pip install uvd-x402-sdk[signer]
+```
+
+```python
+from decimal import Decimal
+from uvd_x402_sdk import X402Client
+
+client = X402Client(recipient_address="0xMerchant...")
+
+# Connect with a private key (reads from env or direct param)
+address = client.connect_with_private_key(
+    private_key="YOUR_PRIVATE_KEY",  # or use os.environ
+    chain_name="base",               # EVM chain to sign for
+)
+print(f"Connected: {address}")
+
+# Create a signed X-PAYMENT header
+x_payment = client.create_authorization(
+    pay_to="0xMerchant...",
+    amount_usd=Decimal("1.00"),
+    chain_name="base",
+    token_type="usdc",
+    valid_duration=3600,  # 1 hour
+)
+
+# Use the header in requests
+import requests
+response = requests.get(
+    "https://api.example.com/premium",
+    headers={"X-PAYMENT": x_payment},
+)
+```
+
+> **Note**: EVM-only. The SDK validates the chain is EVM type before signing.
+
+---
 
 ## `/accepts` Negotiation
 
@@ -1459,6 +1503,19 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.22.0 (2026-04-05)
+
+- **Commerce Scheme**: `PaymentPayload`, `PaymentRequirements`, and `PaymentRequirementsV2` now accept `scheme: "exact" | "escrow" | "commerce"`
+  - Aligns with facilitator v1.43.0 which serves `"commerce"` as alias for `"escrow"` (Execution Market / arbiter integrations)
+  - Default scheme remains `"exact"` -- no breaking changes
+  - Updated scheme validator with clear error messages
+
+### v0.21.0 (2026-04-03)
+
+- **AdvancedEscrowClient WalletAdapter**: `AdvancedEscrowClient` now accepts `WalletAdapter` protocol for signing
+  - Enables Open Wallet Standard (OWS) integration for escrow operations
+  - Backward compatible: still supports direct private key usage
+
 ### v0.20.0 (2026-04-02)
 
 - **WalletAdapter Protocol**: Abstract wallet interface for signing operations (`wallet.py`)
@@ -1470,6 +1527,34 @@ MIT License - see LICENSE file.
   - Uses proven `encode_typed_data()` + `sign_message()` signing pattern
 - **New `[wallet]` install extra**: `pip install uvd-x402-sdk[wallet]` (eth-account>=0.11.0)
 - **eth-account bumped** to `>=0.11.0` across all extras (`signer`, `wallet`, `web3`)
+
+### v0.19.4 (2026-03-29)
+
+- **ERC-8004**: Added `get_identity_by_owner()` method for looking up agent identity by owner address
+- **ERC-8004**: Added documentation for register idempotency behavior
+
+### v0.19.3 (2026-03-29)
+
+- **ERC-8004**: Added SKALE to ERC-8004 networks (20 networks total: 18 EVM + Solana + Solana-devnet)
+
+### v0.19.2 (2026-03-27)
+
+- **Escrow**: Added `OPERATOR_ABI_V2` with `bytes data` parameter for CREATE3 chains
+- **Escrow**: Updated SKALE default operator to EM-deployed address
+
+### v0.18.0 (2026-03-25)
+
+- **Server-Side Signing**: New `X402Client.connect_with_private_key()` for backend EIP-3009 signing
+  - Creates an EVM signer from a private key without browser wallet
+  - Requires `pip install uvd-x402-sdk[signer]` (only `eth-account`, not full `web3`)
+- **EVM-only guard**: `create_authorization()` now validates chain is EVM type before signing
+
+### v0.17.0 (2026-03-22)
+
+- **SKALE Base Network**: Added `skale-base` (mainnet, chainId 1187947933) and `skale-base-sepolia` (testnet, chainId 324705682)
+  - Gasless transactions (CREDIT gas token), legacy tx only (no EIP-1559)
+  - EIP-712 domain name: `"Bridged USDC (SKALE Bridge)"`
+- **SKALE Base Escrow**: Added escrow support via CREATE3 contracts
 
 ### v0.16.0 (2026-03-03)
 
@@ -1501,6 +1586,19 @@ MIT License - see LICENSE file.
   - Returns enriched requirements with feePayer, tokens, escrow config
   - Faremeter middleware compatibility
 - **Solana Smart Wallet Support**: Transparent CPI inner instruction scanning on server side
+
+### v0.14.0 (2026-02-20)
+
+- **Per-Network Settle Timeout**: Different timeout per chain (L1 vs L2)
+- **On-Chain Fallback**: Post-timeout on-chain state check before returning failure
+- **Escrow**: Updated Ethereum mainnet contract addresses from Ali's redeploy
+- **Escrow**: Fixed Optimism `token_collector` and `protocol_fee_config` addresses (corrected to CREATE2)
+
+### v0.13.2 (2026-02-13)
+
+- **Escrow**: Dynamic EIP-712 domain resolution per-chain (was hardcoded "USD Coin"/"2")
+- **Escrow**: Added Optimism (chain_id=10) to `ESCROW_CONTRACTS`
+- **Fix**: HexBytes compatibility with web3 >= 6.x and eth_account >= 0.10.0
 
 ### v0.6.0 (2026-01-30)
 
