@@ -210,12 +210,9 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     1187947933: "SKALE Base",
 }
 
-# Base Mainnet contract addresses (default, backward-compatible).
-# NOTE: "operator" is a legacy key pointing to a previously deployed
-# PaymentOperator instance.  New integrations should use "operator_factory"
-# from ESCROW_CONTRACTS and deploy their own operator via the factory.
+# Base Mainnet contract addresses (Fase 5 PaymentOperator).
 BASE_MAINNET_CONTRACTS = {
-    "operator": "0xa06958D93135BEd7e43893897C0d9fA931EF051C",
+    "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
     "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
     "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
     "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
@@ -584,9 +581,8 @@ class AdvancedEscrowClient:
                 # PaymentOperator instance when no operator is specified.
                 operator_address = BASE_MAINNET_CONTRACTS["operator"]
             if operator_address is None and chain_id == 1187947933:
-                # SKALE Base: EM operator (1300bps fee, 7d escrow, facilitator-as-arbiter)
-                # Deployed via CREATE3 factory by Execution Market (2026-03-27)
-                operator_address = "0x28c23AE8f55aDe5Ea10a5353FC40418D0c1B3d33"
+                # SKALE Base: EM PaymentOperator Fase 5 (1300bps fee, facilitator-as-arbiter)
+                operator_address = "0x43E46d4587fCCc382285C52012227555ed78D183"
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
