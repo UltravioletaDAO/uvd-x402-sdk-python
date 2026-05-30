@@ -58,6 +58,7 @@ class X402Config:
         recipient_solana: Recipient address for Solana/SVM chains (also used for Fogo)
         recipient_near: Recipient account for NEAR
         recipient_stellar: Recipient address for Stellar
+        recipient_xrpl: Recipient address for XRP Ledger (classic r... address)
         facilitator_solana: Solana/SVM facilitator address (fee payer)
         verify_timeout: Timeout for verify requests (seconds)
         settle_timeout: Timeout for settle requests (seconds)
@@ -76,6 +77,7 @@ class X402Config:
     recipient_solana: str = ""  # Also used for Fogo and other SVM chains
     recipient_near: str = ""
     recipient_stellar: str = ""
+    recipient_xrpl: str = ""  # XRP Ledger recipient (classic r... address)
 
     # Solana/SVM facilitator (fee payer) - same for all SVM chains
     facilitator_solana: str = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
@@ -84,7 +86,7 @@ class X402Config:
     verify_timeout: float = 30.0
     settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
 
-    # Network configuration - All 21 networks
+    # Network configuration - All 23 networks
     supported_networks: List[str] = field(default_factory=lambda: [
         # EVM chains (13)
         "base", "ethereum", "polygon", "arbitrum", "optimism",
@@ -100,6 +102,8 @@ class X402Config:
         "algorand", "algorand-testnet",
         # Sui (2)
         "sui", "sui-testnet",
+        # XRPL (2) - native XRP
+        "xrpl-mainnet", "xrpl-testnet",
     ])
 
     # Per-network recipient overrides
@@ -126,6 +130,7 @@ class X402Config:
             self.recipient_solana,
             self.recipient_near,
             self.recipient_stellar,
+            self.recipient_xrpl,
         ]):
             raise ValueError("At least one recipient address is required")
 
@@ -140,6 +145,7 @@ class X402Config:
             X402_RECIPIENT_SOLANA: Solana recipient address
             X402_RECIPIENT_NEAR: NEAR recipient account
             X402_RECIPIENT_STELLAR: Stellar recipient address
+            X402_RECIPIENT_XRPL: XRP Ledger recipient address
             X402_FACILITATOR_SOLANA: Solana fee payer address
             X402_VERIFY_TIMEOUT: Verify request timeout
             X402_SETTLE_TIMEOUT: Settle request timeout
@@ -155,6 +161,7 @@ class X402Config:
             recipient_solana=os.environ.get("X402_RECIPIENT_SOLANA", ""),
             recipient_near=os.environ.get("X402_RECIPIENT_NEAR", ""),
             recipient_stellar=os.environ.get("X402_RECIPIENT_STELLAR", ""),
+            recipient_xrpl=os.environ.get("X402_RECIPIENT_XRPL", ""),
             facilitator_solana=os.environ.get(
                 "X402_FACILITATOR_SOLANA",
                 "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
@@ -196,6 +203,8 @@ class X402Config:
             return self.recipient_near
         elif network_config.network_type == NetworkType.STELLAR:
             return self.recipient_stellar
+        elif network_config.network_type == NetworkType.XRPL:
+            return self.recipient_xrpl
         else:
             return self.recipient_evm
 
@@ -244,6 +253,7 @@ class X402Config:
             "recipient_solana": self.recipient_solana,
             "recipient_near": self.recipient_near,
             "recipient_stellar": self.recipient_stellar,
+            "recipient_xrpl": self.recipient_xrpl,
             "facilitator_solana": self.facilitator_solana,
             "verify_timeout": self.verify_timeout,
             "settle_timeout": self.settle_timeout,

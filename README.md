@@ -2,14 +2,14 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **21 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **23 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 **New in v0.22.0**: Commerce scheme support (`"exact"`, `"escrow"`, `"commerce"`), AdvancedEscrowClient WalletAdapter, server-side signing via `connect_with_private_key()`, ERC-8004 expanded to 20 networks.
 
 ## Features
 
-- **21 Networks**: EVM chains (13 including Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, and Sui
-- **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains)
+- **23 Networks**: EVM chains (13 including Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
+- **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains); XRPL settles in native XRP
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
@@ -57,6 +57,7 @@ config = X402Config(
     recipient_stellar="G...YourStellarAddress",   # For Stellar
     recipient_algorand="YOUR_ALGO_ADDRESS...",    # For Algorand
     recipient_sui="0xYourSuiAddress...",          # For Sui
+    recipient_xrpl="r...YourXRPLAddress",         # For XRP Ledger (native XRP)
 )
 
 client = X402Client(config=config)
@@ -179,6 +180,8 @@ def premium_endpoint(payment_result):
 | Algorand Testnet | Algorand | - | `algorand:testnet` | Active |
 | Sui | Sui | - | `sui:mainnet` | Active |
 | Sui Testnet | Sui | - | `sui:testnet` | Active |
+| XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl-mainnet` | Active |
+| XRP Ledger Testnet | XRPL | - | _(no CAIP-2)_ `xrpl-testnet` | Active |
 
 ### Supported Tokens
 
@@ -764,6 +767,7 @@ X402_RECIPIENT_EVM=0xYourEVMWallet
 X402_RECIPIENT_SOLANA=YourSolanaAddress
 X402_RECIPIENT_NEAR=your-account.near
 X402_RECIPIENT_STELLAR=G...YourStellarAddress
+X402_RECIPIENT_XRPL=r...YourXRPLAddress
 
 # Optional
 X402_FACILITATOR_SOLANA=F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq
@@ -1502,6 +1506,15 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.24.0 (2026-05-30)
+- Added XRP Ledger support: `xrpl-mainnet` and `xrpl-testnet` (native XRP, 6 decimals/drops)
+- New `NetworkType.XRPL` and `networks/xrpl.py` (drops/XRP helpers, address validation)
+- XRPL settles via pre-signed Payment transaction blobs; the facilitator submits and pays the fee
+- Added `recipient_xrpl` to `X402Config` and the `X402_RECIPIENT_XRPL` env var
+- Exported `XRPL_FEE_PAYER_MAINNET` / `XRPL_FEE_PAYER_TESTNET`
+- XRPL has no CAIP-2 form; only the v1 network strings are recognized
+- Now supports 23 blockchains across 7 network families
 
 ### v0.22.0 (2026-04-05)
 

@@ -62,6 +62,10 @@ STELLAR_FEE_PAYER_TESTNET = "GBBFZMLUJEZVI32EN4XA2KPP445XIBTMTRBLYWFIL556RDTHS2O
 SUI_FEE_PAYER_MAINNET = "0xe7bbf2b13f7d72714760aa16e024fa1b35a978793f9893d0568a4fbf356a764a"
 SUI_FEE_PAYER_TESTNET = "0xabbd16a2fab2a502c9cfe835195a6fc7d70bfc27cffb40b8b286b52a97006e67"
 
+# XRPL fee payer addresses (facilitator submits pre-signed Payment tx, pays fee)
+XRPL_FEE_PAYER_MAINNET = "rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp"
+XRPL_FEE_PAYER_TESTNET = "rGhTioKAFHe75KgVnQtacRiKFuPv28Wbwk"
+
 
 # =============================================================================
 # EVM Facilitator Addresses (for reference - EVM uses EIP-3009, no fee payer needed)
@@ -103,6 +107,10 @@ _FEE_PAYER_BY_NETWORK: Dict[str, str] = {
     "sui": SUI_FEE_PAYER_MAINNET,
     "sui-mainnet": SUI_FEE_PAYER_MAINNET,
     "sui-testnet": SUI_FEE_PAYER_TESTNET,
+    # XRPL (native XRP) - XRPL has no CAIP-2 form, v1 names only
+    "xrpl": XRPL_FEE_PAYER_MAINNET,
+    "xrpl-mainnet": XRPL_FEE_PAYER_MAINNET,
+    "xrpl-testnet": XRPL_FEE_PAYER_TESTNET,
 }
 
 # CAIP-2 format mappings (x402 v2)

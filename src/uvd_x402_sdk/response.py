@@ -70,6 +70,8 @@ def create_402_response(
         recipients["near"] = config.recipient_near
     if config.recipient_stellar:
         recipients["stellar"] = config.recipient_stellar
+    if config.recipient_xrpl:
+        recipients["xrpl"] = config.recipient_xrpl
 
     # Get supported chain IDs and network names
     supported_chains: List[Union[int, str]] = []

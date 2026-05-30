@@ -2,8 +2,8 @@
 uvd-x402-sdk: Python SDK for x402 payments via Ultravioleta DAO facilitator.
 
 This SDK enables developers to easily integrate x402 cryptocurrency payments
-into their Python applications with support for 21 blockchain networks across
-6 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui).
+into their Python applications with support for 23 blockchain networks across
+7 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui, XRPL).
 
 The SDK automatically handles facilitator configuration - users don't need to
 configure fee payer addresses or other facilitator details manually.
@@ -36,7 +36,7 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (21 total):
+Supported Networks (23 total):
 - EVM (13): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
             HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia
 - SVM (2): Solana, Fogo
@@ -44,9 +44,10 @@ Supported Networks (21 total):
 - Stellar (1): Stellar
 - Algorand (2): Algorand mainnet, Algorand testnet
 - Sui (2): Sui mainnet, Sui testnet
+- XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.23.0"
+__version__ = "0.24.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -137,6 +138,8 @@ from uvd_x402_sdk.facilitator import (
     STELLAR_FEE_PAYER_TESTNET,
     SUI_FEE_PAYER_MAINNET,
     SUI_FEE_PAYER_TESTNET,
+    XRPL_FEE_PAYER_MAINNET,
+    XRPL_FEE_PAYER_TESTNET,
     # EVM facilitator addresses (for reference)
     EVM_FACILITATOR_MAINNET,
     EVM_FACILITATOR_TESTNET,
@@ -322,6 +325,8 @@ __all__ = [
     "STELLAR_FEE_PAYER_TESTNET",
     "SUI_FEE_PAYER_MAINNET",
     "SUI_FEE_PAYER_TESTNET",
+    "XRPL_FEE_PAYER_MAINNET",
+    "XRPL_FEE_PAYER_TESTNET",
     "EVM_FACILITATOR_MAINNET",
     "EVM_FACILITATOR_TESTNET",
     "get_fee_payer",

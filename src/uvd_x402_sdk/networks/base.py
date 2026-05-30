@@ -58,6 +58,7 @@ class NetworkType(Enum):
     - STELLAR: Soroban Authorization Entry XDR
     - ALGORAND: ASA (Algorand Standard Assets) transfer via signed transaction
     - SUI: Sui sponsored transactions (Move-based programmable transactions)
+    - XRPL: XRP Ledger pre-signed Payment transaction blobs (native XRP)
 
     Note: SOLANA is deprecated, use SVM instead for Solana-compatible chains.
     """
@@ -69,6 +70,7 @@ class NetworkType(Enum):
     STELLAR = "stellar"
     ALGORAND = "algorand"  # Algorand ASA transfers
     SUI = "sui"  # Sui Move VM chains (sponsored transactions)
+    XRPL = "xrpl"  # XRP Ledger (native XRP, pre-signed Payment tx blobs)
 
     @classmethod
     def is_svm(cls, network_type: "NetworkType") -> bool:
@@ -119,7 +121,8 @@ class NetworkConfig:
         """Validate configuration after initialization."""
         if not self.name:
             raise ValueError("Network name is required")
-        if not self.usdc_address:
+        # Native-asset chains (e.g. XRPL with native XRP) have no token contract.
+        if not self.usdc_address and self.network_type != NetworkType.XRPL:
             raise ValueError(f"USDC address is required for network {self.name}")
 
     def get_token_amount(self, usd_amount: float) -> int:

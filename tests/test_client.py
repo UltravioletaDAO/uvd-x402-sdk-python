@@ -203,6 +203,71 @@ class TestNetworkRegistry:
         assert retrieved.chain_id == 99999
 
 
+class TestXRPLNetwork:
+    """Tests for XRP Ledger (XRPL) network support."""
+
+    def test_xrpl_networks_registered(self):
+        """Both XRPL networks are registered with correct properties."""
+        from uvd_x402_sdk.networks import get_network, NetworkType
+
+        mainnet = get_network("xrpl-mainnet")
+        assert mainnet is not None
+        assert mainnet.network_type == NetworkType.XRPL
+        assert mainnet.chain_id == 0
+        assert mainnet.usdc_decimals == 6  # drops
+        assert mainnet.usdc_address == ""  # native XRP, no token contract
+
+        testnet = get_network("xrpl-testnet")
+        assert testnet is not None
+        assert testnet.network_type == NetworkType.XRPL
+
+    def test_xrpl_validate_network(self):
+        """Client accepts XRPL networks."""
+        client = X402Client(
+            recipient_address="0x1234567890123456789012345678901234567890"
+        )
+        assert client.validate_network("xrpl-mainnet") == "xrpl-mainnet"
+        assert client.validate_network("xrpl-testnet") == "xrpl-testnet"
+
+    def test_xrpl_fee_payers(self):
+        """XRPL fee payer addresses resolve to the canonical facilitator wallets."""
+        from uvd_x402_sdk.facilitator import (
+            get_fee_payer,
+            requires_fee_payer,
+            XRPL_FEE_PAYER_MAINNET,
+            XRPL_FEE_PAYER_TESTNET,
+        )
+
+        assert get_fee_payer("xrpl-mainnet") == "rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp"
+        assert get_fee_payer("xrpl-testnet") == "rGhTioKAFHe75KgVnQtacRiKFuPv28Wbwk"
+        assert XRPL_FEE_PAYER_MAINNET == "rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp"
+        assert XRPL_FEE_PAYER_TESTNET == "rGhTioKAFHe75KgVnQtacRiKFuPv28Wbwk"
+        # XRPL is non-EVM, so it requires a fee payer
+        assert requires_fee_payer("xrpl-mainnet") is True
+
+    def test_xrpl_has_no_caip2(self):
+        """XRPL has no CAIP-2 representation; only v1 strings are recognized."""
+        from uvd_x402_sdk.networks import to_caip2_network
+
+        assert to_caip2_network("xrpl-mainnet") is None
+        assert to_caip2_network("xrpl-testnet") is None
+
+    def test_xrpl_recipient_resolution(self):
+        """Config returns the XRPL recipient for XRPL networks."""
+        config = X402Config(
+            recipient_evm="0xEVM",
+            recipient_xrpl="rMERCHANT00000000000000000000000",
+        )
+        assert config.get_recipient("xrpl-mainnet") == "rMERCHANT00000000000000000000000"
+
+    def test_xrpl_drops_conversion(self):
+        """drops_to_xrp and xrp_to_drops round-trip correctly."""
+        from uvd_x402_sdk.networks.xrpl import drops_to_xrp, xrp_to_drops
+
+        assert xrp_to_drops(1.0) == 1_000_000
+        assert drops_to_xrp(1_000_000) == 1.0
+
+
 class TestPaymentResult:
     """Tests for PaymentResult model."""
 
