@@ -592,6 +592,50 @@ payload = client.extract_payload(x_payment_header)
 validate_sui_payload(payload.payload)  # Raises ValueError if invalid
 ```
 
+### XRPL (XRP Ledger)
+
+XRPL uses the t54 scheme. The user signs a Payment transaction sending native XRP to the merchant; the facilitator submits it to the ledger and pays the network fee. Payment details (`payTo`, `amount`, `asset`) travel in `PaymentRequirements`/`extra`, so the payload carries only the signed transaction blob.
+
+```python
+from uvd_x402_sdk import X402Client, X402Config
+
+config = X402Config(
+    recipient_xrpl="r...YourXRPLAddress",
+    supported_networks=["xrpl-mainnet"],
+)
+
+client = X402Client(config=config)
+result = client.process_payment(x_payment_header, Decimal("1.00"))
+
+# XRPL payload carries only the signed Payment transaction blob (hex)
+payload = client.extract_payload(x_payment_header)
+xrpl_data = payload.get_xrpl_payload()
+print(f"Signed tx blob: {xrpl_data.signed_tx_blob[:50]}...")
+```
+
+#### XRPL-Specific Utilities
+
+```python
+from uvd_x402_sdk.networks.xrpl import (
+    drops_to_xrp,
+    xrp_to_drops,
+    is_valid_xrpl_address,
+    get_xrpl_fee_payer,
+)
+from uvd_x402_sdk import XRPL_FEE_PAYER_MAINNET, XRPL_FEE_PAYER_TESTNET
+
+# Native XRP uses 6 decimals (drops): 1 XRP = 1,000,000 drops
+assert xrp_to_drops(1.5) == 1_500_000
+assert drops_to_xrp(1_000_000) == 1.0
+
+# Validate classic addresses (start with 'r', base58, 25-35 chars)
+assert is_valid_xrpl_address("rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp")
+
+# Get the facilitator fee payer (submits the tx + pays the network fee)
+fee_payer = get_xrpl_fee_payer("xrpl-mainnet")
+print(f"XRPL fee payer: {fee_payer}")  # rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp
+```
+
 ---
 
 ## x402 v1 vs v2
@@ -844,6 +888,10 @@ from uvd_x402_sdk import (
     # Sui
     SUI_FEE_PAYER_MAINNET,       # 0xe7bbf2b13f7d72714760aa16e024fa1b35a978793f9893d0568a4fbf356a764a
     SUI_FEE_PAYER_TESTNET,       # 0xabbd16a2fab2a502c9cfe835195a6fc7d70bfc27cffb40b8b286b52a97006e67
+
+    # XRPL
+    XRPL_FEE_PAYER_MAINNET,      # rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp
+    XRPL_FEE_PAYER_TESTNET,      # rGhTioKAFHe75KgVnQtacRiKFuPv28Wbwk
 
     # Helper function
     get_fee_payer,               # Get fee payer for any network
@@ -1400,6 +1448,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 | Stellar | Auth entry (XDR) | Wraps in fee-bump transaction |
 | Algorand | ASA transfer tx | Signs fee tx + submits atomic group |
 | Sui | Programmable tx block | Sponsors gas + submits transaction |
+| XRPL | Payment tx (signed blob) | Submits tx + pays network fee |
 
 ---
 
@@ -1426,6 +1475,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 - **Stellar**: Users sign Soroban authorization entries only
 - **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
 - **Sui**: Users sign programmable transaction blocks (facilitator sponsors gas)
+- **XRPL**: Users sign a native-XRP Payment transaction (facilitator submits it and pays the ledger fee)
 - The facilitator submits and pays for all on-chain transactions
 - All signatures include expiration timestamps (`validBefore`) for replay protection
 - Nonces prevent double-spending of authorizations
