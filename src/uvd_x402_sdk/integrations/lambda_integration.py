@@ -117,6 +117,7 @@ class LambdaX402:
         recipient_solana: str = "",
         recipient_near: str = "",
         recipient_stellar: str = "",
+        recipient_xrpl: str = "",
         **kwargs: Any,
     ) -> None:
         """
@@ -128,6 +129,7 @@ class LambdaX402:
             recipient_solana: Solana recipient address
             recipient_near: NEAR recipient account
             recipient_stellar: Stellar recipient address
+            recipient_xrpl: XRP Ledger recipient address
             **kwargs: Additional config parameters
         """
         if config:
@@ -138,6 +140,7 @@ class LambdaX402:
                 recipient_solana=recipient_solana,
                 recipient_near=recipient_near,
                 recipient_stellar=recipient_stellar,
+                recipient_xrpl=recipient_xrpl,
                 **kwargs,
             )
         self._client = X402Client(config=self._config)

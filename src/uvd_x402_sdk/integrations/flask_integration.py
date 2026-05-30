@@ -88,6 +88,7 @@ class FlaskX402:
                 recipient_solana=app.config.get("X402_RECIPIENT_SOLANA", ""),
                 recipient_near=app.config.get("X402_RECIPIENT_NEAR", ""),
                 recipient_stellar=app.config.get("X402_RECIPIENT_STELLAR", ""),
+                recipient_xrpl=app.config.get("X402_RECIPIENT_XRPL", ""),
             )
 
         self._client = X402Client(config=self._config)

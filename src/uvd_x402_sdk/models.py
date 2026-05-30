@@ -137,6 +137,33 @@ class StellarPayloadContent(BaseModel):
         populate_by_name = True
 
 
+class XRPLPayloadContent(BaseModel):
+    """
+    XRPL (XRP Ledger) payment payload using the t54 scheme.
+
+    Contains a fully-signed XRPL Payment transaction blob (hex). The user signs
+    the Payment transaction (sending native XRP to the merchant); the facilitator
+    submits it to the ledger and pays the network fee.
+
+    Payment fields (payTo, amount, asset, issuer, invoiceId, sourceTag) live in
+    PaymentRequirements/extra, NOT in this payload. The only field carried here is
+    the signed transaction blob.
+
+    Native XRP uses 6 decimals (drops): 1 XRP = 1,000,000 drops.
+    XRPL has no CAIP-2 representation; use the v1 network strings
+    "xrpl-mainnet" / "xrpl-testnet".
+    """
+
+    signed_tx_blob: str = Field(
+        ...,
+        alias="signedTxBlob",
+        description="Hex-encoded fully-signed XRPL Payment transaction blob",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
 class SuiPayloadContent(BaseModel):
     """
     Sui payment payload using sponsored transactions.
@@ -190,6 +217,7 @@ PayloadContent = Union[
     NEARPayloadContent,
     StellarPayloadContent,
     SuiPayloadContent,
+    XRPLPayloadContent,
 ]
 
 
@@ -206,6 +234,7 @@ class PaymentPayload(BaseModel):
     - SVM: Contains partially-signed transaction (Solana, Fogo, etc.)
     - NEAR: Contains SignedDelegateAction (NEP-366)
     - Stellar: Contains Soroban authorization entry XDR
+    - XRPL: Contains a fully-signed XRPL Payment transaction blob (t54 scheme)
     """
 
     x402Version: int = Field(default=1, description="x402 protocol version (1 or 2)")
@@ -269,6 +298,10 @@ class PaymentPayload(BaseModel):
     def get_sui_payload(self) -> SuiPayloadContent:
         """Parse payload as Sui format (sponsored transaction)."""
         return SuiPayloadContent(**self.payload)
+
+    def get_xrpl_payload(self) -> XRPLPayloadContent:
+        """Parse payload as XRPL format (t54 signed Payment tx blob)."""
+        return XRPLPayloadContent(**self.payload)
 
 
 class PaymentRequirements(BaseModel):
@@ -455,7 +488,7 @@ class Payment402Response(BaseModel):
     recipient: str = Field(..., description="Default recipient address (EVM)")
     recipients: Optional[Dict[str, str]] = Field(
         None,
-        description="Network-specific recipients (evm, solana, near, stellar)",
+        description="Network-specific recipients (evm, solana, near, stellar, xrpl)",
     )
     facilitator: Optional[str] = Field(
         None, description="Solana facilitator address (fee payer)"

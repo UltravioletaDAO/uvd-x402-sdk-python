@@ -41,6 +41,7 @@ def _get_config_from_settings() -> X402Config:
         recipient_solana=getattr(settings, "X402_RECIPIENT_SOLANA", ""),
         recipient_near=getattr(settings, "X402_RECIPIENT_NEAR", ""),
         recipient_stellar=getattr(settings, "X402_RECIPIENT_STELLAR", ""),
+        recipient_xrpl=getattr(settings, "X402_RECIPIENT_XRPL", ""),
         facilitator_solana=getattr(
             settings,
             "X402_FACILITATOR_SOLANA",
