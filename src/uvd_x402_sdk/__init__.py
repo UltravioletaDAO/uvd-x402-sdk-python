@@ -232,6 +232,11 @@ try:
         get_escrow_contracts,
         get_supported_escrow_chains,
         is_escrow_supported,
+        retainer_timings,
+        RETAINER_PRE_APPROVAL_SECONDS,
+        RETAINER_AUTH_CAP_SECONDS,
+        RETAINER_REFUND_AFTER_AUTH_SECONDS,
+        UINT48_MAX,
     )
     ADVANCED_ESCROW_AVAILABLE = True
 except ImportError:
@@ -397,6 +402,11 @@ __all__ = [
     "get_escrow_contracts",
     "get_supported_escrow_chains",
     "is_escrow_supported",
+    "retainer_timings",
+    "RETAINER_PRE_APPROVAL_SECONDS",
+    "RETAINER_AUTH_CAP_SECONDS",
+    "RETAINER_REFUND_AFTER_AUTH_SECONDS",
+    "UINT48_MAX",
 ]
 
 # Conditionally remove Advanced Escrow names from __all__ if not available
@@ -409,5 +419,8 @@ if not ADVANCED_ESCROW_AVAILABLE:
         "get_operator_abi", "DEPOSIT_LIMIT_USDC",
         "get_escrow_contracts", "get_supported_escrow_chains",
         "is_escrow_supported",
+        "retainer_timings", "RETAINER_PRE_APPROVAL_SECONDS",
+        "RETAINER_AUTH_CAP_SECONDS", "RETAINER_REFUND_AFTER_AUTH_SECONDS",
+        "UINT48_MAX",
     }
     __all__ = [n for n in __all__ if n not in _advanced_names]

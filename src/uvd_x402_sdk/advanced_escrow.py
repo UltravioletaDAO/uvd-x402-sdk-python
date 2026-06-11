@@ -16,7 +16,8 @@ Gasless facilitator-proxied flows (facilitator pays gas, v1.32.0+):
 7. REFUND VIA FACILITATOR     - Gasless refund through POST /settle action:"refundInEscrow"
 8. QUERY ESCROW STATE         - Read-only escrow state via POST /escrow/state (no gas)
 
-Contract deposit limit: $100 USDC per deposit (enforced on-chain).
+Contract deposit limit: $100,000 USDC per authorize on Base mainnet, $1,000 on
+Base Sepolia (UsdcTvlLimit condition — verified on-chain 2026-06-10).
 Dispute resolution: use refund_in_escrow() (keep funds in escrow, arbiter decides).
 
 Contract mapping:
@@ -85,9 +86,16 @@ PAYMENT_INFO_TYPEHASH = bytes.fromhex(
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
-# Contract deposit limit (enforced by PaymentOperator condition).
-# As of 2026-02-03, commerce-payments contracts enforce $100 max per deposit.
-DEPOSIT_LIMIT_USDC = 100_000_000  # $100 in atomic units (6 decimals)
+# Contract deposit limit (enforced on-chain by the operator's UsdcTvlLimit
+# AUTHORIZE condition). Verified on-chain 2026-06-10 (Execution Market
+# retainers Task 0.1, contracts/scripts/check_tvl_limit.ts): LIMIT() is
+# $100,000 USDC on Base mainnet and $1,000 USDC on Base Sepolia. Semantics:
+# check() requires USDC.balanceOf(ESCROW) + amount <= LIMIT, and the
+# AuthCaptureEscrow singleton's balance is 0 in normal operation (funds rest
+# in per-operator TokenStores), so this is effectively a PER-AUTHORIZE cap,
+# not a binding global TVL. The previous value here ($100) was a 1000x
+# misreading of the Base mainnet limit.
+DEPOSIT_LIMIT_USDC = 100_000_000_000  # $100,000 in atomic units (6 dec), Base mainnet
 
 # ============================================================
 # Multi-chain Escrow Contract Registry
@@ -427,14 +435,71 @@ class TaskTier(str, Enum):
     STANDARD = "standard"  # $5-$50: 2h accept, 24h complete, 7d dispute
     PREMIUM = "premium"  # $50-$200: 4h accept, 48h complete, 14d dispute
     ENTERPRISE = "enterprise"  # $200+: 24h accept, 7d complete, 30d dispute
+    RETAINER = "retainer"  # fixed-term contracts: dynamic per-epoch expiries
 
+
+# RETAINER tier (fixed-term contracts / Execution Market retainers):
+# one escrow per epoch, where each epoch escrow needs
+#   authorizationExpiry = end of ITS epoch + review window + dispute buffer
+# so "auth"/"refund" cannot be static — compute them per epoch with
+# retainer_timings() and pass the result to build_payment_info(timings=...).
+RETAINER_PRE_APPROVAL_SECONDS = 259_200  # 72h to complete the funding ceremony
+RETAINER_AUTH_CAP_SECONDS = 34_560_000  # hard cap: 400 days per epoch escrow
+RETAINER_REFUND_AFTER_AUTH_SECONDS = 2_592_000  # refund window: 30d post-auth
+
+# PaymentInfo expiry fields (preApprovalExpiry/authorizationExpiry/refundExpiry)
+# are uint48 on-chain — absolute timestamps must never exceed this.
+UINT48_MAX = 2**48 - 1
 
 TIER_TIMINGS = {
     TaskTier.MICRO: {"pre": 3600, "auth": 7200, "refund": 86400},
     TaskTier.STANDARD: {"pre": 7200, "auth": 86400, "refund": 604800},
     TaskTier.PREMIUM: {"pre": 14400, "auth": 172800, "refund": 1209600},
     TaskTier.ENTERPRISE: {"pre": 86400, "auth": 604800, "refund": 2592000},
+    # "auth"/"refund" are dynamic per epoch (None = must use retainer_timings()).
+    TaskTier.RETAINER: {
+        "pre": RETAINER_PRE_APPROVAL_SECONDS,
+        "auth": None,
+        "refund": None,
+    },
 }
+
+
+def retainer_timings(auth_seconds: int) -> dict:
+    """
+    Build a TIER_TIMINGS-shaped dict for ONE epoch escrow of a RETAINER contract.
+
+    Args:
+        auth_seconds: Seconds from now until the authorizationExpiry of THIS
+            epoch — i.e. (seconds until the epoch ends) + review window +
+            dispute buffer. Computed per epoch by the caller.
+
+    Returns:
+        {"pre": ..., "auth": ..., "refund": ...} offsets in seconds, suitable
+        for ``build_payment_info(tier=TaskTier.RETAINER, timings=...)``.
+
+    Raises:
+        ValueError: If auth_seconds does not exceed the 72h pre-approval
+            window, or exceeds the 400-day cap. Exceeding the cap fails loudly
+            on purpose: silently clamping would make the escrow reclaimable
+            (post-authorizationExpiry safety valve) BEFORE the epoch closes.
+    """
+    if auth_seconds <= RETAINER_PRE_APPROVAL_SECONDS:
+        raise ValueError(
+            f"auth_seconds ({auth_seconds}) must exceed the pre-approval "
+            f"window ({RETAINER_PRE_APPROVAL_SECONDS}s = 72h)"
+        )
+    if auth_seconds > RETAINER_AUTH_CAP_SECONDS:
+        raise ValueError(
+            f"auth_seconds ({auth_seconds}) exceeds the RETAINER cap of "
+            f"{RETAINER_AUTH_CAP_SECONDS}s (400 days). Shorten the term or "
+            f"split the contract."
+        )
+    return {
+        "pre": RETAINER_PRE_APPROVAL_SECONDS,
+        "auth": auth_seconds,
+        "refund": auth_seconds + RETAINER_REFUND_AFTER_AUTH_SECONDS,
+    }
 
 
 @dataclass
@@ -776,6 +841,7 @@ class AdvancedEscrowClient:
         amount: int,
         *,
         tier: TaskTier = TaskTier.STANDARD,
+        timings: Optional[dict] = None,
         salt: Optional[str] = None,
         min_fee_bps: int = 0,
         max_fee_bps: int = 800,
@@ -787,21 +853,49 @@ class AdvancedEscrowClient:
             receiver: Worker's wallet address
             amount: Amount in token atomic units (e.g., 5_000_000 for $5 USDC)
             tier: Task tier (determines timing parameters)
+            timings: Explicit ``{"pre", "auth", "refund"}`` offsets in seconds
+                from now, overriding ``TIER_TIMINGS[tier]``. REQUIRED for
+                ``TaskTier.RETAINER``, whose expiries are dynamic per epoch —
+                build them with :func:`retainer_timings`.
             salt: Random salt (auto-generated if not provided)
             min_fee_bps: Minimum fee in basis points
             max_fee_bps: Maximum fee in basis points
+
+        Raises:
+            ValueError: If the tier has dynamic timings (RETAINER) and no
+                ``timings`` was provided, or if a resulting absolute expiry
+                would overflow the on-chain uint48 expiry fields.
         """
         now = int(time.time())
-        t = TIER_TIMINGS[tier]
+        t = timings if timings is not None else TIER_TIMINGS[tier]
+
+        if t.get("pre") is None or t.get("auth") is None or t.get("refund") is None:
+            raise ValueError(
+                f"Tier '{getattr(tier, 'value', tier)}' has dynamic per-epoch "
+                "expiries: build them with retainer_timings(auth_seconds) and "
+                "pass timings=..."
+            )
+
+        pre_approval_expiry = now + t["pre"]
+        authorization_expiry = now + t["auth"]
+        refund_expiry = now + t["refund"]
+
+        # PaymentInfo expiry fields are uint48 on-chain — never overflow them.
+        if max(pre_approval_expiry, authorization_expiry, refund_expiry) > UINT48_MAX:
+            raise ValueError(
+                "PaymentInfo expiry exceeds uint48 max "
+                f"({UINT48_MAX}): pre={pre_approval_expiry}, "
+                f"auth={authorization_expiry}, refund={refund_expiry}"
+            )
 
         return PaymentInfo(
             operator=self.contracts["operator"],
             receiver=receiver,
             token=self.contracts["usdc"],
             max_amount=amount,
-            pre_approval_expiry=now + t["pre"],
-            authorization_expiry=now + t["auth"],
-            refund_expiry=now + t["refund"],
+            pre_approval_expiry=pre_approval_expiry,
+            authorization_expiry=authorization_expiry,
+            refund_expiry=refund_expiry,
             min_fee_bps=min_fee_bps,
             max_fee_bps=max_fee_bps,
             fee_receiver=self.contracts["operator"],
