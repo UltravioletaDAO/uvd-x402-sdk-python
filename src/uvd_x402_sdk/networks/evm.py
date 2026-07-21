@@ -8,13 +8,17 @@ Important EIP-712 domain considerations:
 - Most chains use 'USD Coin' as the domain name
 - Celo, HyperEVM, Unichain, Monad use 'USDC' as the domain name
 - SKALE Base uses 'Bridged USDC (SKALE Bridge)' as the domain name
+- Robinhood Chain settles in Paxos USDG (domain 'Global Dollar', version '1').
+  USDG's on-chain version() getter REVERTS, so this domain can never be
+  resolved on-chain and MUST be sent in PaymentRequirements.extra.
 
 Multi-token support:
-- USDC: All chains (6 decimals)
+- USDC: All chains except Robinhood (6 decimals)
 - EURC: Ethereum, Base, Avalanche (6 decimals)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
 - USDT: Arbitrum, Optimism, Celo, Monad (6 decimals) - USDT0 omnichain via LayerZero
+- USDG: Robinhood, Robinhood Testnet (6 decimals) - Paxos Global Dollar
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -384,6 +388,57 @@ SKALE_TESTNET = NetworkConfig(
     },
 )
 
+# Robinhood Chain (Arbitrum Orbit L2, gas ETH, EIP-1559 supported)
+# Settlement stablecoin is Paxos USDG (NOT USDC). There is no USDC on this chain.
+# CRITICAL: USDG's on-chain version() getter REVERTS, so the EIP-712 domain
+# {name: "Global Dollar", version: "1"} can NEVER be resolved on-chain and MUST
+# be sent by the client in PaymentRequirements.extra.
+ROBINHOOD = NetworkConfig(
+    name="robinhood",
+    display_name="Robinhood Chain",
+    network_type=NetworkType.EVM,
+    chain_id=4663,
+    usdc_address="0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",  # USDG (primary asset)
+    usdc_decimals=6,
+    usdc_domain_name="Global Dollar",  # USDG domain; version() reverts on-chain
+    usdc_domain_version="1",
+    rpc_url="https://rpc.mainnet.chain.robinhood.com",
+    default_token="usdg",
+    enabled=True,
+    tokens={
+        "usdg": TokenConfig(
+            address="0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+            decimals=6,
+            name="Global Dollar",
+            version="1",
+        ),
+    },
+)
+
+# Robinhood Chain Testnet
+# Same USDG domain ("Global Dollar" / version "1") as mainnet.
+ROBINHOOD_TESTNET = NetworkConfig(
+    name="robinhood-testnet",
+    display_name="Robinhood Chain Testnet",
+    network_type=NetworkType.EVM,
+    chain_id=46630,
+    usdc_address="0x7E955252E15c84f5768B83c41a71F9eba181802F",  # USDG (primary asset)
+    usdc_decimals=6,
+    usdc_domain_name="Global Dollar",
+    usdc_domain_version="1",
+    rpc_url="https://rpc.testnet.chain.robinhood.com",
+    default_token="usdg",
+    enabled=True,
+    tokens={
+        "usdg": TokenConfig(
+            address="0x7E955252E15c84f5768B83c41a71F9eba181802F",
+            decimals=6,
+            name="Global Dollar",
+            version="1",
+        ),
+    },
+)
+
 # =============================================================================
 # Register all EVM networks
 # =============================================================================
@@ -402,6 +457,8 @@ _EVM_NETWORKS = [
     SCROLL,
     SKALE,
     SKALE_TESTNET,
+    ROBINHOOD,
+    ROBINHOOD_TESTNET,
 ]
 
 for network in _EVM_NETWORKS:
@@ -424,6 +481,11 @@ def get_usdc_domain_name(network_name: str) -> str:
     # SKALE Base uses bridged USDC with a unique domain name
     skale_domain_networks = {"skale-base", "skale-base-sepolia"}
 
+    # Robinhood Chain settles in Paxos USDG (domain 'Global Dollar'), not USDC
+    robinhood_domain_networks = {"robinhood", "robinhood-testnet"}
+
+    if network_name.lower() in robinhood_domain_networks:
+        return "Global Dollar"
     if network_name.lower() in skale_domain_networks:
         return "Bridged USDC (SKALE Bridge)"
     if network_name.lower() in usdc_domain_networks:

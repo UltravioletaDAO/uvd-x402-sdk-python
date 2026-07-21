@@ -2,14 +2,14 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **23 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **25 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.22.0**: Commerce scheme support (`"exact"`, `"escrow"`, `"commerce"`), AdvancedEscrowClient WalletAdapter, server-side signing via `connect_with_private_key()`, ERC-8004 expanded to 20 networks.
+**New in v0.26.0**: Robinhood Chain support (`robinhood` / `robinhood-testnet`, chain IDs 4663 / 46630), settling in Paxos **USDG** (EIP-712 domain `Global Dollar` version `1`, sent via `extra` since `version()` reverts on-chain).
 
 ## Features
 
-- **23 Networks**: EVM chains (13 including Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
-- **5 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT (EVM chains); XRPL settles in native XRP
+- **25 Networks**: EVM chains (15 including Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
+- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
@@ -172,6 +172,8 @@ def premium_endpoint(payment_result):
 | Scroll | EVM | 534352 | `eip155:534352` | Active |
 | SKALE | EVM | 1187947933 | `eip155:1187947933` | Active |
 | SKALE Testnet | EVM | 324705682 | `eip155:324705682` | Active |
+| Robinhood | EVM | 4663 | `eip155:4663` | Active |
+| Robinhood Testnet | EVM | 46630 | `eip155:46630` | Active |
 | Solana | SVM | - | `solana:5eykt...` | Active |
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
@@ -187,11 +189,14 @@ def premium_endpoint(payment_result):
 
 | Token | Networks | Decimals |
 |-------|----------|----------|
-| USDC | All networks | 6 |
+| USDC | All networks except Robinhood | 6 |
 | EURC | Ethereum, Base, Avalanche | 6 |
 | AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui | 6 |
 | PYUSD | Ethereum | 6 |
 | USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |
+| USDG | Robinhood, Robinhood Testnet | 6 |
+
+> **Robinhood Chain settles in Paxos USDG, not USDC.** USDG's on-chain `version()` getter reverts, so clients MUST send the EIP-712 domain `{"name": "Global Dollar", "version": "1"}` in `PaymentRequirements.extra`. The SDK carries this automatically for the `robinhood` / `robinhood-testnet` networks.
 
 ## Installation
 
@@ -1556,6 +1561,15 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.26.0 (2026-07-21)
+- Added Robinhood Chain support: `robinhood` (chain ID 4663) and `robinhood-testnet` (chain ID 46630), Arbitrum Orbit L2s with ETH gas
+- Settlement stablecoin is Paxos **USDG** (Global Dollar), NOT USDC -- there is no USDC on Robinhood Chain
+- New `usdg` token type; USDG uses 6 decimals and EIP-712 domain `{name: "Global Dollar", version: "1"}`
+- USDG's on-chain `version()` reverts, so the SDK always carries the domain via `extra` (never resolved on-chain)
+- Added `default_token` field to `NetworkConfig` so a network can declare a primary settlement asset other than USDC
+- CAIP-2 mappings: `eip155:4663` (mainnet) and `eip155:46630` (testnet)
+- Now supports 25 blockchains across 7 network families
 
 ### v0.24.0 (2026-05-30)
 - Added XRP Ledger support: `xrpl-mainnet` and `xrpl-testnet` (native XRP, 6 decimals/drops)

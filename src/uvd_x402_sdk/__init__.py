@@ -36,9 +36,10 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (23 total):
-- EVM (13): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
-            HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia
+Supported Networks (25 total):
+- EVM (15): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
+            HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia,
+            Robinhood, Robinhood Testnet
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar
@@ -47,7 +48,7 @@ Supported Networks (23 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.25.0"
+__version__ = "0.26.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client

@@ -23,10 +23,11 @@ from typing import Dict, List, Literal, Optional, Any
 # - ausd: Agora USD (Agora Finance) - 6 decimals
 # - pyusd: PayPal USD (PayPal/Paxos) - 6 decimals
 # - usdt: Tether USD (USDT0 omnichain via LayerZero) - 6 decimals
-TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "usdt"]
+# - usdg: Global Dollar (Paxos USDG) - 6 decimals - default asset on Robinhood Chain
+TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg"]
 
 # All supported token types
-ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "usdt"]
+ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg"]
 
 
 @dataclass
@@ -99,6 +100,9 @@ class NetworkConfig:
         usdc_domain_version: EIP-712 domain version (EVM only)
         rpc_url: Default RPC endpoint
         enabled: Whether network is currently enabled
+        default_token: Primary settlement token for the network (defaults to
+            'usdc'; e.g. 'usdg' for Robinhood Chain which settles in Paxos USDG).
+            The usdc_* fields above hold this token's address/domain.
         tokens: Multi-token configurations (EVM chains only, maps token type to config)
         extra_config: Additional network-specific configuration
     """
@@ -114,6 +118,7 @@ class NetworkConfig:
     rpc_url: str = ""
     enabled: bool = True
     settle_timeout_seconds: float = 90.0  # Per-network settle timeout (Eth L1=900, L2s=90)
+    default_token: TokenType = "usdc"
     tokens: Dict[TokenType, TokenConfig] = field(default_factory=dict)
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
@@ -288,8 +293,10 @@ def get_token_config(network_name: str, token_type: TokenType = "usdc") -> Optio
     if token_type in network.tokens:
         return network.tokens[token_type]
 
-    # Fall back to USDC config for backward compatibility
-    if token_type == "usdc":
+    # Fall back to the network's primary settlement token, derived from the
+    # usdc_* fields. Covers both classic USDC and networks whose default token
+    # is not Circle USDC (e.g. Robinhood -> USDG / "Global Dollar").
+    if token_type == "usdc" or token_type == network.default_token:
         return TokenConfig(
             address=network.usdc_address,
             decimals=network.usdc_decimals,
@@ -321,9 +328,11 @@ def get_supported_tokens(network_name: str) -> List[TokenType]:
     # Get tokens from the tokens dict
     tokens: List[TokenType] = list(network.tokens.keys())
 
-    # Always include 'usdc' if the network has USDC configured
-    if "usdc" not in tokens and network.usdc_address:
-        tokens.insert(0, "usdc")
+    # Always include the network's default settlement token (usually USDC,
+    # but e.g. USDG on Robinhood) if the network has a primary asset configured
+    default_token = network.default_token
+    if default_token not in tokens and network.usdc_address:
+        tokens.insert(0, default_token)
 
     return tokens
 
@@ -402,6 +411,8 @@ _NETWORK_TO_CAIP2 = {
     "scroll": "eip155:534352",
     "skale-base": "eip155:1187947933",
     "skale-base-sepolia": "eip155:324705682",
+    "robinhood": "eip155:4663",
+    "robinhood-testnet": "eip155:46630",
     # SVM chains (solana:genesisHash first 32 chars)
     "solana": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
     "fogo": "solana:fogo",  # Placeholder - update when known
