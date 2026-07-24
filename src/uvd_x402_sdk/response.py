@@ -72,6 +72,8 @@ def create_402_response(
         recipients["stellar"] = config.recipient_stellar
     if config.recipient_xrpl:
         recipients["xrpl"] = config.recipient_xrpl
+    if config.recipient_casper:
+        recipients["casper"] = config.recipient_casper
 
     # Get supported chain IDs and network names
     supported_chains: List[Union[int, str]] = []

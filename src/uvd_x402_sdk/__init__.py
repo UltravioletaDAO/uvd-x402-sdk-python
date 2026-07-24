@@ -2,8 +2,8 @@
 uvd-x402-sdk: Python SDK for x402 payments via Ultravioleta DAO facilitator.
 
 This SDK enables developers to easily integrate x402 cryptocurrency payments
-into their Python applications with support for 23 blockchain networks across
-7 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui, XRPL).
+into their Python applications with support for 27 blockchain networks across
+8 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui, XRPL, Casper).
 
 The SDK automatically handles facilitator configuration - users don't need to
 configure fee payer addresses or other facilitator details manually.
@@ -36,7 +36,7 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (25 total):
+Supported Networks (27 total):
 - EVM (15): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
             HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia,
             Robinhood, Robinhood Testnet
@@ -46,6 +46,7 @@ Supported Networks (25 total):
 - Algorand (2): Algorand mainnet, Algorand testnet
 - Sui (2): Sui mainnet, Sui testnet
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
+- Casper (2): Casper mainnet, Casper testnet (wCSPR, CEP-18)
 """
 
 __version__ = "0.26.0"
@@ -76,6 +77,8 @@ from uvd_x402_sdk.models import (
     StellarPayloadContent,
     SuiPayloadContent,
     XRPLPayloadContent,
+    CasperAuthorization,
+    CasperPayloadContent,
     # Requirements models (v1)
     PaymentRequirements,
     # Requirements models (v2)
@@ -142,6 +145,8 @@ from uvd_x402_sdk.facilitator import (
     SUI_FEE_PAYER_TESTNET,
     XRPL_FEE_PAYER_MAINNET,
     XRPL_FEE_PAYER_TESTNET,
+    # Casper facilitator URL (CSPR.cloud)
+    CASPER_FACILITATOR_URL,
     # EVM facilitator addresses (for reference)
     EVM_FACILITATOR_MAINNET,
     EVM_FACILITATOR_TESTNET,
@@ -271,6 +276,8 @@ __all__ = [
     "StellarPayloadContent",
     "SuiPayloadContent",
     "XRPLPayloadContent",
+    "CasperAuthorization",
+    "CasperPayloadContent",
     # Requirements models
     "PaymentRequirements",
     "PaymentOption",
@@ -330,6 +337,7 @@ __all__ = [
     "SUI_FEE_PAYER_TESTNET",
     "XRPL_FEE_PAYER_MAINNET",
     "XRPL_FEE_PAYER_TESTNET",
+    "CASPER_FACILITATOR_URL",
     "EVM_FACILITATOR_MAINNET",
     "EVM_FACILITATOR_TESTNET",
     "get_fee_payer",

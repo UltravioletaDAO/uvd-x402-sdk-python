@@ -59,6 +59,7 @@ class X402Config:
         recipient_near: Recipient account for NEAR
         recipient_stellar: Recipient address for Stellar
         recipient_xrpl: Recipient address for XRP Ledger (classic r... address)
+        recipient_casper: Recipient address for Casper Network ("00"/"01"-prefixed hash)
         facilitator_solana: Solana/SVM facilitator address (fee payer)
         verify_timeout: Timeout for verify requests (seconds)
         settle_timeout: Timeout for settle requests (seconds)
@@ -78,6 +79,7 @@ class X402Config:
     recipient_near: str = ""
     recipient_stellar: str = ""
     recipient_xrpl: str = ""  # XRP Ledger recipient (classic r... address)
+    recipient_casper: str = ""  # Casper recipient ("00"/"01"-prefixed 66-hex-char hash)
 
     # Solana/SVM facilitator (fee payer) - same for all SVM chains
     facilitator_solana: str = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
@@ -105,6 +107,8 @@ class X402Config:
         "sui", "sui-testnet",
         # XRPL (2) - native XRP
         "xrpl-mainnet", "xrpl-testnet",
+        # Casper (2) - wCSPR (CEP-18)
+        "casper", "casper-testnet",
     ])
 
     # Per-network recipient overrides
@@ -132,6 +136,7 @@ class X402Config:
             self.recipient_near,
             self.recipient_stellar,
             self.recipient_xrpl,
+            self.recipient_casper,
         ]):
             raise ValueError("At least one recipient address is required")
 
@@ -147,6 +152,7 @@ class X402Config:
             X402_RECIPIENT_NEAR: NEAR recipient account
             X402_RECIPIENT_STELLAR: Stellar recipient address
             X402_RECIPIENT_XRPL: XRP Ledger recipient address
+            X402_RECIPIENT_CASPER: Casper Network recipient address
             X402_FACILITATOR_SOLANA: Solana fee payer address
             X402_VERIFY_TIMEOUT: Verify request timeout
             X402_SETTLE_TIMEOUT: Settle request timeout
@@ -163,6 +169,7 @@ class X402Config:
             recipient_near=os.environ.get("X402_RECIPIENT_NEAR", ""),
             recipient_stellar=os.environ.get("X402_RECIPIENT_STELLAR", ""),
             recipient_xrpl=os.environ.get("X402_RECIPIENT_XRPL", ""),
+            recipient_casper=os.environ.get("X402_RECIPIENT_CASPER", ""),
             facilitator_solana=os.environ.get(
                 "X402_FACILITATOR_SOLANA",
                 "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
@@ -206,6 +213,8 @@ class X402Config:
             return self.recipient_stellar
         elif network_config.network_type == NetworkType.XRPL:
             return self.recipient_xrpl
+        elif network_config.network_type == NetworkType.CASPER:
+            return self.recipient_casper
         else:
             return self.recipient_evm
 
@@ -255,6 +264,7 @@ class X402Config:
             "recipient_near": self.recipient_near,
             "recipient_stellar": self.recipient_stellar,
             "recipient_xrpl": self.recipient_xrpl,
+            "recipient_casper": self.recipient_casper,
             "facilitator_solana": self.facilitator_solana,
             "verify_timeout": self.verify_timeout,
             "settle_timeout": self.settle_timeout,

@@ -2,14 +2,14 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **25 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **27 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 **New in v0.26.0**: Robinhood Chain support (`robinhood` / `robinhood-testnet`, chain IDs 4663 / 46630), settling in Paxos **USDG** (EIP-712 domain `Global Dollar` version `1`, sent via `extra` since `version()` reverts on-chain).
 
 ## Features
 
-- **25 Networks**: EVM chains (15 including Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
-- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
+- **27 Networks**: EVM chains (15 including Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Casper (wCSPR)
+- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP; Casper settles in wCSPR (CEP-18)
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
@@ -58,6 +58,7 @@ config = X402Config(
     recipient_algorand="YOUR_ALGO_ADDRESS...",    # For Algorand
     recipient_sui="0xYourSuiAddress...",          # For Sui
     recipient_xrpl="r...YourXRPLAddress",         # For XRP Ledger (native XRP)
+    recipient_casper="00...YourCasperAccountHash",  # For Casper Network (wCSPR)
 )
 
 client = X402Client(config=config)
@@ -184,6 +185,8 @@ def premium_endpoint(payment_result):
 | Sui Testnet | Sui | - | `sui:testnet` | Active |
 | XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl-mainnet` | Active |
 | XRP Ledger Testnet | XRPL | - | _(no CAIP-2)_ `xrpl-testnet` | Active |
+| Casper | Casper | - | `casper:casper` | Active |
+| Casper Testnet | Casper | - | `casper:casper-test` | Active |
 
 ### Supported Tokens
 
@@ -641,6 +644,61 @@ fee_payer = get_xrpl_fee_payer("xrpl-mainnet")
 print(f"XRPL fee payer: {fee_payer}")  # rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp
 ```
 
+### Casper Network
+
+Casper uses the x402 `exact` scheme with v2 CAIP-2 network identifiers (`casper:casper` mainnet, `casper:casper-test` testnet), settling in **wCSPR** (Wrapped CSPR), a CEP-18 fungible token with 9 decimals (motes). The user signs an EIP-712 typed-data authorization ([casper-eip-712](https://github.com/casper-ecosystem/casper-eip-712)); the dedicated Casper facilitator at [x402-facilitator.cspr.cloud](https://x402-facilitator.cspr.cloud) submits the `transfer_with_authorization` deploy to the CEP-18 contract and pays gas. Payload shapes follow the [make-software/casper-x402](https://github.com/make-software/casper-x402) SDK.
+
+```python
+from uvd_x402_sdk import X402Client, X402Config, CASPER_FACILITATOR_URL
+
+config = X402Config(
+    facilitator_url=CASPER_FACILITATOR_URL,  # https://x402-facilitator.cspr.cloud
+    recipient_casper="001857b576e2247b68d5bb0dbb6cd70361b056262d0a64d7ded1cdc7326954e344",
+    supported_networks=["casper", "casper-testnet"],
+)
+
+client = X402Client(config=config)
+result = client.process_payment(x_payment_header, Decimal("1.00"))
+
+# Casper payload carries an EIP-712 signed CEP-18 authorization
+payload = client.extract_payload(x_payment_header)
+casper_data = payload.get_casper_payload()
+print(f"Payer: {casper_data.authorization.from_address}")
+print(f"Amount (motes): {casper_data.authorization.value}")
+```
+
+#### Casper-Specific Utilities
+
+```python
+from uvd_x402_sdk.networks.casper import (
+    motes_to_cspr,
+    cspr_to_motes,
+    is_valid_casper_address,
+    is_valid_casper_public_key,
+    get_wcspr_contract_package,
+    get_casper_chain_name,
+    validate_casper_payload,
+)
+from uvd_x402_sdk import CASPER_FACILITATOR_URL
+
+# CSPR/wCSPR use 9 decimals (motes): 1 CSPR = 1,000,000,000 motes
+assert cspr_to_motes(1.5) == 1_500_000_000
+assert motes_to_cspr(1_000_000_000) == 1.0
+
+# Validate addresses ("00" account-hash / "01" hash prefix, 66 hex chars)
+assert is_valid_casper_address("00" + "ab" * 32)
+
+# Validate public keys ("01" ed25519 / "02" secp256k1 prefix)
+assert is_valid_casper_public_key("01" + "cd" * 32)
+
+# wCSPR CEP-18 contract package hash (the x402 asset field)
+wcspr = get_wcspr_contract_package("casper")
+
+# Chain name used in deploy payloads
+assert get_casper_chain_name("casper-testnet") == "casper-test"
+```
+
+
 ---
 
 ## x402 v1 vs v2
@@ -817,6 +875,7 @@ X402_RECIPIENT_SOLANA=YourSolanaAddress
 X402_RECIPIENT_NEAR=your-account.near
 X402_RECIPIENT_STELLAR=G...YourStellarAddress
 X402_RECIPIENT_XRPL=r...YourXRPLAddress
+X402_RECIPIENT_CASPER=00...YourCasperAccountHash
 
 # Optional
 X402_FACILITATOR_SOLANA=F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq
@@ -1454,6 +1513,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 | Algorand | ASA transfer tx | Signs fee tx + submits atomic group |
 | Sui | Programmable tx block | Sponsors gas + submits transaction |
 | XRPL | Payment tx (signed blob) | Submits tx + pays network fee |
+| Casper | EIP-712 authorization (CEP-18) | Submits `transfer_with_authorization` deploy + pays gas |
 
 ---
 
@@ -1481,6 +1541,7 @@ The facilitator (https://facilitator.ultravioletadao.xyz) handles all on-chain i
 - **NEAR**: Users sign NEP-366 meta-transactions (DelegateAction)
 - **Sui**: Users sign programmable transaction blocks (facilitator sponsors gas)
 - **XRPL**: Users sign a native-XRP Payment transaction (facilitator submits it and pays the ledger fee)
+- **Casper**: Users sign EIP-712 typed-data authorizations for CEP-18 `transfer_with_authorization` (facilitator submits the deploy and pays gas)
 - The facilitator submits and pays for all on-chain transactions
 - All signatures include expiration timestamps (`validBefore`) for replay protection
 - Nonces prevent double-spending of authorizations

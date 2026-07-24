@@ -28,9 +28,15 @@ from uvd_x402_sdk.networks.base import (
 
 DEFAULT_FACILITATOR_URL = "https://facilitator.ultravioletadao.xyz"
 
+# Dedicated Casper Network facilitator (CSPR.cloud) - Casper payments are
+# verified/settled by this facilitator, which submits the CEP-18
+# transfer_with_authorization deploy and pays gas in CSPR.
+CASPER_FACILITATOR_URL = "https://x402-facilitator.cspr.cloud"
+
 # Alternative facilitator URLs (for future use)
 FACILITATOR_URLS = {
     "production": "https://facilitator.ultravioletadao.xyz",
+    "casper": CASPER_FACILITATOR_URL,
 }
 
 

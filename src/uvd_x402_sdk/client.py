@@ -762,6 +762,9 @@ class X402Client:
         elif network_config.network_type == NetworkType.STELLAR:
             stellar_payload = payload.get_stellar_payload()
             payer = stellar_payload.from_address
+        elif network_config.network_type == NetworkType.CASPER:
+            casper_payload = payload.get_casper_payload()
+            payer = casper_payload.authorization.from_address
         # For SVM/NEAR/XRPL, payer is determined during verification
         # (XRPL t54 carries only the signed tx blob; the sender is recovered
         #  by the facilitator when it decodes/submits the Payment transaction)
