@@ -1310,6 +1310,16 @@ async with BazaarClient() as bazaar:
     for r in resources.items:
         print(f"{r.url} - {r.description}")
 
+    # Only the ones a probe actually reached, best-curated first
+    for r in (await bazaar.list_resources(limit=50, health="alive", tier="vip")).items:
+        print(r.url, r.health.status, r.health.latency_ms, r.curation.label)
+
+    # Free-text search. This runs server-side over the whole catalog, so
+    # `pagination.total` is the real number of matches -- filtering one page
+    # locally is not the same thing and will under-report.
+    hits = await bazaar.list_resources(q="logs")
+    print(hits.pagination.total)
+
     # Register your own resource
     await bazaar.register_resource(
         url="https://api.example.com/data",
@@ -1561,6 +1571,19 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.27.0 (2026-07-27)
+- **Fixed**: `BazaarClient.list_resources()` raised `ValidationError` against the live registry. `firstSeen` / `lastSeen` are epoch integers on the wire but the model declared them `str`, so *every* call failed regardless of `limit`. Timestamps are now epoch `int` and coerce from int, float, numeric string, ISO-8601 string or `datetime`
+- Added `first_seen_at` / `last_seen_at` / `last_updated_at` helpers returning timezone-aware UTC `datetime`
+- Added `lastUpdated`, which the registry has always sent and the model dropped
+- **Added**: `health` (`DiscoveryHealth`: `status`, `last_checked`, `http_status`, `latency_ms`) and `curation` (`DiscoveryCuration`: `tier`, `label`). These are the fields that make the registry usable -- without them you cannot sort by reachable or by vetted -- and `model_dump()` was discarding them
+- Added `DiscoveryResource.is_alive` and `.tier` shortcuts
+- `list_resources()` now exposes every server-side filter: `provider`, `tag`, `source`, `source_facilitator`, `health`, `tier` and free-text `q`. `q` is validated against `MAX_SEARCH_LEN` (128) and `health` / `tier` against `HEALTH_FILTERS` / `TIER_FILTERS` before the request goes out
+- Discovery models now keep unmodelled server fields instead of silently dropping them
+- `pagination` is a typed `DiscoveryPagination` and still supports `pagination["total"]`
+- Added `tests/test_discovery.py`, a contract test pinned to a verbatim live registry page
+
+Reported by KarmaCadabra against uvd-x402-sdk 0.26.0.
 
 ### v0.26.0 (2026-07-21)
 - Added Robinhood Chain support: `robinhood` (chain ID 4663) and `robinhood-testnet` (chain ID 46630), Arbitrum Orbit L2s with ETH gas

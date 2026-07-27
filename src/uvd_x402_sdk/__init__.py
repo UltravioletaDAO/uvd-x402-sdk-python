@@ -48,7 +48,7 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -198,8 +198,14 @@ from uvd_x402_sdk.escrow import (
 # Bazaar Discovery
 from uvd_x402_sdk.discovery import (
     BazaarClient,
+    DiscoveryCuration,
+    DiscoveryHealth,
+    DiscoveryPagination,
     DiscoveryResource,
     DiscoveryResponse,
+    HEALTH_FILTERS,
+    MAX_SEARCH_LEN,
+    TIER_FILTERS,
 )
 
 # Wallet Adapters
@@ -370,8 +376,14 @@ __all__ = [
     "escrow_time_remaining",
     # Bazaar Discovery
     "BazaarClient",
+    "DiscoveryCuration",
+    "DiscoveryHealth",
+    "DiscoveryPagination",
     "DiscoveryResource",
     "DiscoveryResponse",
+    "HEALTH_FILTERS",
+    "MAX_SEARCH_LEN",
+    "TIER_FILTERS",
     # Wallet Adapters
     "WalletAdapter",
     "EnvKeyAdapter",
