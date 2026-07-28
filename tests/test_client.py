@@ -111,9 +111,14 @@ class TestPayloadExtraction:
             client.extract_payload("")
 
     def test_extract_invalid_version(self, client):
-        """Reject unsupported x402 version."""
+        """Reject an x402 version we do not implement.
+
+        This used to assert that version 2 was rejected, which stopped being
+        true when v2 support landed -- so the test just sat red instead of
+        guarding anything. It now uses a version that really is unsupported.
+        """
         payload_data = {
-            "x402Version": 2,  # Unsupported
+            "x402Version": 99,  # Not a protocol version that exists
             "scheme": "exact",
             "network": "base",
             "payload": {},
@@ -121,6 +126,37 @@ class TestPayloadExtraction:
         header = base64.b64encode(json.dumps(payload_data).encode()).decode()
         with pytest.raises(InvalidPayloadError):
             client.extract_payload(header)
+
+    def test_extract_accepts_v2(self, client):
+        """v2 payloads must parse -- the gap the stale test left uncovered.
+
+        While the old test claimed v2 was rejected, NOTHING asserted that it is
+        accepted. Dropping v2 support would have turned a red test green and
+        looked like progress.
+        """
+        payload_data = {
+            "x402Version": 2,
+            "scheme": "exact",
+            "network": "eip155:8453",  # CAIP-2, the v2 network format
+            "payload": {},
+        }
+        header = base64.b64encode(json.dumps(payload_data).encode()).decode()
+        payload = client.extract_payload(header)
+        assert payload.x402Version == 2
+        assert payload.is_v2() is True
+
+    def test_extract_accepts_v1(self, client):
+        """v1 must keep working alongside v2 -- both are live on the facilitator."""
+        payload_data = {
+            "x402Version": 1,
+            "scheme": "exact",
+            "network": "base",
+            "payload": {},
+        }
+        header = base64.b64encode(json.dumps(payload_data).encode()).decode()
+        payload = client.extract_payload(header)
+        assert payload.x402Version == 1
+        assert payload.is_v2() is False
 
 
 class TestNetworkValidation:
