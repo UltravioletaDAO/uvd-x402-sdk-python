@@ -22,6 +22,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 - **Bazaar Discovery**: Register and discover paid resources across the x402 network
+- **Live Traffic Stream**: Subscribe to `GET /events` (SSE) for settlements as they happen — lossy live hint, not a ledger
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
 
@@ -1389,6 +1390,60 @@ assert isinstance(MyWallet(), WalletAdapter)  # True (runtime_checkable)
 ```
 
 ---
+
+## Live Traffic Stream (`GET /events`)
+
+The facilitator emits one Server-Sent Event per operation it handles, so you can
+render or react to live traffic without polling.
+
+```python
+from uvd_x402_sdk import TrafficEventStream
+
+with TrafficEventStream() as stream:
+    for event in stream:
+        print(event.kind, event.network, event.ok, event.tx)
+
+# Only settlements on the chains you care about. The facilitator has NO
+# server-side filter by network, so this runs client-side.
+with TrafficEventStream(networks=["base", "polygon"], kinds=["settle"]) as stream:
+    for event in stream:
+        print(event.tx, event.timestamp)
+
+# Async, for an event loop
+async with TrafficEventStream() as stream:
+    async for event in stream:
+        print(event.network)
+```
+
+Three properties decide how you should use this:
+
+**It is lossy by design.** The facilitator will never slow down or fail a payment
+to keep an observer in sync, so an event you were not connected for is gone.
+Treat it as a live hint and use the chain as the source of truth — and note that
+*absence of events is not evidence that nothing happened*. On a quiet rail the
+only thing on the wire for minutes is a keepalive.
+
+**Failed operations are not published.** Only operations that resolved emit an
+event, so `ok=False` means "resolved and came back negative", never "blew up". A
+stream that looks healthy is not proof that the rail is.
+
+**Admission is bounded.** `/events` is public and unauthenticated, so it sheds
+with HTTP 503 + `Retry-After` at subscriber capacity, and returns 404 when the
+operator disabled it. Both raise `FacilitatorError` with `status_code` intact.
+
+> **Match the canonical network slug.** `network` is the name `/supported` uses,
+> which is not always the alias you may *send*. `skale` is accepted inbound, but
+> events always say `skale-base`. Keying on the alias silently drops every event
+> for that chain.
+
+| Field | Notes |
+|-------|-------|
+| `ts` | Unix epoch **milliseconds** (not seconds); `event.timestamp` gives a UTC `datetime` |
+| `kind` | `"verify"` or `"settle"` |
+| `network` | Canonical slug, same as `/supported` |
+| `ok` | Resolved successfully? |
+| `payer` / `amount` / `asset` | Omitted in `minimal` detail mode |
+| `tx` | Present on `settle`, absent on `verify` — nothing settled yet |
 
 ## Facilitator Info
 
