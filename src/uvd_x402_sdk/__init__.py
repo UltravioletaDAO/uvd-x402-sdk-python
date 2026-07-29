@@ -48,7 +48,7 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.28.0"
+__version__ = "0.29.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -213,6 +213,14 @@ from uvd_x402_sdk.events import (
     EVENT_KINDS,
     TrafficEvent,
     TrafficEventStream,
+)
+
+# x402 v2 request envelopes (/verify, /settle)
+from uvd_x402_sdk.envelope_v2 import (
+    AcceptedRequirementsV2,
+    ResourceInfoV2,
+    build_settle_request_v2,
+    build_verify_request_v2,
 )
 
 # Wallet Adapters
@@ -395,6 +403,11 @@ __all__ = [
     "EVENT_KINDS",
     "TrafficEvent",
     "TrafficEventStream",
+    # x402 v2 request envelopes
+    "AcceptedRequirementsV2",
+    "ResourceInfoV2",
+    "build_verify_request_v2",
+    "build_settle_request_v2",
     # Wallet Adapters
     "WalletAdapter",
     "EnvKeyAdapter",

@@ -22,6 +22,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 - **Bazaar Discovery**: Register and discover paid resources across the x402 network
+- **x402 v2 Envelopes**: `build_verify_request_v2` / `build_settle_request_v2` for facilitators advertising CAIP-2 networks
 - **Live Traffic Stream**: Subscribe to `GET /events` (SSE) for settlements as they happen — lossy live hint, not a ledger
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
@@ -1390,6 +1391,53 @@ assert isinstance(MyWallet(), WalletAdapter)  # True (runtime_checkable)
 ```
 
 ---
+
+## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
+
+If the 402 you received advertises CAIP-2 networks (`eip155:8453`), you are
+speaking v2 and must send the **v2 envelope**. `X402Client.verify_payment` and
+`settle_payment` emit the v1 one and cannot express v2:
+
+```python
+from uvd_x402_sdk import (
+    AcceptedRequirementsV2, ResourceInfoV2, build_verify_request_v2,
+)
+
+body = build_verify_request_v2(
+    payload={"signature": "0x...", "authorization": {...}},
+    resource=ResourceInfoV2(
+        url="https://api.example.com/thing",
+        description="Thing",
+        mime_type="application/json",
+    ),
+    accepted=AcceptedRequirementsV2(
+        scheme="exact",
+        network="eip155:8453",
+        asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        amount="100000",
+        pay_to="0xabc...",
+        max_timeout_seconds=300,
+    ),
+)
+httpx.post(f"{facilitator_url}/verify", json=body)
+```
+
+Plain dicts work too, which matters because the spec makes you echo the vendor's
+accept **verbatim** — you will usually have a dict, not a model.
+
+| | v1 envelope | v2 envelope |
+|---|---|---|
+| top level | `{x402Version, paymentPayload, paymentRequirements}` | `{x402Version, paymentPayload, resource, accepted}` |
+| network | plain name — `base` | CAIP-2 — `eip155:8453` |
+| amount field | `maxAmountRequired` | `amount` |
+| `resource` | URL **string** | **object** `{url, description, mimeType}` |
+
+> **Do not mix levels.** Each version demands its own network format *and* its
+> own envelope. A v2 payload inside a v1 envelope — or a plain network name
+> inside a v2 request — matches no variant at the facilitator and fails with
+> `data did not match any variant of untagged enum VerifyRequestEnvelope`, an
+> error that names no field. If you see it, check the **envelope shape** first,
+> not the fields inside it.
 
 ## Live Traffic Stream (`GET /events`)
 
