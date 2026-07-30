@@ -48,7 +48,7 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.30.0"
+__version__ = "0.31.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client

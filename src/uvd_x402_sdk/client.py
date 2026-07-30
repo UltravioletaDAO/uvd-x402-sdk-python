@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from decimal import Decimal
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Union
 
 import httpx
 
@@ -1004,6 +1004,10 @@ class X402Client:
         chain_name: Optional[str] = None,
         valid_duration: int = 3600,
         token_type: str = "usdc",
+        x402_version: int = 1,
+        accepted: Optional[Dict[str, Any]] = None,
+        resource: Optional[Union[str, Dict[str, Any]]] = None,
+        extensions: Optional[Any] = None,
     ) -> str:
         """
         Create a signed EIP-3009 payment authorization (X-PAYMENT header value).
@@ -1126,22 +1130,58 @@ class X402Client:
         signature = self._sign_typed_data(domain_data, types, message)
 
         # Build x402 payload
-        payload = {
-            "x402Version": 1,
-            "scheme": "exact",
-            "network": network_config.name,
-            "payload": {
-                "signature": signature,
-                "authorization": {
-                    "from": self._signer_address,
-                    "to": pay_to,
-                    "value": str(amount_base),
-                    "validAfter": str(valid_after),
-                    "validBefore": str(valid_before),
-                    "nonce": nonce,
-                },
+        inner = {
+            "signature": signature,
+            "authorization": {
+                "from": self._signer_address,
+                "to": pay_to,
+                "value": str(amount_base),
+                "validAfter": str(valid_after),
+                "validBefore": str(valid_before),
+                "nonce": nonce,
             },
         }
+
+        if int(x402_version) >= 2:
+            # v2 envelope (x402 spec v2 §5.2). No top-level scheme/network: the CHOSEN
+            # accept is echoed back VERBATIM as `accepted`, so the seller can match it
+            # against what it advertised. Reconstructing it instead of echoing is how a
+            # payment gets rejected by a server that did nothing wrong.
+            if not accepted:
+                raise ValueError(
+                    "x402_version=2 requires `accepted`: the accept object from the 402, "
+                    "echoed back verbatim. Rebuilding it makes the seller reject the payment."
+                )
+            payload: Dict[str, Any] = {
+                "x402Version": 2,
+                "accepted": dict(accepted),
+                "payload": inner,
+            }
+            if resource:
+                # `resource` is a ResourceInfo OBJECT, not the bare URL. The facilitator
+                # requires url + description + mimeType; a plain string matches NO variant
+                # of the VerifyRequestEnvelope and fails with the opaque
+                # "data did not match any variant". A dict that already arrived well-formed
+                # is passed through untouched — normalising what was already right is how a
+                # working case breaks.
+                payload["resource"] = resource if isinstance(resource, dict) else {
+                    "url": str(resource),
+                    "description": (accepted.get("description") or ""),
+                    "mimeType": (accepted.get("mimeType") or "application/json"),
+                }
+            if extensions:
+                # Spec §5: when the server declares extensions the client MUST echo at
+                # least what it received. Strict servers reject a payment with a missing
+                # echo by RE-SERVING the 402 with no hint — indistinguishable from "you
+                # sent no payment at all", which is what makes it expensive to diagnose.
+                payload["extensions"] = extensions
+        else:
+            payload = {
+                "x402Version": 1,
+                "scheme": "exact",
+                "network": network_config.name,
+                "payload": inner,
+            }
 
         # Add token info for non-USDC tokens
         if token_type != "usdc":
