@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, Iterable, Iterator, List, Optional, Sequence
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from uvd_x402_sdk.exceptions import FacilitatorError
 
@@ -86,6 +86,18 @@ class TrafficEvent(BaseModel):
     tx: Optional[str] = None
     amount: Optional[str] = None
     asset: Optional[str] = None
+    #: The protected endpoint being bought. Answers "what was paid for", which
+    #: the amount alone never does — two 1-USDC settles are indistinguishable
+    #: without it.
+    resource: Optional[str] = None
+    #: The seller receiving the payment.
+    pay_to: Optional[str] = Field(default=None, alias="payTo")
+    #: Human-readable description the seller advertised.
+    description: Optional[str] = None
+    #: Payment scheme: ``exact``, ``escrow``, ``commerce``, ``upto``.
+    scheme: Optional[str] = None
+
+    model_config = ConfigDict(populate_by_name=True)
 
     @property
     def timestamp(self) -> datetime:

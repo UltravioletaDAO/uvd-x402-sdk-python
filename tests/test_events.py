@@ -155,3 +155,36 @@ def test_url_is_built_from_base():
 
 def test_event_kinds_match_the_facilitator():
     assert EVENT_KINDS == ("verify", "settle")
+
+
+class TestRicherMetadata:
+    """Fields added 2026-07-30 so an event says WHAT was bought, not just how much."""
+
+    FRAME = {
+        "event": "settle",
+        "data": '{"ts":1785432522148,"kind":"settle","network":"base","ok":true,'
+                '"payer":"0xe4dc","tx":"0xd8c1","amount":"1000000","asset":"0x8335",'
+                '"resource":"https://api.example.com/premium","payTo":"0xseller",'
+                '"description":"Premium feed","scheme":"exact"}',
+    }
+
+    def test_parses_the_endpoint_and_seller(self):
+        event = TrafficEventStream()._to_event(self.FRAME)
+        assert event is not None
+        assert event.resource == "https://api.example.com/premium"
+        assert event.pay_to == "0xseller"
+        assert event.scheme == "exact"
+
+    def test_payTo_arrives_camelCase_on_the_wire(self):
+        # The facilitator emits payTo; the Python attribute is pay_to. Reading
+        # the snake_case key off the wire would silently yield None.
+        event = TrafficEventStream()._to_event(self.FRAME)
+        assert event.pay_to is not None
+
+    def test_events_without_the_new_fields_still_parse(self):
+        """minimal detail mode, and any consumer pinned to an older facilitator."""
+        event = TrafficEventStream()._to_event(
+            {"event": "settle", "data": '{"ts":1,"kind":"settle","network":"base","ok":true}'}
+        )
+        assert event is not None
+        assert event.resource is None and event.pay_to is None
