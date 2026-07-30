@@ -103,6 +103,11 @@ class X402Client:
         # Client-side signer (set via connect_with_private_key)
         self._signer: Any = None  # eth_account.Account when connected
         self._signer_address: Optional[str] = None
+        # Normalised signing seam. BOTH connect_* methods populate this with a
+        # callable (domain, types, message) -> "0x…" 65-byte signature, so
+        # create_authorization has a single code path and the local and remote
+        # signers cannot drift apart.
+        self._sign_typed_data: Optional[Any] = None
         self._connected_chain: Optional[str] = None
 
     def _get_http_client(self) -> httpx.Client:
@@ -869,15 +874,117 @@ class X402Client:
         self._signer = Account.from_key(private_key)
         self._signer_address = self._signer.address
 
+        def _sign_local(domain_data, types, message) -> str:
+            from eth_account.messages import encode_typed_data
+
+            signable = encode_typed_data(
+                domain_data=domain_data,
+                message_types=types,
+                message_data=message,
+            )
+            sig = self._signer.sign_message(signable).signature.hex()
+            # hexbytes < 1.0 returns bare hex; >= 1.0 returns it 0x-prefixed. The
+            # previous code did "0x" + sig unconditionally, which yields "0x0x…"
+            # on the newer release. Normalising here keeps the old behaviour and
+            # fixes that case.
+            return sig if sig.startswith("0x") else "0x" + sig
+
+        self._sign_typed_data = _sign_local
+
         logger.info(f"Connected wallet {self._signer_address}"
                      + (f" on {self._connected_chain}" if self._connected_chain else ""))
 
         return self._signer_address
 
+    def connect_with_signer(
+        self,
+        signer: Any,
+        chain_name: Optional[str] = None,
+    ) -> str:
+        """
+        Connect an EXTERNAL signer that holds the key outside this process.
+
+        The SDK could previously only sign with a raw private key loaded into
+        memory (:meth:`connect_with_private_key`). That rules out every setup
+        where the key is deliberately somewhere else — an HSM, a KMS, a
+        delegated/agentic wallet, an MPC service — which is exactly the setup a
+        production agent wants. This is the seam for those.
+
+        Args:
+            signer: any object exposing
+
+                * ``address`` -> the checksummed EOA these signatures recover to
+                  (a plain attribute or a property)
+                * ``sign_typed_data(domain, types, message)`` -> the 65-byte
+                  EIP-712 signature as a hex string (``0x``-prefixed or not)
+
+            chain_name: network to bind to, same semantics as
+                :meth:`connect_with_private_key`.
+
+        Returns:
+            The signer's address.
+
+        Raises:
+            TypeError: if the object does not implement the two members above.
+                Checked up front ON PURPOSE: a missing method discovered at
+                signing time fails after the caller already believes it is
+                connected.
+
+        Example:
+            >>> class MyRemoteSigner:
+            ...     address = "0x…"
+            ...     def sign_typed_data(self, domain, types, message):
+            ...         return remote_hsm.sign_eip712(domain, types, message)
+            >>> client.connect_with_signer(MyRemoteSigner(), chain_name="base")
+        """
+        address = getattr(signer, "address", None)
+        if not isinstance(address, str) or not address.startswith("0x"):
+            raise TypeError(
+                "signer.address must be a 0x-prefixed address string; got "
+                f"{address!r}"
+            )
+        if not callable(getattr(signer, "sign_typed_data", None)):
+            raise TypeError(
+                "signer must implement sign_typed_data(domain, types, message) "
+                "returning a hex signature"
+            )
+
+        if chain_name:
+            try:
+                normalized = normalize_network(chain_name)
+            except ValueError:
+                raise UnsupportedNetworkError(
+                    network=chain_name,
+                    supported_networks=get_supported_network_names(),
+                )
+            self._connected_chain = normalized
+        else:
+            self._connected_chain = None
+
+        self._signer_address = address
+
+        def _sign_remote(domain_data, types, message) -> str:
+            sig = signer.sign_typed_data(domain_data, types, message)
+            if isinstance(sig, (bytes, bytearray)):
+                sig = sig.hex()
+            if not isinstance(sig, str):
+                raise TypeError(
+                    f"sign_typed_data must return a hex string, got {type(sig)}"
+                )
+            return sig if sig.startswith("0x") else "0x" + sig
+
+        self._sign_typed_data = _sign_remote
+
+        logger.info(
+            f"Connected external signer {address}"
+            + (f" on {self._connected_chain}" if self._connected_chain else "")
+        )
+        return address
+
     @property
     def is_connected(self) -> bool:
-        """Check if a signer is connected."""
-        return self._signer is not None
+        """Check if a signer is connected (private key OR external)."""
+        return self._sign_typed_data is not None
 
     @property
     def address(self) -> Optional[str]:
@@ -929,18 +1036,15 @@ class X402Client:
             ...     headers={"X-PAYMENT": header}
             ... )
         """
-        if not self._signer:
+        if not self._sign_typed_data:
             raise RuntimeError(
-                "No signer connected. Call connect_with_private_key() first."
+                "No signer connected. Call connect_with_private_key() or "
+                "connect_with_signer() first."
             )
 
-        try:
-            from eth_account.messages import encode_typed_data
-        except ImportError:
-            raise ImportError(
-                "eth-account is required for create_authorization. "
-                "Install it with: pip install uvd-x402-sdk[signer]"
-            )
+        # NOTE: eth-account is NOT imported here any more. It is only needed by the
+        # local-key path, which imports it inside its own closure — so an external
+        # signer (connect_with_signer) works without the [signer] extra installed.
 
         # Resolve chain
         chain = chain_name or self._connected_chain
@@ -1017,14 +1121,9 @@ class X402Client:
             "nonce": nonce,
         }
 
-        # Sign: encode_typed_data + sign_message (proven method from x402r SDK)
-        signable = encode_typed_data(
-            domain_data=domain_data,
-            message_types=types,
-            message_data=message,
-        )
-        signed = self._signer.sign_message(signable)
-        signature = signed.signature.hex()
+        # Sign through the normalised seam: identical bytes whether the key is
+        # local (eth_account) or remote (connect_with_signer).
+        signature = self._sign_typed_data(domain_data, types, message)
 
         # Build x402 payload
         payload = {
@@ -1032,7 +1131,7 @@ class X402Client:
             "scheme": "exact",
             "network": network_config.name,
             "payload": {
-                "signature": "0x" + signature,
+                "signature": signature,
                 "authorization": {
                     "from": self._signer_address,
                     "to": pay_to,
