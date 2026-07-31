@@ -96,6 +96,19 @@ class TrafficEvent(BaseModel):
     description: Optional[str] = None
     #: Payment scheme: ``exact``, ``escrow``, ``commerce``, ``upto``.
     scheme: Optional[str] = None
+    #: Why the operation failed, as a BOUNDED CATEGORY — never the error text.
+    #:
+    #: Present only on operations that errored, and only where the operator has
+    #: set ``X402_EVENTS_PUBLISH_FAILURES=true``. Values are a closed set
+    #: (``contract_revert``, ``invalid_signature``, ``insufficient_funds``,
+    #: ``invalid_timing``, ``blocked_address``, …, ``other``) precisely so the
+    #: field can never carry an address or an RPC URL.
+    #:
+    #: Note the distinction this makes visible: ``ok=False`` with no ``error``
+    #: means the operation RESOLVED and came back negative; ``error`` set means
+    #: it blew up. Before this field existed the second case produced no event
+    #: at all.
+    error: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
 

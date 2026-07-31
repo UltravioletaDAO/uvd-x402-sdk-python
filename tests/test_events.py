@@ -188,3 +188,32 @@ class TestRicherMetadata:
         )
         assert event is not None
         assert event.resource is None and event.pay_to is None
+
+
+class TestFailureCategory:
+    """Facilitator v1.63.0+: errored operations, when the operator enables them."""
+
+    def test_parses_the_bounded_category(self):
+        event = TrafficEventStream()._to_event({
+            "event": "settle",
+            "data": '{"ts":1,"kind":"settle","network":"base","ok":false,'
+                    '"error":"contract_revert"}',
+        })
+        assert event is not None
+        assert event.error == "contract_revert"
+        assert event.ok is False
+
+    def test_resolved_negative_and_errored_are_distinguishable(self):
+        """ok=False alone means "resolved negative"; error set means "blew up"."""
+        resolved = TrafficEventStream()._to_event({
+            "event": "settle",
+            "data": '{"ts":1,"kind":"settle","network":"base","ok":false}',
+        })
+        assert resolved.error is None
+
+    def test_events_from_older_facilitators_still_parse(self):
+        event = TrafficEventStream()._to_event({
+            "event": "settle",
+            "data": '{"ts":1,"kind":"settle","network":"base","ok":true}',
+        })
+        assert event is not None and event.error is None

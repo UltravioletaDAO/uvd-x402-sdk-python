@@ -689,6 +689,78 @@ class X402Client:
         except Exception as e:
             raise FacilitatorError(message=f"GET /supported failed: {e}")
 
+    def get_stats(self) -> Dict[str, Any]:
+        """Aggregated totals per network and asset (``GET /api/stats``).
+
+        Returns:
+            Dict with ``totals``, ``byNetworkAndAsset`` and the caveats the
+            facilitator attaches to its own numbers.
+
+        Note:
+            **This is an index, not a ledger.** Records are written best-effort
+            AFTER settlement, so an outage loses rows while payments proceed —
+            verify anything that matters against the transaction hash.
+
+            Counting starts when the operator enabled the store; earlier
+            operations are UNKNOWN, not zero. And unless the operator set
+            ``X402_EVENTS_PUBLISH_FAILURES=true``, operations that ERROR are not
+            recorded at all, so a 100% success rate means "no failures were
+            recorded".
+
+            ``volumeAtomic`` is a STRING (u256-shaped; a float loses precision
+            above 2^53) and each row carries its own ``decimals``. **Use that,
+            never a constant** — USDC is 6 decimals nearly everywhere and 18 on
+            BSC, so scaling by 6 there overstates volume by 10^12. ``decimals``
+            is null when the facilitator does not recognise the asset; render the
+            atomic value rather than guessing.
+
+        Raises:
+            FacilitatorError: If the request fails or the store is unconfigured.
+        """
+        return self._get_json("/api/stats")
+
+    def get_transactions(
+        self,
+        limit: int = 50,
+        network: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Recent recorded operations, newest first (``GET /transactions``).
+
+        Args:
+            limit: Rows to return. The facilitator CLAMPS this to 200.
+            network: Canonical slug, e.g. ``base``. Matches the name
+                ``/supported`` uses, which is not always the alias you may send:
+                ``skale`` is accepted inbound but records say ``skale-base``.
+
+        Note:
+            There is **no pagination and no cursor**. This returns the newest N,
+            walking back at most 30 days. With 10,000 rows you get the newest
+            200 — not page one of fifty.
+
+        Raises:
+            FacilitatorError: If the request fails or the store is unconfigured.
+        """
+        params = f"?limit={limit}"
+        if network:
+            params += f"&network={network}"
+        return self._get_json(f"/transactions{params}")
+
+    def _get_json(self, path: str) -> Dict[str, Any]:
+        """GET a facilitator endpoint and return its JSON."""
+        try:
+            client = self._get_http_client()
+            response = client.get(f"{self.config.facilitator_url}{path}")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"GET {path} failed: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except Exception as e:
+            raise FacilitatorError(message=f"GET {path} failed: {e}")
+
     def get_blacklist(self) -> Dict[str, Any]:
         """
         Get the facilitator's blocked/sanctioned addresses.
