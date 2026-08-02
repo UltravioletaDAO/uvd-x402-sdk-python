@@ -26,6 +26,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Live Traffic Stream**: Subscribe to `GET /events` (SSE) for settlements as they happen — lossy live hint, not a ledger
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
+- **ERC-8128 Signed HTTP Requests**: RFC 9421 request signing with any WalletAdapter — authenticate against wallet-signed APIs like Execution Market
 
 ## Quick Start (5 Lines)
 
@@ -1392,6 +1393,46 @@ assert isinstance(MyWallet(), WalletAdapter)  # True (runtime_checkable)
 
 ---
 
+## ERC-8128 Signed HTTP Requests (`sign_request` / `fetch_nonce`)
+
+Sign HTTP requests per [ERC-8128](https://eip.tools/eip/8128) (Signed HTTP
+Requests with Ethereum, RFC 9421) with any `WalletAdapter`. This is how agents
+authenticate against wallet-signed APIs — most notably Execution Market, where
+API keys are rejected in production and only wallet signing is accepted. The
+private key never leaves the adapter; only `get_address()` and
+`sign_message()` (EIP-191 personal_sign) are used.
+
+```python
+from uvd_x402_sdk import EnvKeyAdapter, fetch_nonce, sign_request
+
+wallet = EnvKeyAdapter()  # reads WALLET_PRIVATE_KEY from env
+
+# 1. Fresh single-use nonce (5-minute TTL) — one per signed request,
+#    including retries: the server consumes it before verification.
+nonce = await fetch_nonce("https://api.execution.market")
+
+# 2. Sign the request. Body must be byte-identical to what goes on the wire.
+headers = sign_request(
+    wallet,
+    method="POST",
+    url="https://api.execution.market/api/v1/tasks",
+    body='{"title": "test"}',
+    nonce=nonce,
+)
+# {"Signature": "eth=:...:", "Signature-Input": "eth=(...)", "Content-Digest": "sha-256=:...:"}
+
+# 3. Merge into the request headers and send.
+```
+
+The wire format is **pinned** and byte-tested against golden vectors
+(`tests/fixtures/erc8128.json`): `alg="eip191"` always emitted, keyid always
+lowercase (`erc8128:{chain_id}:{address}`), signature params in the order
+`created;expires;nonce;keyid;alg`. Covered components: `@method`,
+`@authority`, `@path`, plus `@query` when the URL has a query string and
+`content-digest` (SHA-256, RFC 9530) when the request has a body.
+
+---
+
 ## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
 
 If the 402 you received advertises CAIP-2 networks (`eip155:8453`), you are
@@ -1696,6 +1737,11 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.34.0 (2026-08-02)
+- **Added**: `uvd_x402_sdk.erc8128` — ERC-8128 Signed HTTP Requests (RFC 9421) with any `WalletAdapter`: `sign_request()` builds `Signature` / `Signature-Input` / `Content-Digest` headers, `fetch_nonce()` gets the single-use server nonce
+- Wire format pinned by golden vectors (`tests/fixtures/erc8128.json`, byte-identical copy of Execution Market's F3-1 conformance fixture): `alg="eip191"` emitted, keyid always lowercase, params in the order `created;expires;nonce;keyid;alg`
+- Purely additive — importable on a base install (no `eth-account` required until you instantiate an adapter)
 
 ### v0.27.0 (2026-07-27)
 - **Fixed**: `BazaarClient.list_resources()` raised `ValidationError` against the live registry. `firstSeen` / `lastSeen` are epoch integers on the wire but the model declared them `str`, so *every* call failed regardless of `limit`. Timestamps are now epoch `int` and coerce from int, float, numeric string, ISO-8601 string or `datetime`

@@ -48,7 +48,7 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.33.0"
+__version__ = "0.34.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -233,6 +233,12 @@ from uvd_x402_sdk.wallet import (
     SignedTypedData,
 )
 
+# ERC-8128 Signed HTTP Requests (RFC 9421) — wallet-signed API auth
+from uvd_x402_sdk.erc8128 import (
+    sign_request,
+    fetch_nonce,
+)
+
 # Advanced Escrow (PaymentOperator - on-chain escrow)
 # Requires: eth_abi, eth_account, web3, httpx
 try:
@@ -415,6 +421,9 @@ __all__ = [
     "EIP3009Params",
     "EIP3009Authorization",
     "SignedTypedData",
+    # ERC-8128 Signed HTTP Requests (RFC 9421)
+    "sign_request",
+    "fetch_nonce",
     # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
     "ADVANCED_ESCROW_AVAILABLE",
     "AdvancedEscrowClient",

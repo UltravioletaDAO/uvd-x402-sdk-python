@@ -1,0 +1,307 @@
+"""ERC-8128 (RFC 9421) request signing — unit tests + golden-vector conformance.
+
+PROVENANCE of ``tests/fixtures/erc8128.json``: byte-identical copy of the
+Execution Market monorepo's ``shared/test-vectors/erc8128.json`` (the F3-1
+golden vectors that pin the fleet-wide wire format). The monorepo file is the
+source of truth — if the vectors change there, re-copy the file byte-for-byte,
+NEVER edit the copy here. ``TestFixtureIntegrity`` re-derives the vectors
+cryptographically, so a corrupted copy fails before any conformance assert.
+
+The fixture's signing key is a synthetic test key (0x42 * 32) that never held
+funds, stored WITHOUT the 0x prefix so secret scanners never see 0x + 64 hex;
+loaders re-prefix it. The other tests use a THROWAWAY key generated in-test
+with ``eth_account.Account.create()`` — never a real wallet, never printed.
+Determinism comes from RFC 6979: the same key + signature base always
+produces the same 65 signature bytes.
+"""
+
+import base64
+import json
+import re
+import types
+from pathlib import Path
+
+import pytest
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+import uvd_x402_sdk.erc8128 as erc8128_mod
+from uvd_x402_sdk.erc8128 import fetch_nonce, sign_request
+from uvd_x402_sdk.wallet import EnvKeyAdapter
+
+FIXED_NOW = 1760000000
+
+# RFC 9530 §Section B.1 known vector: sha-256 of '{"hello": "world"}'
+RFC9530_DIGEST = "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:"
+
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "erc8128.json"
+FIXTURE = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+
+FROZEN = FIXTURE["frozen"]
+VECTORS = FIXTURE["vectors"]
+REQUESTS = FIXTURE["requests"]
+
+REQUEST_NAMES = ("get_query", "post_body")
+VARIANT_NAMES = ("canonical", "legacy_no_alg", "legacy_alg_checksum_keyid")
+
+
+@pytest.fixture
+def account():
+    return Account.create()
+
+
+@pytest.fixture
+def wallet(account):
+    key_hex = account.key.hex()
+    return EnvKeyAdapter(private_key=key_hex)
+
+
+@pytest.fixture
+def frozen_time(monkeypatch):
+    monkeypatch.setattr(
+        erc8128_mod, "time", types.SimpleNamespace(time=lambda: FIXED_NOW)
+    )
+    return FIXED_NOW
+
+
+def _decode_signature(headers):
+    m = re.fullmatch(r"eth=:(?P<b64>[A-Za-z0-9+/=]+):", headers["Signature"])
+    assert m, headers["Signature"]
+    return base64.b64decode(m.group("b64"))
+
+
+# =============================================================================
+# Signer unit tests
+# =============================================================================
+
+
+class TestSignRequest:
+    def test_content_digest_rfc9530_vector(self, wallet):
+        headers = sign_request(
+            wallet,
+            method="POST",
+            url="https://api.execution.market/api/v1/tasks",
+            body='{"hello": "world"}',
+            nonce="n1",
+        )
+        assert headers["Content-Digest"] == RFC9530_DIGEST
+
+    def test_known_vector_signature_base(self, wallet, account, frozen_time):
+        """Deterministic fixed-request vector: exact Signature-Input string,
+        signature over the independently rebuilt RFC 9421 base, and ECDSA
+        recovery back to the signer address."""
+        body = '{"hello": "world"}'
+        headers = sign_request(
+            wallet,
+            method="POST",
+            url="https://api.execution.market/api/v1/tasks",
+            body=body,
+            nonce="test-nonce",
+        )
+
+        address = account.address.lower()
+        expected_params = (
+            '("@method" "@authority" "@path" "content-digest")'
+            f";created={FIXED_NOW};expires={FIXED_NOW + 300}"
+            f';nonce="test-nonce";keyid="erc8128:8453:{address}";alg="eip191"'
+        )
+        assert headers["Signature-Input"] == f"eth={expected_params}"
+
+        expected_base = "\n".join(
+            [
+                '"@method": POST',
+                '"@authority": api.execution.market',
+                '"@path": /api/v1/tasks',
+                f'"content-digest": {RFC9530_DIGEST}',
+                f'"@signature-params": {expected_params}',
+            ]
+        )
+        sig = _decode_signature(headers)
+
+        # (a) deterministic re-sign of the rebuilt base matches byte-for-byte
+        expected_sig = account.sign_message(encode_defunct(text=expected_base))
+        assert sig == expected_sig.signature
+
+        # (b) EIP-191 recovery of the header signature yields the signer
+        recovered = Account.recover_message(
+            encode_defunct(text=expected_base), signature=sig
+        )
+        assert recovered.lower() == address
+
+    def test_query_component_covered(self, wallet):
+        headers = sign_request(
+            wallet,
+            method="GET",
+            url="https://api.execution.market/api/v1/tasks?status=published&limit=5",
+            nonce="n1",
+        )
+        assert '"@query"' in headers["Signature-Input"]
+        assert "Content-Digest" not in headers
+
+    def test_no_body_no_content_digest(self, wallet):
+        headers = sign_request(
+            wallet,
+            method="POST",
+            url="https://api.execution.market/api/v1/tasks/abc/cancel",
+            nonce="n1",
+        )
+        assert "Content-Digest" not in headers
+        assert '"content-digest"' not in headers["Signature-Input"]
+
+
+# =============================================================================
+# Fixture integrity — the copied vectors are cryptographically sound.
+# A corrupted or hand-edited copy fails here before any conformance assert.
+# =============================================================================
+
+
+class TestFixtureIntegrity:
+    @pytest.mark.parametrize("variant", VARIANT_NAMES)
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_signature_recovers_to_frozen_address(self, variant, request_name):
+        """EIP-191 recovery over each stored base yields the frozen signer."""
+        vec = VECTORS[variant][request_name]
+        sig_field = vec["headers"]["Signature"]
+        assert sig_field.startswith("eth=:") and sig_field.endswith(":")
+        sig = base64.b64decode(sig_field[len("eth=:") : -1])
+        assert len(sig) == 65, "pinned encoding is base64(r||s||v, 65 bytes)"
+        recovered = Account.recover_message(
+            encode_defunct(text=vec["signature_base"]), signature=sig
+        )
+        assert recovered.lower() == FROZEN["address"]
+
+    @pytest.mark.parametrize("variant", VARIANT_NAMES)
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_signature_input_matches_base_params(self, variant, request_name):
+        """The on-wire Signature-Input is the base's @signature-params line."""
+        vec = VECTORS[variant][request_name]
+        last_line = vec["signature_base"].splitlines()[-1]
+        assert last_line.startswith('"@signature-params": ')
+        sig_params = last_line[len('"@signature-params": ') :]
+        assert vec["headers"]["Signature-Input"] == f"eth={sig_params}"
+
+
+# =============================================================================
+# Pinned policy — the canonical wire format this module emits, spelled out
+# =============================================================================
+
+
+class TestPinnedPolicy:
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_canonical_emits_alg_eip191(self, request_name):
+        sig_input = VECTORS["canonical"][request_name]["headers"]["Signature-Input"]
+        assert sig_input.endswith(';alg="eip191"')
+
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_canonical_keyid_is_lowercase(self, request_name):
+        sig_input = VECTORS["canonical"][request_name]["headers"]["Signature-Input"]
+        keyid = f'keyid="erc8128:{FROZEN["chain_id"]}:{FROZEN["address"]}"'
+        assert keyid in sig_input
+        assert FROZEN["address_checksummed"] not in sig_input, (
+            "checksummed keyid caused the v9.x silent-auth incident"
+        )
+
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_canonical_param_order(self, request_name):
+        """created;expires;nonce;keyid;alg — the pinned order."""
+        sig_input = VECTORS["canonical"][request_name]["headers"]["Signature-Input"]
+        params_part = sig_input.split(")", 1)[1]
+        keys = [p.split("=", 1)[0] for p in params_part.lstrip(";").split(";")]
+        assert keys == ["created", "expires", "nonce", "keyid", "alg"]
+
+    def test_policy_block_pins_the_decision(self):
+        pol = FIXTURE["policy"]["pinned_wire_format"]
+        assert pol["alg"] == "eip191"
+        assert pol["alg_required"] is True
+        assert pol["keyid_lowercase"] is True
+        assert pol["signature_params_order"] == [
+            "created",
+            "expires",
+            "nonce",
+            "keyid",
+            "alg",
+        ]
+
+
+# =============================================================================
+# Golden-vector conformance — byte-equality against the canonical wire format.
+# ANY change that moves these bytes breaks auth for every consumer at once.
+# =============================================================================
+
+
+class TestGoldenVectorConformance:
+    @pytest.mark.parametrize("request_name", REQUEST_NAMES)
+    def test_headers_match_canonical_vector(self, request_name, monkeypatch):
+        # Key stored 0x-less so the secret scanner never sees 0x + 64 hex.
+        wallet = EnvKeyAdapter(private_key="0x" + FROZEN["private_key"])
+        monkeypatch.setattr(
+            erc8128_mod,
+            "time",
+            types.SimpleNamespace(time=lambda: float(FROZEN["created"])),
+        )
+        spec = REQUESTS[request_name]
+        headers = sign_request(
+            wallet,
+            method=spec["method"],
+            url=spec["url"],
+            body=spec["body"],
+            nonce=FROZEN["nonce"],
+            chain_id=FROZEN["chain_id"],
+        )
+        expected = VECTORS["canonical"][request_name]["headers"]
+        assert headers == expected
+
+
+# =============================================================================
+# fetch_nonce — URL construction and response parsing (no network)
+# =============================================================================
+
+
+class _FakeNonceResponse:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"nonce": "nonce-xyz", "ttl_seconds": 300}
+
+
+class _FakeAsyncClient:
+    """Records the requested URL; returns a canned nonce payload."""
+
+    last_url = None
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url, **kwargs):
+        _FakeAsyncClient.last_url = url
+        return _FakeNonceResponse()
+
+
+class TestFetchNonce:
+    async def test_fetches_from_the_nonce_endpoint(self, monkeypatch):
+        monkeypatch.setattr(
+            erc8128_mod, "httpx", types.SimpleNamespace(AsyncClient=_FakeAsyncClient)
+        )
+        nonce = await fetch_nonce("https://api.execution.market")
+        assert nonce == "nonce-xyz"
+        assert (
+            _FakeAsyncClient.last_url
+            == "https://api.execution.market/api/v1/auth/erc8128/nonce"
+        )
+
+    async def test_trailing_slash_is_stripped(self, monkeypatch):
+        monkeypatch.setattr(
+            erc8128_mod, "httpx", types.SimpleNamespace(AsyncClient=_FakeAsyncClient)
+        )
+        await fetch_nonce("https://api.execution.market/")
+        assert (
+            _FakeAsyncClient.last_url
+            == "https://api.execution.market/api/v1/auth/erc8128/nonce"
+        )

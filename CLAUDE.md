@@ -19,6 +19,7 @@ src/uvd_x402_sdk/
 ├── response.py              # 402 response helpers
 ├── discovery.py             # BazaarClient - resource registration and discovery
 ├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
+├── erc8128.py               # ERC-8128 Signed HTTP Requests (RFC 9421) — sign_request() + fetch_nonce()
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
 ├── facilitator.py           # Facilitator addresses and fee payers
@@ -146,6 +147,12 @@ payment_requirements = {
 - `AgentId = Union[int, str]` - EVM uses int, Solana uses base58 pubkey string
 - `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
 - Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
+
+### ERC-8128 Signed HTTP Requests (erc8128.py)
+- `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers
+- `fetch_nonce(api_base)` - async, gets the single-use server nonce (5-min TTL, one per signed request including retries)
+- **Wire format is PINNED** — byte-equality enforced in `tests/test_erc8128.py` against `tests/fixtures/erc8128.json` (byte-identical copy of Execution Market's `shared/test-vectors/erc8128.json` F3-1 golden vectors; re-copy from there, never edit here): `alg="eip191"` emitted, keyid ALWAYS lowercase, params order `created;expires;nonce;keyid;alg`
+- Importable on a base install (httpx + stdlib; no eth-account until an adapter is instantiated)
 
 ### /accepts Negotiation (client.py)
 - `X402Client.negotiate_accepts()` - POST /accepts to facilitator
