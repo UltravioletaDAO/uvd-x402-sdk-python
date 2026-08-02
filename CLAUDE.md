@@ -148,6 +148,13 @@ payment_requirements = {
 - `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
 - Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
 
+### Escrow Pre-Auth Builder (escrow_signing.py)
+- `build_escrow_pre_auth(payment_config, network, payer, receiver, amount_usd, deadline, wallet, tier)` - signs the ADR-002 sign-on-assignment escrow lock (`ReceiveWithAuthorization`) and returns the raw JSON `X-Payment-Auth` header value
+- `compute_escrow_nonce(chain_id, escrow_address, typehash, payment_info)` - `AuthCaptureEscrow.getHash` mirror (raw keccak, payer zeroed, receiver INCLUDED - the signature commits to the worker, so signing happens AT ASSIGNMENT, never before)
+- **Golden vectors are PINNED** in `tests/fixtures/escrow-preauth.json` (byte-identical copy of Execution Market's `shared/test-vectors/escrow-preauth.json` F0-1 fixture; re-copy from there, never edit here)
+- Same math as `AdvancedEscrowClient._compute_nonce` but standalone (dict-based, no web3); `EnvKeyAdapter.sign_eip3009` produces the same digest when payer == adapter wallet - parity pinned in `tests/test_escrow_signing.py`
+- Fail-loud: unknown network / incomplete config raises `ValueError` (silent domain fallback = wallet-draining auth)
+
 ### ERC-8128 Signed HTTP Requests (erc8128.py)
 - `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers
 - `fetch_nonce(api_base)` - async, gets the single-use server nonce (5-min TTL, one per signed request including retries)

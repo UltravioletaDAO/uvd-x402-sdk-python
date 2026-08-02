@@ -27,6 +27,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
 - **ERC-8128 Signed HTTP Requests**: RFC 9421 request signing with any WalletAdapter — authenticate against wallet-signed APIs like Execution Market
+- **Escrow Pre-Auth Builder**: `build_escrow_pre_auth()` / `compute_escrow_nonce()` — sign the ADR-002 sign-on-assignment escrow lock (`X-Payment-Auth` header) with any WalletAdapter, no web3 required
 
 ## Quick Start (5 Lines)
 
@@ -1433,6 +1434,49 @@ lowercase (`erc8128:{chain_id}:{address}`), signature params in the order
 
 ---
 
+## Escrow Pre-Auth Builder (`build_escrow_pre_auth` / `compute_escrow_nonce`)
+
+Sign the escrow lock authorization for sign-on-assignment marketplaces
+(Execution Market ADR-002) with any `WalletAdapter`. The EIP-3009 nonce is
+`AuthCaptureEscrow.getHash(paymentInfo)` which **includes the receiver** — the
+signature commits to the chosen worker, so it can only be created AT
+ASSIGNMENT. Returns the raw JSON `X-Payment-Auth` header value the backend
+relays verbatim to the Facilitator `POST /settle`.
+
+```python
+import httpx
+from uvd_x402_sdk import EnvKeyAdapter, build_escrow_pre_auth
+
+# Full response of GET /api/v1/h2a/payment-config (never hardcode the domain)
+config = httpx.get(
+    "https://api.execution.market/api/v1/h2a/payment-config"
+).json()
+
+payment_auth = build_escrow_pre_auth(
+    payment_config=config,
+    network="base",
+    payer="0xPublisher...",          # must match the signing wallet
+    receiver="0xWorker...",          # committed by the nonce
+    amount_usd=0.10,
+    deadline=task_deadline_epoch,    # release window outlasts it
+    wallet=EnvKeyAdapter(),
+)
+# Send as the X-Payment-Auth header on the assignment request.
+```
+
+Fail-loud: an unknown network or incomplete network config raises
+`ValueError` — a silent domain fallback would sign a mismatched,
+wallet-draining authorization. On-chain limits enforced client-side: bounty
+<= $100 (AuthCaptureEscrow deposit condition) and the signed `maxFeeBps` must
+cover the operator's 1300 bps static fee. `compute_escrow_nonce()` is the
+standalone, dict-based equivalent of `AdvancedEscrowClient._compute_nonce`
+(no web3 needed — only `eth-abi`/`eth-utils`, pulled in by `eth-account`).
+The wrapper is byte-tested against golden vectors
+(`tests/fixtures/escrow-preauth.json`, shared with the Execution Market web,
+mobile and plugin-SDK suites).
+
+---
+
 ## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
 
 If the 402 you received advertises CAIP-2 networks (`eip155:8453`), you are
@@ -1737,6 +1781,11 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.35.0 (2026-08-02)
+- **Added**: `uvd_x402_sdk.escrow_signing` — escrow pre-auth builder for sign-on-assignment marketplaces (Execution Market ADR-002): `build_escrow_pre_auth()` signs the `ReceiveWithAuthorization` escrow lock and returns the raw JSON `X-Payment-Auth` header value; `compute_escrow_nonce()` mirrors `AuthCaptureEscrow.getHash` (payer zeroed, receiver INCLUDED — the signature commits to the worker)
+- Wrapper and nonce pinned by golden vectors (`tests/fixtures/escrow-preauth.json`, byte-identical copy of Execution Market's F0-1 shared fixture, also consumed by the EM web/mobile/plugin-SDK suites)
+- Purely additive — importable on a base install (eth-abi/eth-utils only required at signing time); `EnvKeyAdapter.sign_eip3009` and `AdvancedEscrowClient._compute_nonce` behavior unchanged, their digest/nonce parity is now pinned by tests
 
 ### v0.34.0 (2026-08-02)
 - **Added**: `uvd_x402_sdk.erc8128` — ERC-8128 Signed HTTP Requests (RFC 9421) with any `WalletAdapter`: `sign_request()` builds `Signature` / `Signature-Input` / `Content-Digest` headers, `fetch_nonce()` gets the single-use server nonce

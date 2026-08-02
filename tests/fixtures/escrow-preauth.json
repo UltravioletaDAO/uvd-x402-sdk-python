@@ -1,0 +1,127 @@
+{
+  "_note": [
+    "Golden vectors for the escrow pre-auth builder (ADR-002 sign-on-assignment).",
+    "Single source for the three mirrored suites: dashboard (vitest),",
+    "em-mobile (node --test) and em-plugin-sdk (pytest). Derived from",
+    "em_plugin_sdk.escrow_signing (the production reference, itself derived",
+    "from uvd_x402_sdk.advanced_escrow) with time.time() frozen at",
+    "frozen_build.now and the salt RNG frozen at frozen_build.salt.",
+    "The signature is deterministic (RFC 6979): the same key + typed data",
+    "produces the same bytes in eth_account and viem, so all three",
+    "frameworks must reproduce expected_wrapper exactly.",
+    "Hex values >= 32 bytes are stored WITHOUT the 0x prefix (the",
+    "pre-commit secret scanner blocks any literal 0x + 64 hex chars);",
+    "loaders re-prefix any string matching ^[0-9a-f]{64,}$.",
+    "signer_private_key is a synthetic test key (0x42 * 32) that never",
+    "held funds. signer_address differs from payer on purpose: the tests",
+    "only pin the signed bytes; payer binding is enforced on-chain and by",
+    "the backend, not by the signer."
+  ],
+  "network": "base",
+  "network_config": {
+    "chain_id": 8453,
+    "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+    "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+    "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+    "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "usdc_domain_name": "USD Coin",
+    "usdc_domain_version": "2",
+    "payment_info_typehash": "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591",
+    "min_fee_bps": 0,
+    "max_fee_bps": 1800
+  },
+  "deposit_limit_usd": 100,
+  "escrow_tier_windows": {
+    "micro": {
+      "pre": 3600,
+      "auth": 7200,
+      "refund": 86400
+    },
+    "standard": {
+      "pre": 7200,
+      "auth": 86400,
+      "refund": 604800
+    }
+  },
+  "review_window_sec": 604800,
+  "refund_window_sec": 604800,
+  "payer": "0x2222222222222222222222222222222222222222",
+  "worker": "0x1111111111111111111111111111111111111111",
+  "bounty_usd": "0.10",
+  "bounty_atomic": "100000",
+  "static_vector": {
+    "_note": "compute_escrow_nonce(chain_id, escrow, typehash, payment_info) == expected_nonce (AuthCaptureEscrow.getHash mirror).",
+    "payment_info": {
+      "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+      "receiver": "0x1111111111111111111111111111111111111111",
+      "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "maxAmount": "100000",
+      "preApprovalExpiry": 1760003600,
+      "authorizationExpiry": 1760007200,
+      "refundExpiry": 1760086400,
+      "minFeeBps": 0,
+      "maxFeeBps": 1800,
+      "feeReceiver": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+      "salt": "abababababababababababababababababababababababababababababababab"
+    },
+    "expected_nonce": "5890a092cb9b8d3c17efc8a3fca99886d05f53ced3432a530eb2b4c7ef517f59"
+  },
+  "frozen_build": {
+    "_note": "build_escrow_pre_auth(payment_config, 'base', payer, worker, bounty_usd, deadline, wallet, tier) with time/salt frozen must yield expected_wrapper byte-for-byte (parsed deep-equal).",
+    "signer_private_key": "4242424242424242424242424242424242424242424242424242424242424242",
+    "signer_address": "0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025",
+    "now": 1760000000,
+    "salt": "abababababababababababababababababababababababababababababababab",
+    "deadline": 1760432000,
+    "tier": "micro",
+    "expected_typed_data": {
+      "domain": {
+        "name": "USD Coin",
+        "version": "2",
+        "chainId": 8453,
+        "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      "primaryType": "ReceiveWithAuthorization",
+      "message": {
+        "from": "0x2222222222222222222222222222222222222222",
+        "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "value": "100000",
+        "validAfter": "0",
+        "validBefore": "1760003600",
+        "nonce": "9d3f66fc27b1216dd6745a00a853b8088d0a6275a8a6f6c69603f452e0f99769"
+      }
+    },
+    "expected_wrapper": {
+      "x402Version": 2,
+      "scheme": "escrow",
+      "payload": {
+        "authorization": {
+          "from": "0x2222222222222222222222222222222222222222",
+          "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+          "value": "100000",
+          "validAfter": "0",
+          "validBefore": "1760003600",
+          "nonce": "9d3f66fc27b1216dd6745a00a853b8088d0a6275a8a6f6c69603f452e0f99769"
+        },
+        "signature": "428a0a709ea26747300e20762814e11ffa2c8212fb0e87d197770852d7a03fa119b87fb0f1a744b1abb603a5d8e5931d8426d35df990f719d0ecd213d80a20d51c",
+        "paymentInfo": {
+          "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+          "receiver": "0x1111111111111111111111111111111111111111",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "maxAmount": "100000",
+          "preApprovalExpiry": 1760003600,
+          "authorizationExpiry": 1761036800,
+          "refundExpiry": 1761641600,
+          "minFeeBps": 0,
+          "maxFeeBps": 1800,
+          "feeReceiver": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+          "salt": "abababababababababababababababababababababababababababababababab"
+        }
+      },
+      "paymentRequirements": {
+        "scheme": "escrow",
+        "network": "eip155:8453"
+      }
+    }
+  }
+}
