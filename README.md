@@ -1124,6 +1124,57 @@ Without this, the facilitator will use wrong EIP-712 domain and signature verifi
 
 ---
 
+## Settle Overrides, Retry & Non-Raising Settle
+
+### Asset / EIP-712 domain overrides (non-USDC settles)
+
+`settle_payment()`, `verify_payment()` and `process_payment()` accept `asset` and
+`eip712_domain` overrides. By default they send the network's USDC address and the SDK
+registry's domain — the overrides let YOUR token registry decide instead (required when
+the token is not in the SDK registry, or when registries drift on domain names):
+
+```python
+result = client.process_payment(
+    header,
+    Decimal("0.10"),
+    asset="0x01bFF41798a0BcF287b996046Ca68b395DbC1071",   # the token you actually settle
+    eip712_domain={"name": "USD₮0", "version": "1"},        # the domain the token contract uses
+)
+```
+
+`create_authorization()` accepts the same `eip712_domain` override — there it changes the
+**signed digest** (and the non-USDC `token.eip712` block), so the signature verifies
+against the domain the verifier resolves. A partial domain (missing `name` or `version`)
+raises `ValueError` before anything is signed or sent.
+
+### Opt-in settle retry (anti-double-settle guard)
+
+```python
+response = client.settle_payment(payload, Decimal("0.10"), retry=True)
+```
+
+Default `False` — a single attempt, exactly as before. With `retry=True`: up to 3 attempts
+with exponential backoff (1s, 2s), retrying **only** transient transport errors and 5xx.
+Never retried:
+
+- **4xx** — deterministic (bad request, auth, idempotency conflict); retrying amplifies it
+- **`success=false` inside a 200** — a business error, not a transient one
+- **A 5xx whose body already carries a transaction hash** — the facilitator broadcast the
+  tx (e.g. a non-fatal post-settle hook failed); retrying would settle TWICE
+
+### Non-raising settle
+
+```python
+result = client.try_settle_payment(payload, Decimal("0.10"), retry=True)
+# {"success": True, "tx_hash": "0x...", "error": None}
+```
+
+Same arguments as `settle_payment()`, but payment-flow errors come back as data instead of
+exceptions. **`success=False` with `tx_hash` set is the double-settle warning shape**: the
+facilitator returned an error status AFTER broadcasting — verify on-chain, do not re-send.
+
+---
+
 ## Error Handling
 
 ```python
@@ -1781,6 +1832,13 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.36.0 (2026-08-02)
+- **Added**: `asset` and `eip712_domain` overrides on `settle_payment()`, `verify_payment()` and `process_payment()` — the caller's token registry (not the SDK's) decides which token contract is settled and which EIP-712 domain (`{"name", "version"}`) goes to the facilitator via `extra`. Unblocks non-USDC settles where the token is not in the SDK registry or the registries drift
+- **Added**: `eip712_domain` override on `create_authorization()` — injects the domain into the SIGNED digest (and into the non-USDC `token.eip712` block), so the signature verifies against the domain the verifier resolves. Partial domains raise `ValueError` before signing
+- **Added**: opt-in settle retry — `settle_payment(..., retry=True)` (default `False`, single attempt exactly as before). Up to 3 attempts, exponential backoff (1s, 2s), retrying ONLY transient transport errors and 5xx; NEVER a 4xx, a business failure inside a 2xx, or a 5xx whose body already carries a transaction hash (**anti-double-settle guard**, ported from Execution Market's facilitator retry policy)
+- **Added**: `try_settle_payment()` — non-raising settle returning `{"success", "tx_hash", "error"}`; `success=False` with `tx_hash` set is the double-settle warning shape (the facilitator broadcast the tx despite the error status — verify on-chain, do NOT re-send)
+- Purely additive — every new parameter defaults to the previous behavior; the default wire request is byte-identical
 
 ### v0.35.0 (2026-08-02)
 - **Added**: `uvd_x402_sdk.escrow_signing` — escrow pre-auth builder for sign-on-assignment marketplaces (Execution Market ADR-002): `build_escrow_pre_auth()` signs the `ReceiveWithAuthorization` escrow lock and returns the raw JSON `X-Payment-Auth` header value; `compute_escrow_nonce()` mirrors `AuthCaptureEscrow.getHash` (payer zeroed, receiver INCLUDED — the signature commits to the worker)

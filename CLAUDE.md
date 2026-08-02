@@ -161,6 +161,12 @@ payment_requirements = {
 - **Wire format is PINNED** — byte-equality enforced in `tests/test_erc8128.py` against `tests/fixtures/erc8128.json` (byte-identical copy of Execution Market's `shared/test-vectors/erc8128.json` F3-1 golden vectors; re-copy from there, never edit here): `alg="eip191"` emitted, keyid ALWAYS lowercase, params order `created;expires;nonce;keyid;alg`
 - Importable on a base install (httpx + stdlib; no eth-account until an adapter is instantiated)
 
+### Settle Overrides, Retry & Non-Raising Settle (client.py, v0.36.0)
+- `settle_payment()` / `verify_payment()` / `process_payment()` accept `asset` (token contract address) and `eip712_domain` (`{"name", "version"}`) overrides — the caller's token registry wins over the SDK's (non-USDC settles, registry drift). Defaults unchanged: network USDC + registry domain
+- `create_authorization()` accepts the same `eip712_domain` override — enters the SIGNED digest and the non-USDC `token.eip712` block. Partial domain raises `ValueError` before signing (fail-loud)
+- `settle_payment(..., retry=True)` (default OFF) — up to 3 attempts, backoff 1s/2s, ported from Execution Market's `mcp_server/integrations/_http_retry.py`: retries transient transport errors + 5xx, NEVER 4xx, NEVER `success=false` in a 2xx, NEVER a 5xx whose body carries a tx hash (**anti-double-settle guard**)
+- `try_settle_payment()` — non-raising settle returning `{"success", "tx_hash", "error"}`; `success=False` + `tx_hash` set = the facilitator broadcast despite the error status (verify on-chain, never re-send)
+
 ### /accepts Negotiation (client.py)
 - `X402Client.negotiate_accepts()` - POST /accepts to facilitator
 - Faremeter middleware compatibility
@@ -187,7 +193,7 @@ payment_requirements = {
 
 ## Known Limitations
 
-1. **X402Client.process_payment()** - Doesn't accept `token_type` parameter yet
+1. **X402Client.process_payment()** - Doesn't accept `token_type` parameter yet (since v0.36.0 the `asset` + `eip712_domain` overrides cover the non-USDC settle case; amounts still convert with the network's USDC decimals)
 2. **Response builder** - Hardcodes `token="USDC"` in 402 response
 3. **SVM/Stellar/NEAR** - Only USDC supported
 

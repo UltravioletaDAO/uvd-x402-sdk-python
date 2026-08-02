@@ -20,6 +20,7 @@ import httpx
 
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import (
+    X402Error,
     InvalidPayloadError,
     PaymentVerificationError,
     PaymentSettlementError,
@@ -43,6 +44,100 @@ from uvd_x402_sdk.networks import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Settle Retry Policy (opt-in via settle_payment(..., retry=True))
+# =============================================================================
+#
+# Ported from Execution Market's facilitator retry policy
+# (mcp_server/integrations/_http_retry.py). The rules:
+#
+#   * Retry transient transport failures (timeout / network / protocol) and
+#     5xx responses — up to SETTLE_RETRY_ATTEMPTS with exponential backoff.
+#   * NEVER retry a 4xx. Those are deterministic (bad request, auth,
+#     idempotency conflict); retrying only amplifies the error.
+#   * NEVER retry a business-level failure inside a 2xx (success=false).
+#   * NEVER retry a 5xx whose body already carries a transaction hash. The
+#     facilitator can respond 5xx AFTER broadcasting the tx (e.g. a non-fatal
+#     post-settle hook failed) — retrying in that state risks a DOUBLE-SETTLE.
+
+SETTLE_RETRY_ATTEMPTS = 3
+_SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
+
+
+def _extract_tx_hash_from_body(body: Any) -> Optional[str]:
+    """Return the transaction hash carried in a facilitator response body, if any.
+
+    The facilitator reports the hash under several shapes depending on the
+    endpoint and error path: {"transaction": "0x…"}, {"transaction": {"hash":
+    "0x…"}}, {"txHash": …}, {"tx_hash": …}, {"transaction_hash": …}.
+    """
+    if not isinstance(body, dict):
+        return None
+    tx = body.get("transaction")
+    if isinstance(tx, dict) and tx.get("hash"):
+        return str(tx["hash"])
+    if isinstance(tx, str) and tx:
+        return tx
+    for key in ("txHash", "tx_hash", "transaction_hash"):
+        if body.get(key):
+            return str(body[key])
+    return None
+
+
+def _facilitator_error_tx_hash(exc: FacilitatorError) -> Optional[str]:
+    """Extract a tx hash from a FacilitatorError's raw response body, if present."""
+    if not exc.response_body:
+        return None
+    try:
+        body = json.loads(exc.response_body)
+    except (ValueError, TypeError):
+        return None
+    return _extract_tx_hash_from_body(body)
+
+
+def _is_retryable_settle_error(exc: Exception) -> bool:
+    """Return True if a failed settle attempt is safe to retry.
+
+    See the policy block above. The anti-double-settle guard lives here: a
+    5xx whose body already contains a transaction hash is NOT retryable.
+    """
+    if isinstance(exc, X402TimeoutError):
+        # The facilitator is idempotent per EIP-3009 nonce, and the SDK's
+        # on-chain fallback check already ran before this was raised.
+        return True
+    if isinstance(exc, FacilitatorError):
+        if exc.status_code is None:
+            # Wrapped httpx.RequestError — transient transport issue.
+            return True
+        if exc.status_code < 500:
+            return False
+        if _facilitator_error_tx_hash(exc) is not None:
+            logger.warning(
+                "Facilitator returned %d but body contains a tx hash — "
+                "not retrying to avoid double-settle.",
+                exc.status_code,
+            )
+            return False
+        return True
+    # PaymentSettlementError and everything else: business errors, not transient.
+    return False
+
+
+def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
+    """Validate a caller-supplied EIP-712 domain override and normalise it.
+
+    Fail-loud on purpose: a wrong or partial EIP-712 domain produces a
+    signature the token contract rejects — fail here, not on-chain.
+    """
+    missing = [k for k in ("name", "version") if not domain.get(k)]
+    if missing:
+        raise ValueError(
+            "eip712_domain requires non-empty 'name' and 'version' "
+            f"(missing: {', '.join(missing)})"
+        )
+    return {"name": domain["name"], "version": domain["version"]}
 
 
 class X402Client:
@@ -257,6 +352,8 @@ class X402Client:
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
         pay_to: Optional[str] = None,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
     ) -> PaymentRequirements:
         """
         Build payment requirements for facilitator request.
@@ -264,6 +361,14 @@ class X402Client:
         Args:
             payload: Parsed payment payload
             expected_amount_usd: Expected payment amount in USD
+            pay_to: Override recipient address
+            asset: Override the token contract address sent as `asset`
+                (defaults to the network's USDC). Required for non-USDC
+                settles where the token is not in the SDK registry.
+            eip712_domain: Override the EIP-712 domain params sent to the
+                facilitator via `extra` ({"name": ..., "version": ...}).
+                Use when the caller's token registry disagrees with the
+                SDK's (e.g. USDT "USD₮0" vs "Tether USD" on Optimism).
 
         Returns:
             PaymentRequirements object
@@ -295,11 +400,14 @@ class X402Client:
             mimeType="application/json",
             payTo=recipient,
             maxTimeoutSeconds=60,
-            asset=network_config.usdc_address,
+            asset=asset if asset is not None else network_config.usdc_address,
         )
 
-        # Add EIP-712 domain params for EVM chains
-        if network_config.network_type == NetworkType.EVM:
+        # EIP-712 domain params: caller override wins; otherwise the SDK
+        # registry values for EVM chains (unchanged default behavior).
+        if eip712_domain is not None:
+            requirements.extra = _validated_eip712_domain(eip712_domain)
+        elif network_config.network_type == NetworkType.EVM:
             requirements.extra = {
                 "name": network_config.usdc_domain_name,
                 "version": network_config.usdc_domain_version,
@@ -316,6 +424,9 @@ class X402Client:
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
         pay_to: Optional[str] = None,
+        *,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -326,6 +437,10 @@ class X402Client:
             payload: Parsed payment payload
             expected_amount_usd: Expected payment amount in USD
             pay_to: Override recipient address (must match auth.to in EIP-3009)
+            asset: Override the token contract address (non-USDC settles).
+                Must match what settle_payment will use.
+            eip712_domain: Override the EIP-712 domain params sent via `extra`
+                ({"name": ..., "version": ...})
 
         Returns:
             VerifyResponse from facilitator
@@ -336,7 +451,13 @@ class X402Client:
             TimeoutError: If request times out
         """
         normalized_network = self.validate_network(payload.network)
-        requirements = self._build_payment_requirements(payload, expected_amount_usd, pay_to=pay_to)
+        requirements = self._build_payment_requirements(
+            payload,
+            expected_amount_usd,
+            pay_to=pay_to,
+            asset=asset,
+            eip712_domain=eip712_domain,
+        )
 
         verify_request = {
             "x402Version": 1,
@@ -386,6 +507,10 @@ class X402Client:
         payload: PaymentPayload,
         expected_amount_usd: Decimal,
         pay_to: Optional[str] = None,
+        *,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
+        retry: bool = False,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -396,6 +521,15 @@ class X402Client:
             payload: Parsed payment payload
             expected_amount_usd: Expected payment amount in USD
             pay_to: Override recipient address (must match auth.to in EIP-3009)
+            asset: Override the token contract address (non-USDC settles)
+            eip712_domain: Override the EIP-712 domain params sent via `extra`
+                ({"name": ..., "version": ...})
+            retry: Opt into the settle retry policy (default: False, single
+                attempt exactly as before). When True: up to
+                SETTLE_RETRY_ATTEMPTS attempts with exponential backoff on
+                transient transport errors and 5xx — but NEVER on 4xx,
+                business failures, or a 5xx whose body already carries a
+                transaction hash (anti-double-settle guard).
 
         Returns:
             SettleResponse from facilitator
@@ -405,8 +539,95 @@ class X402Client:
             FacilitatorError: If facilitator returns an error
             TimeoutError: If request times out
         """
+        if not retry:
+            return self._settle_once(
+                payload, expected_amount_usd, pay_to=pay_to,
+                asset=asset, eip712_domain=eip712_domain,
+            )
+
+        for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
+            try:
+                return self._settle_once(
+                    payload, expected_amount_usd, pay_to=pay_to,
+                    asset=asset, eip712_domain=eip712_domain,
+                )
+            except Exception as exc:
+                if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
+                    raise
+                backoff = min(float(2 ** (attempt - 1)), _SETTLE_RETRY_MAX_BACKOFF_SECONDS)
+                logger.warning(
+                    "Settle attempt %d/%d failed (%s) — retrying in %.0fs",
+                    attempt, SETTLE_RETRY_ATTEMPTS, exc, backoff,
+                )
+                time.sleep(backoff)
+
+        raise AssertionError("unreachable: settle retry loop returns or raises")
+
+    def try_settle_payment(
+        self,
+        payload: PaymentPayload,
+        expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
+        *,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
+        retry: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Settle payment without raising on payment-flow errors.
+
+        Same arguments and behavior as :meth:`settle_payment`, but every
+        ``X402Error`` is captured and returned as a result dict instead of
+        raised. Useful for callers that treat settle failures as data (job
+        queues, batch dispatchers) rather than control flow.
+
+        Non-payment exceptions (TypeError, etc. — genuine programming errors)
+        still propagate.
+
+        Returns:
+            Dict with:
+              - ``success`` (bool): whether settlement succeeded
+              - ``tx_hash`` (Optional[str]): the on-chain transaction hash.
+                May be set even when ``success`` is False — a 5xx whose body
+                carries a hash means the facilitator DID broadcast the tx
+                (do NOT re-settle; verify on-chain instead).
+              - ``error`` (Optional[str]): error message when failed
+        """
+        try:
+            response = self.settle_payment(
+                payload, expected_amount_usd, pay_to=pay_to,
+                asset=asset, eip712_domain=eip712_domain, retry=retry,
+            )
+        except X402Error as exc:
+            tx_hash: Optional[str] = None
+            if isinstance(exc, FacilitatorError):
+                tx_hash = _facilitator_error_tx_hash(exc)
+            elif isinstance(exc, PaymentSettlementError):
+                tx_hash = exc.tx_hash
+            return {"success": False, "tx_hash": tx_hash, "error": exc.message}
+        return {
+            "success": True,
+            "tx_hash": response.get_transaction_hash(),
+            "error": None,
+        }
+
+    def _settle_once(
+        self,
+        payload: PaymentPayload,
+        expected_amount_usd: Decimal,
+        pay_to: Optional[str] = None,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
+    ) -> SettleResponse:
+        """Single settle attempt — the pre-retry settle_payment body, unchanged."""
         normalized_network = self.validate_network(payload.network)
-        requirements = self._build_payment_requirements(payload, expected_amount_usd, pay_to=pay_to)
+        requirements = self._build_payment_requirements(
+            payload,
+            expected_amount_usd,
+            pay_to=pay_to,
+            asset=asset,
+            eip712_domain=eip712_domain,
+        )
 
         settle_request = {
             "x402Version": 1,
@@ -516,6 +737,9 @@ class X402Client:
         x_payment_header: str,
         expected_amount_usd: Decimal,
         pay_to: Optional[str] = None,
+        *,
+        asset: Optional[str] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -530,6 +754,10 @@ class X402Client:
             x_payment_header: X-PAYMENT header value (base64-encoded JSON)
             expected_amount_usd: Expected payment amount in USD
             pay_to: Override recipient address (must match auth.to in EIP-3009)
+            asset: Override the token contract address (non-USDC settles).
+                Applied to BOTH the verify and the settle requirements.
+            eip712_domain: Override the EIP-712 domain params sent via `extra`
+                ({"name": ..., "version": ...}). Applied to both steps.
 
         Returns:
             PaymentResult with payer address, transaction hash, etc.
@@ -547,10 +775,16 @@ class X402Client:
         logger.info(f"Processing payment: network={payload.network}, amount=${expected_amount_usd}")
 
         # Verify payment
-        verify_response = self.verify_payment(payload, expected_amount_usd, pay_to=pay_to)
+        verify_response = self.verify_payment(
+            payload, expected_amount_usd, pay_to=pay_to,
+            asset=asset, eip712_domain=eip712_domain,
+        )
 
         # Settle payment
-        settle_response = self.settle_payment(payload, expected_amount_usd, pay_to=pay_to)
+        settle_response = self.settle_payment(
+            payload, expected_amount_usd, pay_to=pay_to,
+            asset=asset, eip712_domain=eip712_domain,
+        )
 
         # Build result
         return PaymentResult(
@@ -1080,6 +1314,7 @@ class X402Client:
         accepted: Optional[Dict[str, Any]] = None,
         resource: Optional[Union[str, Dict[str, Any]]] = None,
         extensions: Optional[Any] = None,
+        eip712_domain: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Create a signed EIP-3009 payment authorization (X-PAYMENT header value).
@@ -1093,6 +1328,12 @@ class X402Client:
             chain_name: Network name (uses connected chain if not specified)
             valid_duration: Authorization validity in seconds (default: 1 hour)
             token_type: Token to pay with (default: 'usdc')
+            eip712_domain: Override the EIP-712 domain used to SIGN
+                ({"name": ..., "version": ...}). The domain is part of the
+                signed digest — if the server/facilitator resolves a different
+                name/version than the SDK registry (they diverge on some
+                chains), the signature will not verify unless the caller
+                injects the domain the verifier expects.
 
         Returns:
             Base64-encoded X-PAYMENT header value
@@ -1167,10 +1408,20 @@ class X402Client:
         valid_before = now + valid_duration
         nonce = "0x" + os.urandom(32).hex()
 
-        # EIP-712 domain
+        # EIP-712 domain — registry values unless the caller injects its own
+        # (name/version divergences between registries are real, and a wrong
+        # domain silently produces a signature the verifier rejects).
+        if eip712_domain is not None:
+            domain_override = _validated_eip712_domain(eip712_domain)
+            domain_name = domain_override["name"]
+            domain_version = domain_override["version"]
+        else:
+            domain_name = token_config.name
+            domain_version = token_config.version
+
         domain_data = {
-            "name": token_config.name,
-            "version": token_config.version,
+            "name": domain_name,
+            "version": domain_version,
             "chainId": network_config.chain_id,
             "verifyingContract": token_config.address,
         }
@@ -1255,14 +1506,16 @@ class X402Client:
                 "payload": inner,
             }
 
-        # Add token info for non-USDC tokens
+        # Add token info for non-USDC tokens. Carries the EFFECTIVE domain
+        # (override included): the eip712 block exists so the verifier resolves
+        # the same domain the signature was produced with.
         if token_type != "usdc":
             payload["payload"]["token"] = {
                 "address": token_config.address,
                 "symbol": token_type.upper(),
                 "eip712": {
-                    "name": token_config.name,
-                    "version": token_config.version,
+                    "name": domain_name,
+                    "version": domain_version,
                 },
             }
 
