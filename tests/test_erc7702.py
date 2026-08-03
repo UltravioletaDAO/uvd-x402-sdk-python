@@ -119,7 +119,7 @@ def _config():
         "escrow": "0x2222222222222222222222222222222222222222",
         "token_collector": "0x3333333333333333333333333333333333333333",
         "usdc": "0x4444444444444444444444444444444444444444",
-        "usdc_domain_name": "USDC", "usdc_domain_version": "2",
+        "usdc_domain_name": "USD Coin", "usdc_domain_version": "2",
     }}}}
 
 
@@ -171,3 +171,44 @@ def test_si_NO_SE_SABE_no_se_firma_NADA():
     with pytest.raises(ValueError, match="could not determine"):
         _construir(wallet=w, delegation_resolver=lambda a, n: None)
     assert w.llamadas == [], "no se puede haber pedido ninguna firma"
+
+
+# ── el dominio EIP-712, contra la cadena y no contra el servidor ─────────────
+#
+# Aporte de KarmaCadabra (2026-08-02). El SDK verificaba que la config estuviera
+# COMPLETA y le creía el `usdc_domain_name`/`version` al servidor. Pero ese par ES el
+# dominio con el que se firma: un valor equivocado produce una autorización que o no
+# liquida nunca, o —peor— es válida para algo que no se quiso autorizar. Confiarle el
+# dominio al servidor es confiarle el significado de la firma.
+
+def test_un_dominio_que_contradice_la_cadena_NO_se_firma():
+    from uvd_x402_sdk.escrow_signing import build_escrow_pre_auth
+    cfg = _config()
+    cfg["escrow"]["networks"]["base"]["usdc_domain_name"] = "USDC"   # Base es "USD Coin"
+    w = _Wallet()
+    with pytest.raises(ValueError, match="domain mismatch"):
+        build_escrow_pre_auth(
+            payment_config=cfg, network="base",
+            payer="0x5555555555555555555555555555555555555555",
+            receiver="0x6666666666666666666666666666666666666666",
+            amount_usd=0.05, deadline=None, wallet=w)
+    assert w.llamadas == [], "no se puede haber pedido ninguna firma"
+
+
+def test_una_cadena_DESCONOCIDA_avisa_pero_no_bloquea(caplog):
+    """Bloquear rompería a cualquiera que agregue una red antes de que el SDK la
+    conozca; avisar deja la decisión a la vista sin frenar el trabajo."""
+    import logging
+    from uvd_x402_sdk.escrow_signing import build_escrow_pre_auth
+    cfg = _config()
+    cfg["escrow"]["networks"]["base"]["chain_id"] = 999999          # no está en la tabla
+    cfg["escrow"]["networks"]["base"]["usdc_domain_name"] = "Lo que sea"
+    caplog.set_level(logging.WARNING)
+    w = _Wallet()
+    build_escrow_pre_auth(
+        payment_config=cfg, network="base",
+        payer="0x5555555555555555555555555555555555555555",
+        receiver="0x6666666666666666666666666666666666666666",
+        amount_usd=0.05, deadline=None, wallet=w)
+    assert w.llamadas, "una cadena desconocida sí se firma"
+    assert any("UNVERIFIED chain" in r.getMessage() for r in caplog.records)

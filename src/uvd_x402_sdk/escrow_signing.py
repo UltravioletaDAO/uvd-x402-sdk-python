@@ -77,7 +77,40 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from uvd_x402_sdk.wallet import WalletAdapter
 
+import logging
+
 from . import erc7702 as _erc7702
+
+_log = logging.getLogger("uvd_x402_sdk.escrow_signing")
+
+# ── Dominios EIP-712 de USDC VERIFICADOS ON-CHAIN ────────────────────────────
+# El servidor manda `usdc_domain_name`/`usdc_domain_version` en la config de pago, y
+# hasta acá se le creía. Pero ese par ES el dominio con el que se firma: un valor
+# equivocado produce una autorizacion que o no liquida nunca, o —peor— es valida para
+# algo que no se quiso autorizar. Confiar en el servidor para el dominio es confiarle
+# el significado de la firma.
+#
+# Esta tabla se llena LEYENDO EL CONTRATO (`name()`/`version()` del token en cada
+# cadena), no copiando documentacion. Contribuida por KarmaCadabra, que corre el flujo
+# en 9 cadenas y la construyo asi.
+#
+# Politica deliberada:
+#   - cadena EN la tabla y el servidor no coincide  -> se REHUSA firmar
+#   - cadena que no esta en la tabla                -> se firma, con AVISO fuerte
+# Bloquear una cadena desconocida rompería a cualquiera que agregue una red antes de
+# que este SDK la conozca; avisar deja la decision a la vista sin frenar el trabajo.
+VERIFIED_USDC_DOMAINS: dict[int, tuple[str, str]] = {
+    8453: ("USD Coin", "2"),                          # base
+    1: ("USD Coin", "2"),                             # ethereum
+    137: ("USD Coin", "2"),                           # polygon
+    42161: ("USD Coin", "2"),                         # arbitrum
+    42220: ("USDC", "2"),                             # celo
+    143: ("USDC", "2"),                               # monad
+    43114: ("USD Coin", "2"),                         # avalanche
+    10: ("USD Coin", "2"),                            # optimism
+    1187947933: ("Bridged USDC (SKALE Bridge)", "2"),  # skale
+}
+
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -286,6 +319,23 @@ def build_escrow_pre_auth(
             f"Incomplete escrow config for '{network}' (missing {missing}) — "
             "refusing to sign an EIP-3009 authorization with a mismatched domain."
         )
+
+    # El dominio con el que se va a firmar, contra la verdad leida de la cadena.
+    _cid = int(net["chain_id"])
+    _verificado = VERIFIED_USDC_DOMAINS.get(_cid)
+    _afirmado = (str(net["usdc_domain_name"]), str(net["usdc_domain_version"]))
+    if _verificado is not None and _afirmado != _verificado:
+        raise ValueError(
+            f"EIP-712 domain mismatch for '{network}' (chain {_cid}): the payment "
+            f"config asserts name/version {_afirmado} but the on-chain-verified domain "
+            f"is {_verificado} — refusing to sign. A wrong domain produces an "
+            f"authorization that either never settles or authorizes something else."
+        )
+    if _verificado is None:
+        _log.warning(
+            "signing escrow on UNVERIFIED chain %s (network %r) with the "
+            "server-asserted domain %s — read name()/version() from the token and add "
+            "it to VERIFIED_USDC_DOMAINS", _cid, network, _afirmado)
 
     typehash = escrow_cfg.get("payment_info_typehash")
     if not typehash:
