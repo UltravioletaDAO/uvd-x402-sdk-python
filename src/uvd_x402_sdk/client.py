@@ -354,6 +354,7 @@ class X402Client:
         pay_to: Optional[str] = None,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
     ) -> PaymentRequirements:
         """
         Build payment requirements for facilitator request.
@@ -369,6 +370,12 @@ class X402Client:
                 facilitator via `extra` ({"name": ..., "version": ...}).
                 Use when the caller's token registry disagrees with the
                 SDK's (e.g. USDT "USD₮0" vs "Tether USD" on Optimism).
+            token_decimals: Decimals of the token named by `asset`. The default
+                converts USD with the NETWORK's USDC decimals, which is wrong
+                the moment `asset` points at a token that does not share them —
+                USDC is 7 decimals on Stellar and 18 on BSC while AUSD is 6
+                everywhere, so the same override silently mis-prices by orders
+                of magnitude. Pass it whenever `asset` is passed.
 
         Returns:
             PaymentRequirements object
@@ -383,8 +390,16 @@ class X402Client:
                 supported_networks=get_supported_network_names(),
             )
 
-        # Convert USD to token amount
-        expected_amount_wei = network_config.get_token_amount(float(expected_amount_usd))
+        # Convert USD to token amount. With an explicit decimals the conversion
+        # stays in Decimal: float(Decimal("0.07")) is 0.070000000000000007, and
+        # at 18 decimals that rounds into a different amount than the payer
+        # signed, which the facilitator rejects.
+        if token_decimals is not None:
+            if token_decimals < 0:
+                raise ValueError(f"token_decimals must be non-negative, got {token_decimals}")
+            expected_amount_wei = int(expected_amount_usd * (Decimal(10) ** token_decimals))
+        else:
+            expected_amount_wei = network_config.get_token_amount(float(expected_amount_usd))
 
         # Get recipient for this network (allow per-call override)
         recipient = pay_to or self.config.get_recipient(normalized_network)
@@ -427,6 +442,7 @@ class X402Client:
         *,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -457,6 +473,7 @@ class X402Client:
             pay_to=pay_to,
             asset=asset,
             eip712_domain=eip712_domain,
+            token_decimals=token_decimals,
         )
 
         verify_request = {
@@ -510,6 +527,7 @@ class X402Client:
         *,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
         retry: bool = False,
     ) -> SettleResponse:
         """
@@ -524,6 +542,10 @@ class X402Client:
             asset: Override the token contract address (non-USDC settles)
             eip712_domain: Override the EIP-712 domain params sent via `extra`
                 ({"name": ..., "version": ...})
+            token_decimals: Decimals of the token named by `asset`. Without it
+                the USD amount is converted with the network's USDC decimals,
+                which mis-prices any token that does not share them (USDC is 7
+                decimals on Stellar, 18 on BSC). Pass it whenever `asset` is.
             retry: Opt into the settle retry policy (default: False, single
                 attempt exactly as before). When True: up to
                 SETTLE_RETRY_ATTEMPTS attempts with exponential backoff on
@@ -543,6 +565,7 @@ class X402Client:
             return self._settle_once(
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
+                token_decimals=token_decimals,
             )
 
         for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
@@ -550,6 +573,7 @@ class X402Client:
                 return self._settle_once(
                     payload, expected_amount_usd, pay_to=pay_to,
                     asset=asset, eip712_domain=eip712_domain,
+                    token_decimals=token_decimals,
                 )
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
@@ -571,6 +595,7 @@ class X402Client:
         *,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
         retry: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -596,7 +621,8 @@ class X402Client:
         try:
             response = self.settle_payment(
                 payload, expected_amount_usd, pay_to=pay_to,
-                asset=asset, eip712_domain=eip712_domain, retry=retry,
+                asset=asset, eip712_domain=eip712_domain,
+                token_decimals=token_decimals, retry=retry,
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
@@ -618,6 +644,7 @@ class X402Client:
         pay_to: Optional[str] = None,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
     ) -> SettleResponse:
         """Single settle attempt — the pre-retry settle_payment body, unchanged."""
         normalized_network = self.validate_network(payload.network)
@@ -627,6 +654,7 @@ class X402Client:
             pay_to=pay_to,
             asset=asset,
             eip712_domain=eip712_domain,
+            token_decimals=token_decimals,
         )
 
         settle_request = {
@@ -740,6 +768,7 @@ class X402Client:
         *,
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
+        token_decimals: Optional[int] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -758,6 +787,10 @@ class X402Client:
                 Applied to BOTH the verify and the settle requirements.
             eip712_domain: Override the EIP-712 domain params sent via `extra`
                 ({"name": ..., "version": ...}). Applied to both steps.
+            token_decimals: Decimals of the token named by `asset`. Without it
+                the USD amount is converted with the network's USDC decimals,
+                which mis-prices any token that does not share them. Pass it
+                whenever `asset` is passed. Applied to both steps.
 
         Returns:
             PaymentResult with payer address, transaction hash, etc.
@@ -778,12 +811,14 @@ class X402Client:
         verify_response = self.verify_payment(
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
+            token_decimals=token_decimals,
         )
 
         # Settle payment
         settle_response = self.settle_payment(
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
+            token_decimals=token_decimals,
         )
 
         # Build result

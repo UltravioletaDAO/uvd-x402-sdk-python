@@ -48,7 +48,7 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.37.0"
+__version__ = "0.38.0"
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
@@ -122,6 +122,7 @@ from uvd_x402_sdk.response import (
     create_402_headers_v2,
     payment_required_response_v2,
     Payment402BuilderV2,
+    bazaar_extension,
 )
 from uvd_x402_sdk.facilitator import (
     # Facilitator URL and constants
@@ -281,6 +282,7 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "bazaar_extension",
     "SAFE_TO_FALLBACK",
     "is_fallback_safe",
     "DelegationResolver",

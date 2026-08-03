@@ -240,12 +240,55 @@ class Payment402Builder:
 # =============================================================================
 
 
+def bazaar_extension(
+    input_schema: Dict[str, Any],
+    output_example: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build the `bazaar` extension block for an x402 v2 challenge.
+
+    This is what lets an agent client or a discovery crawler call the endpoint
+    straight from the 402 response, without fetching and interpreting an
+    OpenAPI document first: the request body schema and a sample response
+    travel inside the challenge itself.
+
+    402milly shipped this by hand and it is what made the resource classifiable
+    by x402scan's crawler.
+
+    Args:
+        input_schema: JSON Schema of the request body
+        output_example: A representative successful response body
+
+    Returns:
+        `{"bazaar": {...}}`, ready to pass as `extensions`
+
+    Example:
+        >>> extensions = bazaar_extension(
+        ...     input_schema={"type": "object", "properties": {"x": {"type": "integer"}}},
+        ...     output_example={"ok": True},
+        ... )
+    """
+    return {
+        "bazaar": {
+            "schema": {
+                "properties": {
+                    "input": {"properties": {"body": input_schema}},
+                    "output": {"properties": {"example": output_example}},
+                }
+            }
+        }
+    }
+
+
 def create_402_response_v2(
     amount_usd: Union[Decimal, float, str],
     config: X402Config,
-    resource: str = "",
+    resource: Union[str, Dict[str, Any]] = "",
     description: str = "",
     networks: Optional[List[str]] = None,
+    *,
+    extensions: Optional[Dict[str, Any]] = None,
+    max_timeout_seconds: int = 60,
 ) -> Dict[str, Any]:
     """
     Create an x402 v2 format 402 response with accepts array.
@@ -256,9 +299,18 @@ def create_402_response_v2(
     Args:
         amount_usd: Required payment amount in USD
         config: X402Config with recipient addresses
-        resource: Resource URL being purchased
-        description: Human-readable description
+        resource: Resource being purchased. A string is used as the URL and
+            kept at the top level alongside `description`/`mimeType`. A dict is
+            emitted verbatim as a resource OBJECT
+            (`{"url": ..., "description": ..., "mimeType": ...}`), which is the
+            shape discovery crawlers read.
+        description: Human-readable description (ignored when `resource` is a dict —
+            put it inside the object)
         networks: List of networks to offer (default: all enabled)
+        extensions: x402 `extensions` block. Use :func:`bazaar_extension` to
+            build the `bazaar` entry that makes the resource callable straight
+            from the challenge.
+        max_timeout_seconds: Settlement window advertised per payment option
 
     Returns:
         Dictionary suitable for JSON response body
@@ -302,11 +354,17 @@ def create_402_response_v2(
         # Calculate amount in token base units
         token_amount = network.get_token_amount(float(amount))
 
+        # `scheme` and `maxTimeoutSeconds` belong to each payment option, not
+        # only to the envelope: a client picks one entry out of `accepts` and
+        # must be able to read its terms without looking anywhere else.
+        # Discovery crawlers that classify resources skip entries missing them.
         option: Dict[str, Any] = {
+            "scheme": "exact",
             "network": caip2_network,
             "asset": network.usdc_address,
             "amount": str(token_amount),
             "payTo": recipient,
+            "maxTimeoutSeconds": max_timeout_seconds,
         }
 
         # Add EIP-712 domain for EVM chains
@@ -318,15 +376,26 @@ def create_402_response_v2(
 
         accepts.append(option)
 
-    return {
+    body: Dict[str, Any] = {
         "x402Version": 2,
         "scheme": "exact",
-        "resource": resource or config.resource_url or "/api/resource",
-        "description": description or config.description,
-        "mimeType": "application/json",
-        "maxTimeoutSeconds": 60,
-        "accepts": accepts,
     }
+
+    if isinstance(resource, dict):
+        # Resource object: url/description/mimeType live inside it.
+        body["resource"] = resource
+    else:
+        body["resource"] = resource or config.resource_url or "/api/resource"
+        body["description"] = description or config.description
+        body["mimeType"] = "application/json"
+
+    body["maxTimeoutSeconds"] = max_timeout_seconds
+    body["accepts"] = accepts
+
+    if extensions:
+        body["extensions"] = extensions
+
+    return body
 
 
 def create_402_headers_v2(
@@ -360,9 +429,12 @@ def create_402_headers_v2(
 def payment_required_response_v2(
     amount_usd: Union[Decimal, float, str],
     config: X402Config,
-    resource: str = "",
+    resource: Union[str, Dict[str, Any]] = "",
     description: str = "",
     networks: Optional[List[str]] = None,
+    *,
+    extensions: Optional[Dict[str, Any]] = None,
+    max_timeout_seconds: int = 60,
 ) -> tuple:
     """
     Create a complete x402 v2 402 response (body, headers, status code).
@@ -377,7 +449,15 @@ def payment_required_response_v2(
     Returns:
         Tuple of (body_dict, headers_dict, status_code)
     """
-    body = create_402_response_v2(amount_usd, config, resource, description, networks)
+    body = create_402_response_v2(
+        amount_usd,
+        config,
+        resource,
+        description,
+        networks,
+        extensions=extensions,
+        max_timeout_seconds=max_timeout_seconds,
+    )
     headers = create_402_headers_v2(body)
     return body, headers, 402
 
@@ -400,17 +480,19 @@ class Payment402BuilderV2:
     def __init__(self, config: X402Config) -> None:
         self._config = config
         self._amount: Decimal = Decimal("1.00")
-        self._resource: str = ""
+        self._resource: Union[str, Dict[str, Any]] = ""
         self._description: str = ""
         self._networks: Optional[List[str]] = None
+        self._extensions: Optional[Dict[str, Any]] = None
+        self._max_timeout_seconds: int = 60
 
     def amount(self, usd: Union[Decimal, float, str]) -> "Payment402BuilderV2":
         """Set the required payment amount in USD."""
         self._amount = Decimal(str(usd))
         return self
 
-    def resource(self, url: str) -> "Payment402BuilderV2":
-        """Set the resource URL."""
+    def resource(self, url: Union[str, Dict[str, Any]]) -> "Payment402BuilderV2":
+        """Set the resource URL, or a full resource object."""
         self._resource = url
         return self
 
@@ -424,6 +506,16 @@ class Payment402BuilderV2:
         self._networks = network_names
         return self
 
+    def extensions(self, extensions: Dict[str, Any]) -> "Payment402BuilderV2":
+        """Attach the x402 `extensions` block (see :func:`bazaar_extension`)."""
+        self._extensions = extensions
+        return self
+
+    def max_timeout_seconds(self, seconds: int) -> "Payment402BuilderV2":
+        """Set the settlement window advertised per payment option."""
+        self._max_timeout_seconds = seconds
+        return self
+
     def build(self) -> Dict[str, Any]:
         """Build the v2 response body."""
         return create_402_response_v2(
@@ -432,6 +524,8 @@ class Payment402BuilderV2:
             resource=self._resource,
             description=self._description,
             networks=self._networks,
+            extensions=self._extensions,
+            max_timeout_seconds=self._max_timeout_seconds,
         )
 
     def build_with_headers(self) -> tuple:
