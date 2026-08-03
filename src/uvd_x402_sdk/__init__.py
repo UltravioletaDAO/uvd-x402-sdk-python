@@ -240,6 +240,14 @@ from uvd_x402_sdk.erc8128 import (
 )
 
 # Escrow pre-auth builder (ADR-002 sign-on-assignment) — X-Payment-Auth header
+from uvd_x402_sdk.erc7702 import (
+    DelegationResolver,
+    delegate_target,
+    is_delegated,
+    rpc_delegation_resolver,
+    sign_eip3009_for_delegated,
+    wrap_signature,
+)
 from uvd_x402_sdk.escrow_signing import (
     build_escrow_pre_auth,
     compute_escrow_nonce,
@@ -272,6 +280,18 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "DelegationResolver",
+    "delegate_target",
+    "is_delegated",
+    "rpc_delegation_resolver",
+    "sign_eip3009_for_delegated",
+    "wrap_signature",
+    "wrap_signature",
+    "sign_eip3009_for_delegated",
+    "rpc_delegation_resolver",
+    "is_delegated",
+    "delegate_target",
+    "DelegationResolver",
     # Version
     "__version__",
     # Main client

@@ -77,6 +77,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from uvd_x402_sdk.wallet import WalletAdapter
 
+from . import erc7702 as _erc7702
+
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 USDC_DECIMALS = 6
@@ -215,6 +217,7 @@ def build_escrow_pre_auth(
     deadline: int | None,
     wallet: WalletAdapter,
     tier: str = "micro",
+    delegation_resolver: "_erc7702.DelegationResolver | None" = None,
 ) -> str:
     """Build + sign the escrow lock authorization AT ASSIGNMENT time.
 
@@ -350,25 +353,50 @@ def build_escrow_pre_auth(
         int(net["chain_id"]), net["escrow"], typehash, payment_info
     )
 
-    signed = wallet.sign_typed_data(
-        {
-            "domain": {
-                "name": net["usdc_domain_name"],
-                "version": net["usdc_domain_version"],
-                "chainId": int(net["chain_id"]),
-                "verifyingContract": to_checksum_address(net["usdc"]),
-            },
-            "types": RECEIVE_WITH_AUTHORIZATION_TYPES,
-            "message": {
-                "from": to_checksum_address(payer),
-                "to": to_checksum_address(net["token_collector"]),
-                "value": atomic,
-                "validAfter": 0,
-                "validBefore": payment_info["preApprovalExpiry"],
-                "nonce": bytes.fromhex(nonce.removeprefix("0x")),
-            },
-        }
-    )
+    typed = {
+        "domain": {
+            "name": net["usdc_domain_name"],
+            "version": net["usdc_domain_version"],
+            "chainId": int(net["chain_id"]),
+            "verifyingContract": to_checksum_address(net["usdc"]),
+        },
+        "types": RECEIVE_WITH_AUTHORIZATION_TYPES,
+        "message": {
+            "from": to_checksum_address(payer),
+            "to": to_checksum_address(net["token_collector"]),
+            "value": atomic,
+            "validAfter": 0,
+            "validBefore": payment_info["preApprovalExpiry"],
+            "nonce": bytes.fromhex(nonce.removeprefix("0x")),
+        },
+    }
+
+    # ── EIP-7702: a DELEGATED payer cannot settle a raw ECDSA authorization ──
+    # Once a gasless-wallet provider delegates the payer's EOA, the address has code
+    # and USDC validates via ERC-1271 only — raw ECDSA reverts (0x151d90fe) and the
+    # lock fails on-chain. Measured in production: 14 of 14 delegated payers failed;
+    # the one plain EOA locked fine. See uvd_x402_sdk.erc7702.
+    #
+    # THREE STATES, and the third is the one that matters: an UNKNOWN delegation is
+    # NOT "not delegated". Collapsing None to False is exactly how this survived eight
+    # days — signing raw for an account that can never settle it, silently.
+    delegated = _erc7702.is_delegated(payer, network, delegation_resolver)
+    if delegated is None and delegation_resolver is not None:
+        raise ValueError(
+            f"could not determine whether {payer} is EIP-7702-delegated on "
+            f"{network} (the resolver gave no verdict) — refusing to sign an escrow "
+            f"authorization blindly: the wrong dialect is unsettleable on-chain and "
+            f"the failure only shows up at lock time. Retry when the chain is readable."
+        )
+    if delegated:
+        inner = _erc7702.eip712_digest(typed["domain"], typed["types"], typed["message"])
+        signature = _erc7702.sign_eip3009_for_delegated(
+            wallet=wallet, inner_digest=inner,
+            chain_id=int(net["chain_id"]), account=to_checksum_address(payer),
+        )
+        signed = {"signature": signature}
+    else:
+        signed = wallet.sign_typed_data(typed)
 
     # Raw JSON (NOT base64): the backend relays this verbatim to the
     # Facilitator /settle after validating payer/amount/receiver.
