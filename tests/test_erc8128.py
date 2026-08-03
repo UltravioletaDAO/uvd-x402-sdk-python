@@ -305,3 +305,54 @@ class TestFetchNonce:
             _FakeAsyncClient.last_url
             == "https://api.execution.market/api/v1/auth/erc8128/nonce"
         )
+
+
+# ── el hermano SÍNCRONO (2026-08-02) ─────────────────────────────────────────
+#
+# El async sigue siendo el principal. Pero un consumidor con camino de ejecución
+# síncrono tendría que hacer `asyncio.run` por cada request firmado sólo para pedir un
+# nonce — abre y cierra un event loop por llamada, y revienta si ya hay uno corriendo.
+# Un SDK que obliga a eso empuja a que cada consumidor reimplemente el fetch, que es
+# exactamente lo que había pasado.
+
+def test_fetch_nonce_sync_devuelve_nonce_y_ttl(monkeypatch):
+    import httpx as _h
+    from uvd_x402_sdk import erc8128
+
+    class _R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"nonce": "abc123", "ttl": 300}
+
+    monkeypatch.setattr(_h, "get", lambda *a, **k: _R())
+    assert erc8128.fetch_nonce_sync("https://x") == ("abc123", 300)
+
+
+def test_fetch_nonce_sync_sin_ttl_devuelve_None_no_un_numero_inventado(monkeypatch):
+    """Un TTL adivinado hace reusar un nonce ya consumido, y ese fallo se lee como un
+    problema de FIRMA, no de nonce."""
+    import httpx as _h
+    from uvd_x402_sdk import erc8128
+
+    class _R:
+        def raise_for_status(self): pass
+        def json(self): return {"nonce": "abc123"}
+
+    monkeypatch.setattr(_h, "get", lambda *a, **k: _R())
+    assert erc8128.fetch_nonce_sync("https://x") == ("abc123", None)
+
+
+def test_sin_endpoint_falla_CERRADO_por_defecto():
+    from uvd_x402_sdk import erc8128
+    import pytest as _p
+    with _p.raises(RuntimeError, match="fallback local"):
+        erc8128.fetch_nonce_sync("http://127.0.0.1:9", timeout=0.2)
+
+
+def test_el_fallback_local_es_OPT_IN():
+    """Encenderlo contra un servidor que exige nonce propio convierte 'el endpoint está
+    caído' en 'tu firma es inválida' — un diagnóstico mucho peor."""
+    from uvd_x402_sdk import erc8128
+    nonce, ttl = erc8128.fetch_nonce_sync("http://127.0.0.1:9", timeout=0.2,
+                                          allow_local_fallback=True)
+    assert len(nonce) == 32 and ttl is None

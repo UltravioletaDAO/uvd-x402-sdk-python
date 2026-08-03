@@ -240,6 +240,7 @@ from uvd_x402_sdk.erc8128 import (
 )
 
 # Escrow pre-auth builder (ADR-002 sign-on-assignment) — X-Payment-Auth header
+from uvd_x402_sdk.money_safety import SAFE_TO_FALLBACK, is_fallback_safe
 from uvd_x402_sdk.erc7702 import (
     DelegationResolver,
     delegate_target,
@@ -280,6 +281,8 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "SAFE_TO_FALLBACK",
+    "is_fallback_safe",
     "DelegationResolver",
     "delegate_target",
     "is_delegated",

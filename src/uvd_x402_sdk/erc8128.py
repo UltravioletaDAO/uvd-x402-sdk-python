@@ -182,6 +182,50 @@ async def fetch_nonce(api_base: str, timeout: float = 10.0) -> str:
         return data["nonce"]
 
 
+def fetch_nonce_sync(
+    api_base: str,
+    timeout: float = 10.0,
+    allow_local_fallback: bool = False,
+) -> "tuple[str, Optional[int]]":
+    """Igual que :func:`fetch_nonce` pero SÍNCRONO, y devolviendo el TTL.
+
+    POR QUÉ EXISTE (el async sigue siendo el principal): un consumidor con un camino
+    de ejecución síncrono —una herramienta que corre dentro de un bucle de agente, por
+    ejemplo— tendría que hacer ``asyncio.run`` por cada request firmado sólo para pedir
+    un nonce. Eso abre y cierra un event loop por llamada, y revienta directamente si
+    ya hay uno corriendo. Un SDK que obliga a eso empuja a que cada consumidor
+    reimplemente el fetch, que es exactamente lo que pasó.
+
+    Devuelve ``(nonce, ttl_segundos)``. El TTL viene del servidor cuando lo informa y
+    es ``None`` cuando no: sirve para no re-pedir un nonce que todavía sirve, pero
+    **nunca se adivina** — un TTL inventado hace reusar un nonce ya consumido, y ese
+    fallo se ve como un problema de firma, no de nonce.
+
+    ``allow_local_fallback`` genera un nonce local si el endpoint no responde. Está
+    APAGADO por defecto a propósito: sólo sirve contra servidores que aceptan nonce del
+    cliente. Encenderlo contra uno que exige nonce propio convierte "el endpoint está
+    caído" en "tu firma es inválida", que es un diagnóstico mucho peor.
+    """
+    url = f"{api_base.rstrip('/')}/api/v1/auth/erc8128/nonce"
+    try:
+        resp = httpx.get(url, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        nonce = data.get("nonce")
+        if nonce:
+            ttl = data.get("ttl") or data.get("expires_in")
+            return str(nonce), (int(ttl) if isinstance(ttl, int) else None)
+    except Exception:  # noqa: BLE001 - abajo se decide qué hacer con la falta
+        pass
+    if not allow_local_fallback:
+        raise RuntimeError(
+            f"no pude obtener un nonce de {url} y el fallback local está apagado. "
+            f"Encendelo SOLO si este servidor acepta nonce del cliente."
+        )
+    import secrets as _secrets
+    return _secrets.token_hex(16), None
+
+
 # =============================================================================
 # Internal helpers
 # =============================================================================
