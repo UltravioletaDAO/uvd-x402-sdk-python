@@ -150,6 +150,83 @@ class TestSignRequest:
 
 
 # =============================================================================
+# @authority normalisation (RFC 9421 §2.2.3)
+#
+# The authority is lowercased and the scheme's DEFAULT port dropped; any other
+# port is part of the authority. `urlsplit().netloc` keeps an explicit `:443`,
+# so the same request written two ways used to sign two different bases — and
+# only one of them is what a server sees in `Host`. The rule is IDEMPOTENT, so
+# every already-normalised URL (all live traffic, every pinned vector) signs
+# the exact bytes it signed before.
+# =============================================================================
+
+
+class TestAuthorityNormalisation:
+    @pytest.mark.parametrize(
+        "url,expected_authority",
+        [
+            ("https://api.execution.market/api/v1/tasks", "api.execution.market"),
+            ("https://api.execution.market:443/api/v1/tasks", "api.execution.market"),
+            ("http://api.execution.market:80/api/v1/tasks", "api.execution.market"),
+            ("https://API.Execution.Market/api/v1/tasks", "api.execution.market"),
+            # A port that is not THIS scheme's default stays put — including
+            # 80 under https, which is not the same authority as bare host.
+            (
+                "https://api.execution.market:8443/api/v1/tasks",
+                "api.execution.market:8443",
+            ),
+            ("https://api.execution.market:80/api/v1/tasks", "api.execution.market:80"),
+            ("http://api.execution.market:443/api/v1/tasks", "api.execution.market:443"),
+        ],
+    )
+    def test_signed_authority_line(self, wallet, account, url, expected_authority):
+        """Pins the AUTHORITY BYTES, not just that two spellings agree: the
+        base is rebuilt by hand and re-signed (RFC 6979 is deterministic)."""
+        headers = sign_request(
+            wallet, method="GET", url=url, nonce="n1", now=lambda: FIXED_NOW
+        )
+        params = headers["Signature-Input"][len("eth=") :]
+        expected_base = "\n".join(
+            [
+                '"@method": GET',
+                f'"@authority": {expected_authority}',
+                '"@path": /api/v1/tasks',
+                f'"@signature-params": {params}',
+            ]
+        )
+        expected = account.sign_message(encode_defunct(text=expected_base))
+        assert _decode_signature(headers) == expected.signature
+
+    def test_the_url_rule_requires_a_scheme(self):
+        """No default scheme, because there is no caller without one: the
+        signer reads it off the URL, the verifier off the request it serves.
+        The one value that has no scheme — the CONFIGURED policy authority —
+        does not come here at all (it goes through ``policy_authority``, which
+        never touches ports); a default would have let it in silently."""
+        from uvd_x402_sdk.erc8128 import normalize_authority
+
+        with pytest.raises(TypeError):
+            normalize_authority("api.execution.market:443")
+
+    def test_normalisation_is_idempotent(self):
+        """Why this cannot move live traffic: every form the fleet already
+        emits is a fixed point, IPv6 literals included."""
+        from uvd_x402_sdk.erc8128 import normalize_authority
+
+        for value in (
+            "api.execution.market",
+            "api.execution.market:8443",
+            "[2001:db8::1]",
+            "[2001:db8::1]:8443",
+            "",
+        ):
+            once = normalize_authority(value, "https")
+            assert once == value
+            assert normalize_authority(once, "https") == once
+        assert normalize_authority("[2001:db8::1]:443", "https") == "[2001:db8::1]"
+
+
+# =============================================================================
 # Fixture integrity — the copied vectors are cryptographically sound.
 # A corrupted or hand-edited copy fails here before any conformance assert.
 # =============================================================================

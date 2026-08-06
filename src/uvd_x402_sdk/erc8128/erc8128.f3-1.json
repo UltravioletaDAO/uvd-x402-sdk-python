@@ -1,0 +1,147 @@
+{
+  "_note": [
+    "F3-1 golden vectors: the PINNED ERC-8128 wire format plus the two",
+    "legacy variants the verifier stays tolerant of. Single source for the",
+    "conformance suites: mcp_server (pytest, tests/test_erc8128_conformance.py),",
+    "em-plugin-sdk (tests/test_erc8128.py), sdk/python (tests/test_signer.py),",
+    "sdk/typescript (src/__tests__/erc8128.conformance.test.ts) and",
+    "ows-mcp-server (src/erc8128-base.test.ts) — the TS runtimes joined in F3-2.",
+    "Signatures are deterministic (RFC 6979): the same key + signature base",
+    "produces the same 65 bytes in eth_account and ethers, so every",
+    "implementation of a given variant must reproduce these headers exactly.",
+    "private_key is stored WITHOUT the 0x prefix (the pre-commit secret",
+    "scanner blocks any literal 0x + 64 hex chars); loaders re-prefix it.",
+    "It is a synthetic test key (0x42 * 32) that never held funds."
+  ],
+  "policy": {
+    "pinned_wire_format": {
+      "decided": "2026-08-01 (F3-1)",
+      "alg": "eip191",
+      "alg_required": true,
+      "keyid_lowercase": true,
+      "keyid_format": "erc8128:{chain_id}:{address_lowercase}",
+      "label": "eth",
+      "signature_params_order": [
+        "created",
+        "expires",
+        "nonce",
+        "keyid",
+        "alg"
+      ],
+      "covered_components_order": [
+        "@method",
+        "@authority",
+        "@path",
+        "@query (only when the URL has a query string)",
+        "content-digest (only when the request has a body)"
+      ],
+      "signature_encoding": "base64(r||s||v, 65 bytes) wrapped in RFC 8941 byte sequence",
+      "content_digest": "sha-256 (RFC 9530)",
+      "signing": "EIP-191 personal_sign over the RFC 9421 signature base",
+      "rationale": [
+        "alg=eip191 + lowercase keyid is what the canonical skill",
+        "(dashboard/public/skill.md v10.0.0 EM8128Client) documents and what",
+        "the external fleet already emits \u2014 the copies we cannot migrate by",
+        "PR. F3-2 converged the 5 client copies to canonical; the backend",
+        "reference signer (server-side test helper) still emits",
+        "legacy_no_alg \u2014 see the implementations map.",
+        "Lowercase keyid is mandatory: the checksummed-keyid drift caused",
+        "the v9.x silent-auth-failure INC (sdk/python/_signer.py:210-213)."
+      ]
+    },
+    "verifier_tolerance": {
+      "accepts_missing_alg": true,
+      "accepts_checksummed_keyid": true,
+      "note": [
+        "The backend verifier deliberately stays tolerant of both legacy",
+        "variants (it rebuilds the byte-exact base the client signed and",
+        "lowercases both sides of the address comparison). Do NOT harden",
+        "acceptance until every emitter passes the canonical vector; a",
+        "hardening is a contract change: update these vectors, the",
+        "conformance suite, and bump skill.md."
+      ]
+    }
+  },
+  "frozen": {
+    "private_key": "4242424242424242424242424242424242424242424242424242424242424242",
+    "address": "0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025",
+    "address_checksummed": "0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025",
+    "chain_id": 8453,
+    "created": 1754006400,
+    "expires": 1754006700,
+    "nonce": "f3-1-conformance-nonce-0001"
+  },
+  "requests": {
+    "get_query": {
+      "method": "GET",
+      "url": "https://api.execution.market/api/v1/tasks?status=published&limit=5",
+      "body": null
+    },
+    "post_body": {
+      "method": "POST",
+      "url": "https://api.execution.market/api/v1/tasks",
+      "body": "{\"title\":\"F3-1 conformance\",\"bounty_usd\":0.1}"
+    }
+  },
+  "vectors": {
+    "canonical": {
+      "get_query": {
+        "signature_base": "\"@method\": GET\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"@query\": ?status=published&limit=5\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\";alg=\"eip191\"",
+        "headers": {
+          "Signature": "eth=:0v4mJbn6JjlDOq3AyO16MhXlhoOkI4uxnd9tJitVBqkN20kNglL07U2HznZcdmUjS+QZqSCP4rLqWIE3SgsJUxs=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\";alg=\"eip191\""
+        }
+      },
+      "post_body": {
+        "signature_base": "\"@method\": POST\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"content-digest\": sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\";alg=\"eip191\"",
+        "headers": {
+          "Signature": "eth=:+AIbVIIbugueMUZU1L7Nn5NAulvb0L4I0o7KMig1Dv12qHR7pX9OfotNig8mHnM5MByu9ZGXVGj/wYC8pbs52xw=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\";alg=\"eip191\"",
+          "Content-Digest": "sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:"
+        }
+      }
+    },
+    "legacy_no_alg": {
+      "get_query": {
+        "signature_base": "\"@method\": GET\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"@query\": ?status=published&limit=5\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\"",
+        "headers": {
+          "Signature": "eth=:hcrt/D26EPTizJGHeR0dvscl9atj7vnd+ixZbR3bpJFDGefTECAEgkLatLMI/NuNtV7siMxjkzrxnx9ww6biqBs=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\""
+        }
+      },
+      "post_body": {
+        "signature_base": "\"@method\": POST\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"content-digest\": sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\"",
+        "headers": {
+          "Signature": "eth=:RK5sZyChzoBccdqogrTT/HINSc7XCJUTqaKUR+eEptx5FhHCe2C8jbRYhpCs1N/zgnwsD1urZN5m60qX48h6kxw=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025\"",
+          "Content-Digest": "sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:"
+        }
+      }
+    },
+    "legacy_alg_checksum_keyid": {
+      "get_query": {
+        "signature_base": "\"@method\": GET\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"@query\": ?status=published&limit=5\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025\";alg=\"eip191\"",
+        "headers": {
+          "Signature": "eth=:gNNfGRgF5+W2MYZymiEMTSgX1o0hlwVENdprnldY6qlgDEcdqOeimoj835V40avsmKK2jjvPPzXP9sobPwCO2Bw=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"@query\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025\";alg=\"eip191\""
+        }
+      },
+      "post_body": {
+        "signature_base": "\"@method\": POST\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"content-digest\": sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025\";alg=\"eip191\"",
+        "headers": {
+          "Signature": "eth=:o/VaEKYjPrafAKLaeMQT7clsTQ3I2WaySRQuYinxv24fCUHKLCimmQsXb/XsRyP+CGhMScrUwKtKs7kUQcf80hw=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1754006400;expires=1754006700;nonce=\"f3-1-conformance-nonce-0001\";keyid=\"erc8128:8453:0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025\";alg=\"eip191\"",
+          "Content-Digest": "sha-256=:yitNmn9roYfKVZJpvmRDFucegbyS2nDuvVoE4zuzu7g=:"
+        }
+      }
+    }
+  },
+  "implementations": {
+    "mcp_server/integrations/erc8128/signer.py": "legacy_no_alg",
+    "em-plugin-sdk/em_plugin_sdk/erc8128.py": "canonical",
+    "sdk/typescript/src/erc8128.ts": "canonical",
+    "sdk/python/execution_market/_signer.py": "canonical",
+    "ows-mcp-server/src/server.ts": "canonical",
+    "scripts/em_monitor.py": "canonical"
+  }
+}

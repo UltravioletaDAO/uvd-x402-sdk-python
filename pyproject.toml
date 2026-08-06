@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.38.0"
+version = "0.39.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 25 blockchains (including Robinhood Chain, XRPL, Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT, USDG)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -110,6 +110,12 @@ Issues = "https://github.com/UltravioletaDAO/uvd-x402-sdk-python/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Autodiscovery ships ONLY .py files. Without this the ERC-8128 conformance
+# vectors load fine from a source checkout and raise FileNotFoundError from an
+# installed wheel — green locally, broken for every consumer.
+[tool.setuptools.package-data]
+uvd_x402_sdk = ["**/*.json"]
 
 [tool.black]
 line-length = 100

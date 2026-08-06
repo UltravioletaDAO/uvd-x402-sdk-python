@@ -234,10 +234,25 @@ from uvd_x402_sdk.wallet import (
     SignedTypedData,
 )
 
-# ERC-8128 Signed HTTP Requests (RFC 9421) — wallet-signed API auth
+# ERC-8128 Signed HTTP Requests (RFC 9421) — wallet-signed API auth.
+# The submodule carries the rest (pure core, conformance vectors, presets):
+#   from uvd_x402_sdk.erc8128 import build_signature_base, run_conformance, ...
 from uvd_x402_sdk.erc8128 import (
-    sign_request,
+    ERC8128_ERROR_RETRYABLE,
+    ERC8128_ERROR_STATUS,
+    POLICY_PRESETS,
+    Erc8128Error,
+    NoncePolicy,
+    NonceStore,
+    VerifiableRequest,
+    VerifyPolicy,
+    VerifyResult,
     fetch_nonce,
+    fetch_nonce_sync,
+    policy_from_preset,
+    run_conformance,
+    sign_request,
+    verify_request,
 )
 
 # Escrow pre-auth builder (ADR-002 sign-on-assignment) — X-Payment-Auth header
@@ -455,6 +470,19 @@ __all__ = [
     # ERC-8128 Signed HTTP Requests (RFC 9421)
     "sign_request",
     "fetch_nonce",
+    "fetch_nonce_sync",
+    "verify_request",
+    "VerifiableRequest",
+    "VerifyPolicy",
+    "VerifyResult",
+    "NoncePolicy",
+    "NonceStore",
+    "POLICY_PRESETS",
+    "policy_from_preset",
+    "Erc8128Error",
+    "ERC8128_ERROR_STATUS",
+    "ERC8128_ERROR_RETRYABLE",
+    "run_conformance",
     # Escrow pre-auth builder (ADR-002 sign-on-assignment)
     "build_escrow_pre_auth",
     "compute_escrow_nonce",

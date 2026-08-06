@@ -2,6 +2,12 @@
 # Prevents CRLF/LF churn when editing on Windows/WSL.
 * text=auto eol=lf
 
+# ERC-8128 conformance vectors: the BYTES are the contract. CONFORMANCE_SHA256
+# pins them, and the same files must hash identically in uvd-x402-sdk-typescript
+# and in execution-market/shared/test-vectors. Pinned explicitly so the
+# invariant survives any future edit to the blanket rule above.
+src/uvd_x402_sdk/erc8128/erc8128.f3-*.json text eol=lf
+
 # Explicit binaries (never normalize).
 *.png binary
 *.jpg binary

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install
+        run: pip install -e '.[signer,dev]'
+
+      - name: Test
+        run: python -m pytest -q
+
+  # The one check this repo's own suite cannot make. Both SDK suites were green
+  # while the two implementations diverged, because each validated itself
+  # against vectors it had generated. This job spawns BOTH runtimes and makes
+  # each verify what the other just signed. The driver lives in the TypeScript
+  # SDK (one copy, not two) and is run here against THIS checkout. It has no
+  # skip path: if Node or the TypeScript SDK is unavailable, the job fails.
+  cross-language:
+    name: Cross-language conformance (PY ↔ TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: uvd-x402-sdk-python
+
+      - name: Check out the TypeScript SDK (it hosts the harness)
+        uses: actions/checkout@v4
+        with:
+          repository: UltravioletaDAO/uvd-x402-sdk-typescript
+          path: uvd-x402-sdk-typescript
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: uvd-x402-sdk-typescript/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install this SDK
+        run: pip install -e '.[signer]'
+        working-directory: uvd-x402-sdk-python
+
+      - name: Install and build the TypeScript SDK
+        working-directory: uvd-x402-sdk-typescript
+        run: |
+          npm ci
+          npm run build
+
+      # The conformance vectors must be the SAME FILE, byte for byte, in both
+      # packages. A PR that edits this repo's copy alone fails here.
+      - name: Vectors are the same file in both repos
+        working-directory: uvd-x402-sdk-typescript
+        env:
+          UVD_X402_PY_ROOT: ${{ github.workspace }}/uvd-x402-sdk-python
+        run: node scripts/derive-erc8128-f3-3.mjs --check
+
+      - name: Sign in each runtime, verify in the other
+        working-directory: uvd-x402-sdk-typescript
+        env:
+          UVD_X402_PY_ROOT: ${{ github.workspace }}/uvd-x402-sdk-python
+          UVD_PYTHON: python
+        run: node scripts/xlang/cross-language-conformance.mjs
