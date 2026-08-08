@@ -40,6 +40,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from uvd_x402_sdk.exceptions import LookupInconclusiveError
+from uvd_x402_sdk.exceptions import TimeoutError as SdkTimeoutError
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
@@ -394,6 +395,40 @@ class RegisterAgentResponse(BaseModel):
     owner: Optional[str] = None
     error: Optional[str] = None
     network: str
+
+    class Config:
+        populate_by_name = True
+
+
+RegisterJobStatus = Literal["pending", "mint_confirmed", "done", "failed"]
+"""Lifecycle of an async registration. ``mint_confirmed`` and ``done`` carry an
+``agentId``; ``failed`` carries an ``error``."""
+
+
+class RegisterJobResponse(BaseModel):
+    """Status of an asynchronous registration.
+
+    Returned by ``POST /register`` with ``Prefer: respond-async`` (HTTP 202) and
+    by ``GET /register/status/{job_id}``.
+
+    Terminal jobs are retained for one hour and then age out, after which the
+    status endpoint 404s. Read the agent id before then, or it is only
+    recoverable from the chain.
+    """
+
+    job_id: str = Field(..., alias="jobId")
+    status: RegisterJobStatus
+    network: Optional[str] = None
+    agent_id: Optional[AgentId] = Field(None, alias="agentId")
+    transaction: Optional[str] = None
+    transfer_transaction: Optional[str] = Field(None, alias="transferTransaction")
+    owner: Optional[str] = None
+    error: Optional[str] = None
+
+    @property
+    def is_terminal(self) -> bool:
+        """Whether polling can stop: the job either finished or failed."""
+        return self.status in ("done", "failed")
 
     class Config:
         populate_by_name = True
@@ -976,6 +1011,121 @@ class Erc8004Client:
                 error=str(e),
                 network=network,
             )
+
+    async def register_agent_async(
+        self,
+        network: Erc8004Network,
+        agent_uri: str,
+        *,
+        metadata: Optional[list[MetadataEntryParam]] = None,
+        recipient: Optional[str] = None,
+        x402_version: int = 1,
+    ) -> RegisterJobResponse:
+        """
+        Start a registration without waiting for the chain to confirm it.
+
+        Registration waits on a mint receipt, which on a congested chain outlives
+        client and proxy timeouts. A timed-out synchronous call is genuinely
+        ambiguous - the mint may well have landed - and retrying it is how five
+        duplicate agents once got minted. This returns immediately with a job id
+        instead; poll :meth:`get_register_status` or use
+        :meth:`wait_for_registration`.
+
+        Args:
+            network: Network to register on
+            agent_uri: URI of the agent registration file
+            metadata: Optional metadata entries
+            recipient: Address to receive the NFT (0x-hex for EVM, base58 for
+                Solana). On Solana the facilitator mints, initializes the ATOM
+                stats and transfers, paying every fee.
+            x402_version: x402 protocol version
+
+        Returns:
+            The job, whose ``agent_id`` is only populated once the mint confirms.
+        """
+        payload: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": network,
+            "agentUri": agent_uri,
+        }
+        if metadata:
+            payload["metadata"] = [m.model_dump() for m in metadata]
+        if recipient:
+            payload["recipient"] = recipient
+
+        url = f"{self.base_url}/register"
+        response = await self._client.post(
+            url, json=payload, headers={"Prefer": "respond-async"}
+        )
+        response.raise_for_status()
+        return RegisterJobResponse.model_validate(response.json())
+
+    async def get_register_status(self, job_id: str) -> RegisterJobResponse:
+        """
+        Read the current state of an asynchronous registration.
+
+        Args:
+            job_id: Job id returned by :meth:`register_agent_async`
+
+        Returns:
+            Current job status
+
+        Raises:
+            httpx.HTTPStatusError: 404 if the job is unknown or has aged out
+                (terminal jobs are kept for one hour).
+        """
+        url = f"{self.base_url}/register/status/{job_id}"
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return RegisterJobResponse.model_validate(response.json())
+
+    async def wait_for_registration(
+        self,
+        job_id: str,
+        *,
+        poll_interval: float = 2.0,
+        timeout: float = 300.0,
+    ) -> RegisterJobResponse:
+        """
+        Poll an asynchronous registration until it finishes.
+
+        Raises on timeout rather than returning the last non-terminal status, so
+        "still pending" is never mistaken for "did not happen": the mint may
+        still land afterwards, and treating a timeout as failure is what leads to
+        registering the same agent twice. On timeout, keep the job id and poll
+        again instead of re-registering.
+
+        Args:
+            job_id: Job id returned by :meth:`register_agent_async`
+            poll_interval: Seconds between polls
+            timeout: Seconds to wait before giving up
+
+        Returns:
+            The terminal job, either ``done`` or ``failed``
+
+        Raises:
+            X402TimeoutError: The job was still running when the wait elapsed.
+                This does not mean it failed.
+        """
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+
+        while True:
+            job = await self.get_register_status(job_id)
+            if job.is_terminal:
+                return job
+            if loop.time() >= deadline:
+                raise SdkTimeoutError(
+                    operation=(
+                        f"Registration job {job_id} (last status '{job.status}'). "
+                        f"It may still complete: poll "
+                        f"get_register_status('{job_id}') rather than registering again"
+                    ),
+                    timeout_seconds=timeout,
+                )
+            await asyncio.sleep(poll_interval)
 
     async def get_register_info(self) -> dict[str, Any]:
         """
