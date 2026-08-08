@@ -82,6 +82,7 @@ from uvd_x402_sdk.exceptions import (
     UnsupportedNetworkError,
     InvalidPayloadError,
     FacilitatorError,
+    LookupInconclusiveError,
     ConfigurationError,
     TimeoutError as X402TimeoutError,
 )
@@ -353,6 +354,7 @@ __all__ = [
     "UnsupportedNetworkError",
     "InvalidPayloadError",
     "FacilitatorError",
+    "LookupInconclusiveError",
     "ConfigurationError",
     "X402TimeoutError",
     # Payload models

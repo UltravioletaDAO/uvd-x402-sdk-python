@@ -39,6 +39,8 @@ from typing import Any, Literal, Optional, Union
 import httpx
 from pydantic import BaseModel, Field
 
+from uvd_x402_sdk.exceptions import LookupInconclusiveError
+
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
 
@@ -545,18 +547,34 @@ class Erc8004Client:
         """
         Get the first agent identity owned by an address.
 
+        Works on EVM and on Solana (base58 address), where ownership comes from
+        a program-account scan rather than ``balanceOf``.
+
+        Do not collapse the two failure modes. "Owns nothing" and "could not
+        find out" are different answers, and treating the second as the first is
+        how a caller mints a duplicate agent for someone who already has one.
+
         Args:
             network: Network to query
-            address: Owner wallet address
+            address: Owner wallet address (0x-hex for EVM, base58 for Solana)
 
         Returns:
             Identity info including agentId, agentUri, and balance
 
         Raises:
-            httpx.HTTPStatusError: 404 if address owns no agents
+            LookupInconclusiveError: The lookup failed to reach a verdict and
+                should be retried. Never means the address owns nothing.
+            httpx.HTTPStatusError: 404 if the address owns no agent, or any
+                other non-success status.
         """
         url = f"{self.base_url}/identity/{network}/owner/{address}"
         response = await self._client.get(url)
+        if response.status_code == 503:
+            raise LookupInconclusiveError(
+                f"Owner lookup for {address} on {network} was inconclusive; retry",
+                status_code=503,
+                response_body=response.text,
+            )
         response.raise_for_status()
         return IdentityByOwnerResponse.model_validate(response.json())
 

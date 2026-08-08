@@ -230,6 +230,40 @@ class FacilitatorError(X402Error):
         self.response_body = response_body
 
 
+class LookupInconclusiveError(X402Error):
+    """
+    Raised when a lookup could not reach a verdict and should be retried.
+
+    Distinct from "not found" on purpose. The facilitator answers 404 for "this
+    address owns no agent" and 503 for "I could not find out" - usually an RPC
+    failure behind it. Collapsing the two is how a transient failure becomes a
+    permanent wrong answer: a caller that persists "not registered" stops asking,
+    and on a registration path mints a second agent for someone who already has
+    one, burning gas and leaving an orphan.
+
+    Catch this separately from the 404 and retry; never treat it as absence.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response_body: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            code="LOOKUP_INCONCLUSIVE",
+            details={
+                "statusCode": status_code,
+                "response": response_body,
+                "retryable": True,
+            },
+        )
+        self.status_code = status_code
+        self.response_body = response_body
+        self.retryable = True
+
+
 class TimeoutError(X402Error):
     """
     Raised when a facilitator request times out.
