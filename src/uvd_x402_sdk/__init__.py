@@ -48,7 +48,27 @@ Supported Networks (25 total):
 - XRPL (2): XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 """
 
-__version__ = "0.38.0"
+def _resolve_version() -> str:
+    """Read the version from installed package metadata.
+
+    Hardcoding it here meant it drifted from ``pyproject.toml`` whenever a
+    release bumped only one of the two: 0.39.0 and 0.40.0 both shipped with
+    ``__version__`` still reading "0.38.0". That is not cosmetic - anything
+    gating a feature on the version (``__version__ >= "0.40.0"`` to decide
+    whether ``score`` is supported) silently gets the wrong answer.
+
+    Reading the metadata means the two cannot disagree again. The fallback
+    only applies to a source checkout that was never installed.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("uvd-x402-sdk")
+    except PackageNotFoundError:
+        return "0.0.0.dev0"
+
+
+__version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
