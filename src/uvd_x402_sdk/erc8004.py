@@ -284,12 +284,41 @@ class FeedbackEntry(BaseModel):
         populate_by_name = True
 
 
+class AtomStats(BaseModel):
+    """ATOM Engine reputation analytics (Solana only).
+
+    Present only when the agent's ``atom_stats`` account has been initialized.
+    The facilitator does that during ``register_agent``; agents registered
+    elsewhere may never have it, in which case their feedback is never scored.
+
+    The engine measures quality through EMA scores, so there are no
+    positive/negative tallies.
+    """
+
+    trust_tier: int = Field(..., alias="trustTier")
+    trust_tier_name: str = Field(..., alias="trustTierName")
+    quality_score: int = Field(..., alias="qualityScore")
+    loyalty_score: int = Field(..., alias="loyaltyScore")
+    confidence: int
+    risk_score: int = Field(..., alias="riskScore")
+    diversity_ratio: int = Field(..., alias="diversityRatio")
+    min_score: int = Field(..., alias="minScore")
+    max_score: int = Field(..., alias="maxScore")
+    last_score: int = Field(..., alias="lastScore")
+    feedback_count: int = Field(..., alias="feedbackCount")
+    last_feedback_slot: int = Field(..., alias="lastFeedbackSlot")
+
+    class Config:
+        populate_by_name = True
+
+
 class ReputationResponse(BaseModel):
     """Reputation query response."""
 
     agent_id: AgentId = Field(..., alias="agentId")
     summary: ReputationSummary
     feedback: Optional[list[FeedbackEntry]] = None
+    atom_stats: Optional[AtomStats] = Field(None, alias="atomStats")
     network: str
 
     class Config:
@@ -307,6 +336,15 @@ class FeedbackParams(BaseModel):
     endpoint: str = ""
     feedback_uri: str = Field("", alias="feedbackUri")
     feedback_hash: Optional[str] = Field(None, alias="feedbackHash")
+    score: Optional[int] = None
+    """Quality score 0-100.
+
+    Solana only, and effectively required there: the ATOM Engine ignores an
+    unscored feedback. It is written to the agent, but contributes nothing to
+    reputation and the program reports ``had_impact=false``. This is not
+    retroactive - reputation stays at zero however much unscored feedback
+    accumulates.
+    """
     proof: Optional[ProofOfPayment] = None
 
     class Config:
@@ -364,8 +402,14 @@ class IdentityMetadataResponse(BaseModel):
 
     agent_id: AgentId = Field(..., alias="agentId")
     key: str
-    value_hex: str = Field(..., alias="valueHex")
+    value_hex: str = Field(..., alias="value")
+    """Hex-encoded value.
+
+    The facilitator sends this as ``value``; the alias used to be ``valueHex``,
+    which no response ever carried, so every parse failed.
+    """
     value_utf8: Optional[str] = Field(None, alias="valueUtf8")
+    immutable: Optional[bool] = None
     network: str
 
     class Config:
@@ -386,9 +430,17 @@ class IdentityByOwnerResponse(BaseModel):
 
 
 class IdentityTotalSupplyResponse(BaseModel):
-    """Response from GET /identity/{network}/total-supply."""
+    """Response from GET /identity/{network}/total-supply.
+
+    On Solana the counts come from the Metaplex Core collection, not the
+    registry, which keeps no counter of its own: ``total_supply`` is the
+    collection's current size (net of burns) and ``num_minted`` its all-time
+    mint count.
+    """
 
     total_supply: int = Field(..., alias="totalSupply")
+    num_minted: Optional[int] = Field(None, alias="numMinted")
+    collection: Optional[str] = None
     network: str
 
     class Config:
@@ -586,6 +638,7 @@ class Erc8004Client:
         endpoint: str = "",
         feedback_uri: str = "",
         feedback_hash: Optional[str] = None,
+        score: Optional[int] = None,
         proof: Optional[ProofOfPayment] = None,
         x402_version: int = 1,
     ) -> FeedbackResponse:
@@ -604,6 +657,9 @@ class Erc8004Client:
             endpoint: Service endpoint that was used
             feedback_uri: URI to off-chain feedback file
             feedback_hash: Keccak256 hash of feedback content
+            score: Quality score 0-100. Send it on Solana: without a score the
+                ATOM Engine records the feedback but scores none of it, and
+                reputation stays at zero permanently.
             proof: Proof of payment (required for authorized feedback)
             x402_version: x402 protocol version
 
@@ -613,13 +669,17 @@ class Erc8004Client:
         Example:
             >>> # After settling a payment with ERC-8004 extension
             >>> result = await client.submit_feedback(
-            ...     network="ethereum",
-            ...     agent_id=42,
+            ...     network="solana",
+            ...     agent_id="247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
             ...     value=95,
+            ...     score=95,
             ...     tag1="quality",
             ...     proof=settle_response.proof_of_payment,
             ... )
         """
+        if score is not None and not 0 <= score <= 100:
+            raise ValueError(f"score must be between 0 and 100, got {score}")
+
         request = FeedbackRequest(
             x402_version=x402_version,
             network=network,
@@ -632,6 +692,7 @@ class Erc8004Client:
                 endpoint=endpoint,
                 feedback_uri=feedback_uri,
                 feedback_hash=feedback_hash,
+                score=score,
                 proof=proof,
             ),
         )
@@ -664,6 +725,7 @@ class Erc8004Client:
         feedback_index: int,
         *,
         seal_hash: Optional[str] = None,
+        original_feedback: Optional[FeedbackParams] = None,
         x402_version: int = 1,
     ) -> FeedbackResponse:
         """
@@ -671,10 +733,18 @@ class Erc8004Client:
 
         Only the original submitter can revoke their feedback.
 
+        Solana revocations need the SEAL hash of the feedback being revoked.
+        Pass ``original_feedback`` and the facilitator derives it; computing it
+        yourself means reimplementing the program's keccak256 layout exactly.
+        ``seal_hash`` still works and takes precedence.
+
         Args:
             network: Network where feedback was submitted
             agent_id: Agent ID
             feedback_index: Index of feedback to revoke
+            seal_hash: Precomputed SEAL hash (Solana)
+            original_feedback: Content of the feedback being revoked, which must
+                match the original submission exactly (Solana)
             x402_version: x402 protocol version
 
         Returns:
@@ -689,6 +759,15 @@ class Erc8004Client:
         }
         if seal_hash:
             payload["sealHash"] = seal_hash
+        elif original_feedback is not None:
+            original = original_feedback.model_dump(
+                by_alias=True, exclude_none=True
+            )
+            # The facilitator derives the hash from the content alone; agentId
+            # and proof are not part of the SEAL preimage.
+            for key in ("agentId", "proof"):
+                original.pop(key, None)
+            payload["originalFeedback"] = original
         try:
             response = await self._client.post(url, json=payload)
             response.raise_for_status()
