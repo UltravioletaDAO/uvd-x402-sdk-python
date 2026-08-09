@@ -1000,6 +1000,25 @@ class Erc8004Client:
             response.raise_for_status()
             return RegisterAgentResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # The facilitator answers 4xx with a structured RegisterAgentResponse,
+            # and on 409 - a registration for this agent is ALREADY IN FLIGHT -
+            # that body carries the agent id and tx of the run already underway,
+            # plus an explicit "poll GET /register/status/{jobId}" hint.
+            #
+            # Flattening it into a bare string threw away the only thing that
+            # lets a caller resolve instead of re-POSTing, and re-POSTing a mint
+            # is exactly how duplicate agents get created. Keep the body.
+            parsed: Optional[RegisterAgentResponse] = None
+            try:
+                parsed = RegisterAgentResponse.model_validate(e.response.json())
+            except Exception:
+                parsed = None
+            if parsed is not None:
+                # Never let a 4xx body claim success, whatever it says.
+                parsed.success = False
+                if not parsed.error:
+                    parsed.error = f"Facilitator error: {e.response.status_code}"
+                return parsed
             return RegisterAgentResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
