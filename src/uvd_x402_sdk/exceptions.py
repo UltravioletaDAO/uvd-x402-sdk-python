@@ -264,6 +264,46 @@ class LookupInconclusiveError(X402Error):
         self.retryable = True
 
 
+class RegistrationPendingError(X402Error):
+    """
+    Raised when a registration is still running after the wait elapsed.
+
+    This is emphatically **not** a failure. The mint may still land. The job id
+    is carried as an attribute rather than only in the message, because the
+    correct recovery is to keep polling ``get_register_status(job_id)`` — and a
+    caller that cannot reach the id without parsing a string will re-register
+    instead, minting a duplicate agent. That is the exact sequence that once
+    produced five duplicate mints.
+
+    Never map this to "registration failed".
+    """
+
+    def __init__(
+        self,
+        job_id: str,
+        last_status: str,
+        timeout_seconds: float,
+    ) -> None:
+        super().__init__(
+            message=(
+                f"Registration job {job_id} still '{last_status}' after "
+                f"{timeout_seconds:.0f}s. It may still complete: poll "
+                f"get_register_status('{job_id}') rather than registering again."
+            ),
+            code="REGISTRATION_PENDING",
+            details={
+                "jobId": job_id,
+                "lastStatus": last_status,
+                "timeoutSeconds": timeout_seconds,
+                "retryable": True,
+            },
+        )
+        self.job_id = job_id
+        self.last_status = last_status
+        self.timeout_seconds = timeout_seconds
+        self.retryable = True
+
+
 class TimeoutError(X402Error):
     """
     Raised when a facilitator request times out.

@@ -39,8 +39,7 @@ from typing import Any, Literal, Optional, Union
 import httpx
 from pydantic import BaseModel, Field
 
-from uvd_x402_sdk.exceptions import LookupInconclusiveError
-from uvd_x402_sdk.exceptions import TimeoutError as SdkTimeoutError
+from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
@@ -398,6 +397,26 @@ class RegisterAgentResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+def _job_to_register_response(
+    job: "RegisterJobResponse", network: str
+) -> "RegisterAgentResponse":
+    """Present a finished async job in the shape the synchronous call returns.
+
+    Keeping the return type identical is the whole point of
+    ``use_async_transport``: switching transports must not force callers to
+    rewrite anything downstream.
+    """
+    return RegisterAgentResponse(
+        success=job.status != "failed",
+        agentId=job.agent_id,
+        transaction=job.transaction,
+        transferTransaction=job.transfer_transaction,
+        owner=job.owner,
+        error=job.error,
+        network=job.network or network,
+    )
 
 
 RegisterJobStatus = Literal["pending", "mint_confirmed", "done", "failed"]
@@ -949,6 +968,9 @@ class Erc8004Client:
         metadata: Optional[list[MetadataEntryParam]] = None,
         recipient: Optional[str] = None,
         x402_version: int = 1,
+        use_async_transport: bool = False,
+        poll_interval: float = 2.0,
+        async_timeout: float = 300.0,
     ) -> RegisterAgentResponse:
         """
         Register an agent on the Identity Registry.
@@ -984,6 +1006,19 @@ class Erc8004Client:
             ... )
             >>> print(f"Agent #{result.agent_id} transferred to user")
         """
+        if use_async_transport:
+            job = await self.register_agent_async(
+                network,
+                agent_uri,
+                metadata=metadata,
+                recipient=recipient,
+                x402_version=x402_version,
+            )
+            terminal = await self.wait_for_registration(
+                job.job_id, poll_interval=poll_interval, timeout=async_timeout
+            )
+            return _job_to_register_response(terminal, network)
+
         payload: dict[str, Any] = {
             "x402Version": x402_version,
             "network": network,
@@ -1123,8 +1158,10 @@ class Erc8004Client:
             The terminal job, either ``done`` or ``failed``
 
         Raises:
-            X402TimeoutError: The job was still running when the wait elapsed.
-                This does not mean it failed.
+            RegistrationPendingError: The job was still running when the wait
+                elapsed. This does NOT mean it failed; the error carries
+                ``job_id`` so the caller can resume polling instead of
+                re-registering.
         """
         import asyncio
 
@@ -1136,12 +1173,9 @@ class Erc8004Client:
             if job.is_terminal:
                 return job
             if loop.time() >= deadline:
-                raise SdkTimeoutError(
-                    operation=(
-                        f"Registration job {job_id} (last status '{job.status}'). "
-                        f"It may still complete: poll "
-                        f"get_register_status('{job_id}') rather than registering again"
-                    ),
+                raise RegistrationPendingError(
+                    job_id=job_id,
+                    last_status=job.status,
                     timeout_seconds=timeout,
                 )
             await asyncio.sleep(poll_interval)
