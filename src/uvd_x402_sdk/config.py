@@ -12,7 +12,14 @@ Supports:
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Literal
+import json
 import os
+
+
+# Reserved key inside ``facilitator_by_network`` meaning "every other network".
+# Its presence is the ONLY thing that authorises falling back to a facilitator
+# that was not named for the network at hand.
+FACILITATOR_FALLBACK_KEY = "*"
 
 
 @dataclass
@@ -53,7 +60,17 @@ class X402Config:
     Main SDK configuration.
 
     Attributes:
-        facilitator_url: URL of the x402 facilitator service
+        facilitator_url: URL of the x402 facilitator service. Used for every
+            network unless ``facilitator_by_network`` routes it elsewhere, and
+            for the endpoints that are not network-scoped (``/version``,
+            ``/blacklist``, ``/api/stats``, ``/transactions``).
+        facilitator_by_network: Optional routing table ``network -> facilitator
+            URL``, for deployments that settle different networks through
+            different facilitators (e.g. base via CDP, avalanche via UVD,
+            because CDP does not settle avalanche). The reserved key ``"*"``
+            declares the fallback for anything not named. Leave it empty and
+            nothing changes: a single facilitator serves every network, exactly
+            as before.
         recipient_evm: Default recipient address for EVM chains
         recipient_solana: Recipient address for Solana/SVM chains (also used for Fogo)
         recipient_near: Recipient account for NEAR
@@ -71,6 +88,9 @@ class X402Config:
     """
 
     facilitator_url: str = "https://facilitator.ultravioletadao.xyz"
+
+    # Per-network facilitator routing. Empty = single-facilitator behavior.
+    facilitator_by_network: Dict[str, str] = field(default_factory=dict)
 
     # Recipient addresses per network type
     recipient_evm: str = ""
@@ -135,6 +155,163 @@ class X402Config:
         ]):
             raise ValueError("At least one recipient address is required")
 
+        # Normalised routing table. Built here on purpose: a facilitator route
+        # that cannot serve an enabled network must blow up at boot, not on the
+        # first payment.
+        self._facilitator_routes: Dict[str, str] = self._build_facilitator_routes()
+
+    # =========================================================================
+    # Facilitator Routing
+    # =========================================================================
+
+    @staticmethod
+    def network_key(network: str) -> str:
+        """Normalise a network identifier for routing-table lookups.
+
+        Unknown identifiers are lowercased rather than rejected: rejection is
+        the caller's job (``_build_facilitator_routes`` for keys,
+        ``facilitator_url_for`` for lookups), and both give a better message
+        than a bare ValueError from the network registry.
+        """
+        from uvd_x402_sdk.networks import normalize_network
+
+        try:
+            return normalize_network(network)
+        except ValueError:
+            return network.lower()
+
+    def _build_facilitator_routes(self) -> Dict[str, str]:
+        """Validate ``facilitator_by_network`` and normalise it into a lookup table.
+
+        Raises:
+            ConfigurationError: If a key is not a known network, a value is not
+                an http(s) URL, two spellings of the same network disagree, or
+                an ENABLED network would be left without a facilitator (and no
+                ``"*"`` fallback was declared).
+        """
+        from uvd_x402_sdk.exceptions import ConfigurationError
+        from uvd_x402_sdk.networks import get_network
+
+        routes: Dict[str, str] = {}
+        if not self.facilitator_by_network:
+            return routes
+
+        for raw_key, raw_url in self.facilitator_by_network.items():
+            if not isinstance(raw_url, str) or not raw_url.startswith(("http://", "https://")):
+                raise ConfigurationError(
+                    f"facilitator_by_network[{raw_key!r}] must be an http(s) URL, "
+                    f"got {raw_url!r}",
+                    config_key="facilitator_by_network",
+                )
+            url = raw_url.rstrip("/")
+
+            if raw_key == FACILITATOR_FALLBACK_KEY:
+                routes[FACILITATOR_FALLBACK_KEY] = url
+                continue
+
+            key = self.network_key(raw_key)
+            if get_network(key) is None:
+                raise ConfigurationError(
+                    f"facilitator_by_network has an unknown network key {raw_key!r}. "
+                    f"Use a network name the SDK knows (e.g. 'base', 'avalanche', "
+                    f"'eip155:8453') or {FACILITATOR_FALLBACK_KEY!r} for the fallback.",
+                    config_key="facilitator_by_network",
+                )
+
+            existing = routes.get(key)
+            if existing is not None and existing != url:
+                raise ConfigurationError(
+                    f"facilitator_by_network routes network {key!r} to two different "
+                    f"facilitators ({existing} and {url}) — two spellings of the same "
+                    f"network disagree.",
+                    config_key="facilitator_by_network",
+                )
+            routes[key] = url
+
+        if FACILITATOR_FALLBACK_KEY not in routes:
+            unrouted = [
+                network
+                for network in self.supported_networks
+                if self.is_network_enabled(network)
+                and self.network_key(network) not in routes
+            ]
+            if unrouted:
+                raise ConfigurationError(
+                    f"facilitator_by_network is set but these enabled networks have no "
+                    f"facilitator: {', '.join(unrouted)}. Route each one explicitly, "
+                    f"narrow supported_networks to what you actually accept, or add a "
+                    f"{FACILITATOR_FALLBACK_KEY!r} entry as the fallback. They will NOT "
+                    f"be routed to facilitator_url silently.",
+                    config_key="facilitator_by_network",
+                )
+
+        return routes
+
+    def facilitator_url_for(self, network: str) -> str:
+        """Resolve which facilitator settles a given network.
+
+        With no ``facilitator_by_network`` configured this always returns
+        ``facilitator_url`` — the pre-existing behavior, for any input.
+
+        Args:
+            network: Network identifier (v1 name or CAIP-2).
+
+        Returns:
+            Facilitator base URL for that network.
+
+        Raises:
+            ConfigurationError: If a routing table is configured and neither the
+                network nor a ``"*"`` fallback is in it. It never guesses.
+
+        Example:
+            >>> config = X402Config(
+            ...     recipient_evm="0xMerchant...",
+            ...     supported_networks=["base", "avalanche"],
+            ...     facilitator_by_network={
+            ...         "base": "https://api.cdp.coinbase.com/platform/v2/x402",
+            ...         "avalanche": "https://facilitator.ultravioletadao.xyz",
+            ...     },
+            ... )
+            >>> config.facilitator_url_for("base")
+            'https://api.cdp.coinbase.com/platform/v2/x402'
+            >>> config.facilitator_url_for("eip155:43114")  # CAIP-2 for avalanche
+            'https://facilitator.ultravioletadao.xyz'
+        """
+        from uvd_x402_sdk.exceptions import ConfigurationError
+
+        routes: Dict[str, str] = getattr(self, "_facilitator_routes", None) or {}
+        if not routes:
+            return self.facilitator_url
+
+        if network:
+            url = routes.get(self.network_key(network))
+            if url:
+                return url
+
+        fallback = routes.get(FACILITATOR_FALLBACK_KEY)
+        if fallback:
+            return fallback
+
+        named = sorted(k for k in routes if k != FACILITATOR_FALLBACK_KEY)
+        raise ConfigurationError(
+            f"No facilitator is configured for network {network!r}. "
+            f"facilitator_by_network routes: {', '.join(named) or '(none)'}. "
+            f"Add it, or add a {FACILITATOR_FALLBACK_KEY!r} entry to declare a fallback.",
+            config_key="facilitator_by_network",
+        )
+
+    def facilitator_routes(self) -> Dict[str, str]:
+        """Resolved ``network -> facilitator URL`` for every ENABLED network.
+
+        The boot-time picture of where each network would settle. Useful for
+        diagnostics and for :meth:`X402Client.verify_routes`.
+        """
+        return {
+            network: self.facilitator_url_for(network)
+            for network in self.supported_networks
+            if self.is_network_enabled(network)
+        }
+
     @classmethod
     def from_env(cls) -> "X402Config":
         """
@@ -142,6 +319,9 @@ class X402Config:
 
         Environment variables:
             X402_FACILITATOR_URL: Facilitator URL
+            X402_FACILITATOR_BY_NETWORK: JSON object mapping network -> facilitator
+                URL, e.g. '{"base": "https://cdp...", "avalanche": "https://uvd..."}'.
+                Use the key "*" to declare a fallback. Unset = single facilitator.
             X402_RECIPIENT_EVM: EVM recipient address
             X402_RECIPIENT_SOLANA: Solana recipient address
             X402_RECIPIENT_NEAR: NEAR recipient account
@@ -158,6 +338,9 @@ class X402Config:
                 "X402_FACILITATOR_URL",
                 "https://facilitator.ultravioletadao.xyz",
             ),
+            facilitator_by_network=cls._parse_facilitator_by_network_env(
+                os.environ.get("X402_FACILITATOR_BY_NETWORK", "")
+            ),
             recipient_evm=os.environ.get("X402_RECIPIENT_EVM", ""),
             recipient_solana=os.environ.get("X402_RECIPIENT_SOLANA", ""),
             recipient_near=os.environ.get("X402_RECIPIENT_NEAR", ""),
@@ -172,6 +355,28 @@ class X402Config:
             resource_url=os.environ.get("X402_RESOURCE_URL", ""),
             description=os.environ.get("X402_DESCRIPTION", "x402 payment"),
         )
+
+    @staticmethod
+    def _parse_facilitator_by_network_env(raw: str) -> Dict[str, str]:
+        """Parse X402_FACILITATOR_BY_NETWORK. Malformed JSON fails loudly."""
+        from uvd_x402_sdk.exceptions import ConfigurationError
+
+        if not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"X402_FACILITATOR_BY_NETWORK is not valid JSON: {exc}",
+                config_key="facilitator_by_network",
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise ConfigurationError(
+                "X402_FACILITATOR_BY_NETWORK must be a JSON object mapping "
+                "network -> facilitator URL",
+                config_key="facilitator_by_network",
+            )
+        return {str(k): v for k, v in parsed.items()}
 
     def get_recipient(self, network: str) -> str:
         """
@@ -250,6 +455,7 @@ class X402Config:
         """Convert configuration to dictionary."""
         return {
             "facilitator_url": self.facilitator_url,
+            "facilitator_by_network": dict(self.facilitator_by_network),
             "recipient_evm": self.recipient_evm,
             "recipient_solana": self.recipient_solana,
             "recipient_near": self.recipient_near,

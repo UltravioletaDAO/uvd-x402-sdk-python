@@ -862,6 +862,56 @@ config = X402Config(
 config = X402Config.from_env()
 ```
 
+### One facilitator per network
+
+Some deployments cannot settle every chain through the same facilitator —
+Coinbase's CDP facilitator, for example, does not settle Avalanche. Map the
+networks that need a different one; everything else is unchanged.
+
+```python
+from uvd_x402_sdk import X402Client
+
+client = X402Client(
+    recipient_address="0xYourEVMWallet",
+    supported_networks=["base", "avalanche"],
+    facilitator_by_network={
+        "base": "https://api.cdp.coinbase.com/platform/v2/x402",
+        "avalanche": "https://facilitator.ultravioletadao.xyz",
+    },
+)
+
+client.facilitator_url_for("base")          # -> the CDP URL
+client.facilitator_url_for("eip155:43114")  # -> the UVD URL (CAIP-2 works too)
+```
+
+Three rules make this safe to run in production:
+
+1. **Not configured = nothing changes.** Without `facilitator_by_network` every
+   network resolves to `facilitator_url`, exactly as before.
+2. **It never guesses.** A network that is not in the table raises
+   `ConfigurationError` instead of falling back to `facilitator_url` — silently
+   settling on a facilitator that does not support that chain is a money bug.
+   Declare a fallback explicitly with the reserved `"*"` key:
+   `{"base": CDP, "*": UVD}`.
+3. **It fails at boot, not at the first payment.** An enabled network with no
+   route raises in the constructor. Either route every network in
+   `supported_networks`, narrow that list, or add `"*"`. Pass
+   `verify_facilitator_support=True` to also probe each facilitator's
+   `GET /supported` at construction and refuse a route the facilitator itself
+   does not advertise (available on demand as `client.verify_routes()`).
+
+From the environment, as a JSON object:
+
+```bash
+X402_FACILITATOR_BY_NETWORK='{"base":"https://api.cdp.coinbase.com/platform/v2/x402","avalanche":"https://facilitator.ultravioletadao.xyz"}'
+```
+
+`/verify`, `/settle` (including the post-timeout re-check, which always asks the
+same facilitator the settle went to) and `/accepts` follow the table. The
+endpoints that are not network-scoped — `/version`, `/blacklist`, `/api/stats`,
+`/transactions` — use `facilitator_url`; `get_supported()` and `health_check()`
+accept an optional `network=` to target one facilitator.
+
 ---
 
 ## Facilitator Addresses
@@ -1832,6 +1882,14 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.44.0 (2026-08-11)
+- **Added**: per-network facilitator routing — `X402Config(facilitator_by_network={"base": CDP_URL, "avalanche": UVD_URL})` (also `X402Client(...)` and `configure_x402(...)`, and the `X402_FACILITATOR_BY_NETWORK` env var as a JSON object). `verify`, `settle`, the post-timeout settle re-check and `/accepts` each go to the facilitator that owns their network
+- **The translation refuses to guess**: a network that is neither in the table nor covered by the reserved `"*"` fallback key raises `ConfigurationError` — it is NEVER routed to `facilitator_url` silently. Settling on a facilitator that does not settle that chain is a money bug, not a config nit
+- **Boot fails early**: an ENABLED network left unrouted raises in the `X402Config` constructor, not on the first payment. `X402Client(..., verify_facilitator_support=True)` additionally probes each facilitator's `GET /supported` at construction and raises if one does not advertise a network routed to it (also available on demand as `client.verify_routes()`)
+- Added `X402Config.facilitator_url_for(network)`, `X402Config.facilitator_routes()`, `X402Client.facilitator_url_for()` / `verify_routes()`, and optional `network=` on `get_supported()` / `health_check()` to target a single facilitator
+- Purely additive — with no `facilitator_by_network` the resolution returns `facilitator_url` for every input, including unknown networks, and the wire is byte-identical. `FACILITATOR_URLS` (which maps ENVIRONMENT, not network) is untouched
+- Reported by **NomiCheck**, who route `base` through Coinbase's CDP facilitator and `avalanche` through Ultravioleta's — CDP does not settle avalanche — and had to maintain a routing layer of their own on top of the SDK because a single `facilitator_url` could not express it
 
 ### v0.36.0 (2026-08-02)
 - **Added**: `asset` and `eip712_domain` overrides on `settle_payment()`, `verify_payment()` and `process_payment()` — the caller's token registry (not the SDK's) decides which token contract is settled and which EIP-712 domain (`{"name", "version"}`) goes to the facilitator via `extra`. Unblocks non-USDC settles where the token is not in the SDK registry or the registries drift

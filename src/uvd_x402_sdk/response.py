@@ -208,6 +208,7 @@ class Payment402Builder:
         if self._networks:
             limited_config = X402Config(
                 facilitator_url=self._config.facilitator_url,
+                facilitator_by_network=self._config.facilitator_by_network,
                 recipient_evm=self._config.recipient_evm,
                 recipient_solana=self._config.recipient_solana,
                 recipient_near=self._config.recipient_near,

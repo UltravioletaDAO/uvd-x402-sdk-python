@@ -72,7 +72,12 @@ __version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
 from uvd_x402_sdk.client import X402Client
-from uvd_x402_sdk.config import X402Config, NetworkConfig, MultiPaymentConfig
+from uvd_x402_sdk.config import (
+    X402Config,
+    NetworkConfig,
+    MultiPaymentConfig,
+    FACILITATOR_FALLBACK_KEY,
+)
 from uvd_x402_sdk.decorators import require_payment, x402_required, configure_x402
 from uvd_x402_sdk.exceptions import (
     X402Error,
@@ -345,6 +350,7 @@ __all__ = [
     "X402Config",
     "NetworkConfig",
     "MultiPaymentConfig",
+    "FACILITATOR_FALLBACK_KEY",
     # Decorators
     "require_payment",
     "x402_required",

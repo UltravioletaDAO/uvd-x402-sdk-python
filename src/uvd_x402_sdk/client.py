@@ -165,6 +165,8 @@ class X402Client:
         recipient_address: Optional[str] = None,
         facilitator_url: str = "https://facilitator.ultravioletadao.xyz",
         config: Optional[X402Config] = None,
+        *,
+        verify_facilitator_support: bool = False,
         **kwargs: Any,
     ) -> None:
         """
@@ -172,12 +174,34 @@ class X402Client:
 
         Args:
             recipient_address: Default recipient for EVM chains (convenience arg)
-            facilitator_url: URL of the facilitator service
+            facilitator_url: URL of the facilitator service. Serves every network
+                unless `facilitator_by_network` routes it elsewhere.
             config: Full X402Config object (overrides other args)
-            **kwargs: Additional config parameters passed to X402Config
+            verify_facilitator_support: Probe every configured facilitator's
+                `GET /supported` at construction and raise if an enabled network
+                is routed to a facilitator that does not settle it. Off by
+                default because it performs network I/O; see `verify_routes()`.
+            **kwargs: Additional config parameters passed to X402Config —
+                including `facilitator_by_network`, the `network -> facilitator
+                URL` routing table (see X402Config).
 
         Raises:
             ValueError: If no recipient address is configured
+            ConfigurationError: If the facilitator routing table leaves an
+                enabled network unrouted, or (with verify_facilitator_support)
+                routes one to a facilitator that does not settle it.
+
+        Example:
+            >>> # base settles through CDP, avalanche through UVD (CDP does not
+            >>> # settle avalanche). Unrouted networks are refused, not guessed.
+            >>> client = X402Client(
+            ...     recipient_address="0xMerchant...",
+            ...     supported_networks=["base", "avalanche"],
+            ...     facilitator_by_network={
+            ...         "base": "https://api.cdp.coinbase.com/platform/v2/x402",
+            ...         "avalanche": "https://facilitator.ultravioletadao.xyz",
+            ...     },
+            ... )
         """
         if config:
             self.config = config
@@ -204,6 +228,92 @@ class X402Client:
         # signers cannot drift apart.
         self._sign_typed_data: Optional[Any] = None
         self._connected_chain: Optional[str] = None
+
+        if verify_facilitator_support:
+            self.verify_routes()
+
+    # =========================================================================
+    # Facilitator Routing
+    # =========================================================================
+
+    def facilitator_url_for(self, network: str) -> str:
+        """Resolve which facilitator settles `network`.
+
+        Delegates to :meth:`X402Config.facilitator_url_for`. Without a
+        `facilitator_by_network` table this is always `config.facilitator_url`.
+
+        Raises:
+            ConfigurationError: If a routing table is configured and the network
+                is neither in it nor covered by a `"*"` fallback.
+        """
+        return self.config.facilitator_url_for(network)
+
+    def verify_routes(self) -> Dict[str, list]:
+        """Prove every configured facilitator settles the networks routed to it.
+
+        Performs one `GET /supported` per DISTINCT facilitator URL and checks
+        each enabled network against what that facilitator advertises. This is
+        the check `verify_facilitator_support=True` runs at construction: a
+        network pointed at a facilitator that cannot settle it fails at boot
+        instead of on the first payment.
+
+        Returns:
+            `facilitator URL -> [networks]` for the verified routes.
+
+        Raises:
+            ConfigurationError: If a facilitator does not advertise a network
+                routed to it.
+            FacilitatorError: If a facilitator's `/supported` cannot be read.
+                Deliberately fatal — an unverifiable route is not a verified one.
+        """
+        from uvd_x402_sdk.exceptions import ConfigurationError
+
+        by_url: Dict[str, list] = {}
+        for network, url in self.config.facilitator_routes().items():
+            by_url.setdefault(url, []).append(network)
+
+        for url, networks in by_url.items():
+            advertised = self._fetch_supported_networks(url)
+            unsupported = sorted(
+                n for n in networks if self.config.network_key(n) not in advertised
+            )
+            if unsupported:
+                raise ConfigurationError(
+                    f"Facilitator {url} does not settle: {', '.join(unsupported)}. "
+                    f"It advertises: {', '.join(sorted(advertised)) or '(nothing)'}. "
+                    f"Route those networks to a facilitator that supports them, or "
+                    f"drop them from supported_networks.",
+                    config_key="facilitator_by_network",
+                )
+
+        return by_url
+
+    def _fetch_supported_networks(self, facilitator_url: str) -> set:
+        """Normalised set of network names a facilitator advertises via /supported."""
+        try:
+            client = self._get_http_client()
+            response = client.get(
+                f"{facilitator_url}/supported", timeout=self.config.verify_timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            raise FacilitatorError(
+                message=f"GET {facilitator_url}/supported failed: {e.response.status_code}",
+                status_code=e.response.status_code,
+                response_body=e.response.text,
+            )
+        except Exception as e:
+            raise FacilitatorError(
+                message=f"GET {facilitator_url}/supported failed: {e}"
+            )
+
+        networks = set()
+        for kind in data.get("kinds", []) or []:
+            name = kind.get("network") if isinstance(kind, dict) else None
+            if name:
+                networks.add(self.config.network_key(str(name)))
+        return networks
 
     def _get_http_client(self) -> httpx.Client:
         """Get or create HTTP client."""
@@ -488,7 +598,7 @@ class X402Client:
         try:
             client = self._get_http_client()
             response = client.post(
-                f"{self.config.facilitator_url}/verify",
+                f"{self.facilitator_url_for(payload.network)}/verify",
                 json=verify_request,
                 headers={"Content-Type": "application/json"},
                 timeout=self.config.verify_timeout,
@@ -665,16 +775,17 @@ class X402Client:
 
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
+        facilitator_url = self.facilitator_url_for(payload.network)
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
-            f"(timeout={settle_timeout}s)"
+            f"(timeout={settle_timeout}s, facilitator={facilitator_url})"
         )
         logger.debug(f"Settle request: {json.dumps(settle_request, indent=2)}")
 
         try:
             client = self._get_http_client()
             response = client.post(
-                f"{self.config.facilitator_url}/settle",
+                f"{facilitator_url}/settle",
                 json=settle_request,
                 headers={"Content-Type": "application/json"},
                 timeout=settle_timeout,
@@ -707,7 +818,9 @@ class X402Client:
                 f"Settle timed out after {settle_timeout}s on {payload.network}, "
                 f"checking on-chain state..."
             )
-            fallback = self._check_settle_fallback(settle_request, settle_timeout)
+            fallback = self._check_settle_fallback(
+                settle_request, settle_timeout, facilitator_url
+            )
             if fallback:
                 return fallback
             raise X402TimeoutError(operation="settle", timeout_seconds=settle_timeout)
@@ -718,6 +831,7 @@ class X402Client:
         self,
         settle_request: Dict[str, Any],
         settle_timeout: float,
+        facilitator_url: Optional[str] = None,
     ) -> Optional[SettleResponse]:
         """
         Check on-chain state after a settle timeout.
@@ -726,13 +840,19 @@ class X402Client:
         have succeeded. This queries the facilitator's /settle endpoint again
         with a short timeout to check if the transaction was confirmed.
 
+        Args:
+            facilitator_url: The facilitator the timed-out settle was sent to.
+                Must be that same one — re-resolving or defaulting could ask a
+                DIFFERENT facilitator about a payment it never saw.
+
         Returns:
             SettleResponse if payment was confirmed on-chain, None otherwise.
         """
+        url = facilitator_url or self.config.facilitator_url
         try:
             client = self._get_http_client()
             response = client.post(
-                f"{self.config.facilitator_url}/settle",
+                f"{url}/settle",
                 json=settle_request,
                 headers={"Content-Type": "application/json"},
                 timeout=30.0,  # Short timeout for fallback check
@@ -873,7 +993,7 @@ class X402Client:
             >>> enriched = client.negotiate_accepts(requirements)
             >>> # enriched[0]["extra"]["feePayer"] is now set
         """
-        url = f"{self.config.facilitator_url}/accepts"
+        url = f"{self._accepts_facilitator_url(payment_requirements)}/accepts"
         payload = {
             "x402Version": x402_version,
             "accepts": payment_requirements,
@@ -900,6 +1020,30 @@ class X402Client:
             raise X402TimeoutError(operation="accepts", timeout_seconds=self.config.verify_timeout)
         except Exception as e:
             raise FacilitatorError(message=f"Facilitator /accepts error: {e}")
+
+    def _accepts_facilitator_url(self, payment_requirements: list) -> str:
+        """Resolve the facilitator for a /accepts negotiation.
+
+        One request cannot span two facilitators: if the requirements name
+        networks that route to different ones, the caller must split the call
+        rather than have the SDK pick a winner.
+        """
+        from uvd_x402_sdk.exceptions import ConfigurationError
+
+        urls = {
+            self.facilitator_url_for(req["network"])
+            for req in payment_requirements
+            if isinstance(req, dict) and req.get("network")
+        }
+        if not urls:
+            return self.config.facilitator_url
+        if len(urls) > 1:
+            raise ConfigurationError(
+                f"negotiate_accepts got requirements spanning {len(urls)} facilitators "
+                f"({', '.join(sorted(urls))}). Split them into one call per facilitator.",
+                config_key="facilitator_by_network",
+            )
+        return urls.pop()
 
     # =========================================================================
     # Facilitator Info Methods
@@ -929,9 +1073,14 @@ class X402Client:
         except Exception as e:
             raise FacilitatorError(message=f"GET /version failed: {e}")
 
-    def get_supported(self) -> Dict[str, Any]:
+    def get_supported(self, network: Optional[str] = None) -> Dict[str, Any]:
         """
         Get the facilitator's supported networks and payment schemes.
+
+        Args:
+            network: Ask the facilitator that settles this network. Only
+                meaningful with a `facilitator_by_network` table configured;
+                without one every network resolves to the same facilitator.
 
         Returns:
             Dict with 'kinds' array of supported network/scheme combos
@@ -944,9 +1093,10 @@ class X402Client:
         Raises:
             FacilitatorError: If the request fails
         """
+        base_url = self.facilitator_url_for(network) if network else self.config.facilitator_url
         try:
             client = self._get_http_client()
-            response = client.get(f"{self.config.facilitator_url}/supported")
+            response = client.get(f"{base_url}/supported")
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -1058,16 +1208,22 @@ class X402Client:
         except Exception as e:
             raise FacilitatorError(message=f"GET /blacklist failed: {e}")
 
-    def health_check(self) -> bool:
+    def health_check(self, network: Optional[str] = None) -> bool:
         """
         Check facilitator health.
+
+        Args:
+            network: Check the facilitator that settles this network. Without it
+                (or without a `facilitator_by_network` table) the default
+                facilitator is checked — which says nothing about the others.
 
         Returns:
             True if the facilitator is healthy
         """
+        base_url = self.facilitator_url_for(network) if network else self.config.facilitator_url
         try:
             client = self._get_http_client()
-            response = client.get(f"{self.config.facilitator_url}/health")
+            response = client.get(f"{base_url}/health")
             return response.is_success
         except Exception:
             return False
