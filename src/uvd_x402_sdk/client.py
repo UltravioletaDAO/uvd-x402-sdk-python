@@ -41,6 +41,7 @@ from uvd_x402_sdk.networks import (
     get_supported_network_names,
     normalize_network,
     is_caip2_format,
+    parse_caip2_network,
 )
 
 logger = logging.getLogger(__name__)
@@ -344,9 +345,86 @@ class X402Client:
     # Payload Parsing
     # =========================================================================
 
+    @staticmethod
+    def _normalize_v2_envelope(data: Dict[str, Any]) -> Dict[str, Any]:
+        """Flatten an x402 v2 X-PAYMENT envelope into the v1 shape.
+
+        The v2 challenge (``create_402_response_v2``) instructs the payer to
+        echo the chosen accept back as ``accepted`` with NO top-level
+        ``network`` — but this client parsed only the flat v1 model, so every
+        payment built exactly as the challenge asked died with
+        "network Field required": the server rejected the format it had
+        itself requested. Found 2026-08-12 with a real Rabby signature on
+        Base (describe-net incident); the wallet was signing perfectly, and
+        the first successful x402 payment of that API only happened once its
+        paywall translated the envelope before handing it to this SDK. This
+        is that translation, moved to where it always belonged.
+
+        Only the wrapper changes: the EIP-3009 signature and authorization
+        inside ``payload`` are copied through untouched. A dict without
+        ``accepted``, or with a top-level ``network``, is already v1-shaped
+        and is returned as-is, so v1 parsing stays byte-identical.
+
+        Unlike the downstream shim this replaces, unknown networks raise a
+        clear :class:`InvalidPayloadError` instead of silently reproducing
+        the old cryptic failure, and CAIP-2 resolution covers every
+        namespace the registry knows (eip155 by chain id, solana, near,
+        stellar, ...), not just EVM.
+        """
+        if "accepted" not in data or "network" in data:
+            return data
+
+        accepted = data.get("accepted") or {}
+        if not isinstance(accepted, dict):
+            raise InvalidPayloadError(
+                "v2 envelope: `accepted` must be the accept object echoed "
+                f"from the 402, got {type(accepted).__name__}"
+            )
+
+        raw_network = accepted.get("network")
+        if not raw_network:
+            raise InvalidPayloadError(
+                "v2 envelope: `accepted.network` is missing — echo the "
+                "chosen accept object from the 402 unchanged"
+            )
+        network = str(raw_network)
+        if is_caip2_format(network):
+            resolved = parse_caip2_network(network)
+            if resolved is None:
+                raise InvalidPayloadError(
+                    f"v2 envelope: unrecognized CAIP-2 network '{network}'"
+                )
+            network = resolved
+
+        # pay.js (the only producer observed in production) sends the inner
+        # block as top-level `payload`; the SDK's own outbound v2 envelope
+        # nests it as `paymentPayload` (sometimes with `payload` inside).
+        payload = data.get("payload")
+        if payload is None:
+            inner = data.get("paymentPayload")
+            if isinstance(inner, dict):
+                payload = inner.get("payload", inner)
+        if not isinstance(payload, dict) or not payload:
+            raise InvalidPayloadError(
+                "v2 envelope: no payment `payload` found (expected "
+                "`payload` or `paymentPayload` with the signature and "
+                "authorization)"
+            )
+
+        return {
+            "x402Version": data.get("x402Version", 2),
+            "scheme": accepted.get("scheme", "exact"),
+            "network": network,
+            "payload": payload,
+        }
+
     def extract_payload(self, x_payment_header: str) -> PaymentPayload:
         """
         Extract and validate payment payload from X-PAYMENT header.
+
+        Accepts both envelope shapes: the flat v1 payload and the v2
+        envelope (``accepted`` echo, no top-level ``network``) that this
+        SDK's own v2 challenge instructs payers to send.
 
         Args:
             x_payment_header: Base64-encoded JSON payload
@@ -368,6 +446,10 @@ class X402Client:
             # Parse JSON
             data = json.loads(json_str)
 
+            # v2 envelope (`accepted` echo) -> flat v1 shape; v1 passes as-is
+            if isinstance(data, dict):
+                data = self._normalize_v2_envelope(data)
+
             # Validate and parse with Pydantic
             payload = PaymentPayload(**data)
 
@@ -378,6 +460,8 @@ class X402Client:
             raise InvalidPayloadError(f"Invalid base64 encoding: {e}")
         except json.JSONDecodeError as e:
             raise InvalidPayloadError(f"Invalid JSON in payload: {e}")
+        except InvalidPayloadError:
+            raise
         except Exception as e:
             raise InvalidPayloadError(f"Failed to parse payload: {e}")
 
