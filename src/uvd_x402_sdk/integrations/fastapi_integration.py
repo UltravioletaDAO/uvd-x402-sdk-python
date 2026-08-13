@@ -14,6 +14,7 @@ from typing import Any, Callable, Optional, TypeVar, Union
 try:
     from fastapi import FastAPI, Request, HTTPException, Depends
     from fastapi.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
 except ImportError:
     raise ImportError(
@@ -131,7 +132,13 @@ class FastAPIX402:
                 )
 
             try:
-                return self._client.process_payment(
+                # process_payment does blocking HTTP (sync httpx: verify up to
+                # 30s + settle up to 90s on L2s). Called directly inside this
+                # async dependency it would freeze the whole event loop for
+                # every request on the server, /health included, while one
+                # payment settles.
+                return await run_in_threadpool(
+                    self._client.process_payment,
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
                 )
@@ -190,7 +197,9 @@ class X402Depends:
             )
 
         try:
-            return self._client.process_payment(
+            # Blocking HTTP off the event loop; see require_payment above.
+            return await run_in_threadpool(
+                self._client.process_payment,
                 x_payment_header=payment_header,
                 expected_amount_usd=self._amount,
             )
@@ -245,7 +254,9 @@ def fastapi_require_payment(
                 )
 
             try:
-                result = client.process_payment(
+                # Blocking HTTP off the event loop; see require_payment above.
+                result = await run_in_threadpool(
+                    client.process_payment,
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
                 )
@@ -315,7 +326,9 @@ class X402Middleware(BaseHTTPMiddleware):
             )
 
         try:
-            result = self._client.process_payment(
+            # Blocking HTTP off the event loop; see require_payment above.
+            result = await run_in_threadpool(
+                self._client.process_payment,
                 x_payment_header=payment_header,
                 expected_amount_usd=required_amount,
             )
