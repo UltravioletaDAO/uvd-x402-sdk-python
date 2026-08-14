@@ -286,6 +286,18 @@ from uvd_x402_sdk.erc8128 import (
 )
 
 # Escrow pre-auth builder (ADR-002 sign-on-assignment) — X-Payment-Auth header
+from uvd_x402_sdk.dx402 import (
+    EVIDENCE_HEADER,
+    AnchoredEvidence,
+    ContentHashMismatch,
+    DX402Error,
+    EvidenceSkipped,
+    dereference_pointer,
+    evidence_from_headers,
+    parse_evidence_header,
+    payment_id,
+    recover_evidence,
+)
 from uvd_x402_sdk.money_safety import SAFE_TO_FALLBACK, is_fallback_safe
 from uvd_x402_sdk.erc7702 import (
     DelegationResolver,
@@ -327,6 +339,17 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    # DX402 durable-evidence
+    "EVIDENCE_HEADER",
+    "AnchoredEvidence",
+    "ContentHashMismatch",
+    "DX402Error",
+    "EvidenceSkipped",
+    "dereference_pointer",
+    "evidence_from_headers",
+    "parse_evidence_header",
+    "payment_id",
+    "recover_evidence",
     "bazaar_extension",
     "SAFE_TO_FALLBACK",
     "is_fallback_safe",
