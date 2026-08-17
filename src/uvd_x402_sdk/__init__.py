@@ -292,11 +292,16 @@ from uvd_x402_sdk.dx402 import (
     ContentHashMismatch,
     DX402Error,
     EvidenceSkipped,
+    content_hash,
     dereference_pointer,
     evidence_from_headers,
     parse_evidence_header,
+    payer_key_from_ed25519_pubkey,
+    payer_key_from_evm_signature,
+    payer_key_from_solana_address,
     payment_id,
     recover_evidence,
+    seal_evidence,
 )
 from uvd_x402_sdk.money_safety import SAFE_TO_FALLBACK, is_fallback_safe
 from uvd_x402_sdk.erc7702 import (
@@ -350,6 +355,12 @@ __all__ = [
     "parse_evidence_header",
     "payment_id",
     "recover_evidence",
+    # DX402 seller side
+    "seal_evidence",
+    "content_hash",
+    "payer_key_from_solana_address",
+    "payer_key_from_ed25519_pubkey",
+    "payer_key_from_evm_signature",
     "bazaar_extension",
     "SAFE_TO_FALLBACK",
     "is_fallback_safe",

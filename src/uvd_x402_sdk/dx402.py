@@ -348,3 +348,222 @@ def recover_evidence(
         raise ContentHashMismatch(evidence.content_hash, actual)
 
     return plaintext
+
+
+# ============================================================================
+# Seller side -- sealing and anchoring
+# ============================================================================
+#
+# The buyer half above recovers evidence. This half PRODUCES it, and it belongs
+# to whoever holds the plaintext: the resource server, right after settlement.
+#
+# The facilitator is deliberately not involved here. It only ever sees /verify
+# and /settle, never a response body, so sealing cannot happen there -- see
+# docs/plans/dx402/00-RESEARCH.md in x402-rs.
+
+_P25519 = 2**255 - 19
+
+
+def _ed25519_pubkey_to_x25519(pubkey: bytes) -> bytes:
+    """Map an ed25519 public key to its X25519 (Montgomery u) form.
+
+    Birational map: ``u = (1 + y) / (1 - y) mod p``.
+
+    An ed25519 public key is a compressed Edwards point -- little-endian ``y``
+    with the sign bit of ``x`` in the top bit, which is discarded here because
+    the u-coordinate does not depend on it.
+    """
+    if len(pubkey) != 32:
+        raise DX402Error(f"ed25519 public key must be 32 bytes, got {len(pubkey)}")
+
+    y = int.from_bytes(pubkey, "little") & ((1 << 255) - 1)
+
+    denom = (1 - y) % _P25519
+    if denom == 0:
+        # y == 1 is the identity element, and it has no Montgomery u.
+        raise DX402Error("degenerate ed25519 public key (identity element)")
+
+    u = ((1 + y) * pow(denom, _P25519 - 2, _P25519)) % _P25519
+    return u.to_bytes(32, "little")
+
+
+def payer_key_from_solana_address(address: str) -> bytes:
+    """Derive the encryption target from a Solana (or Fogo) address.
+
+    On ed25519 chains the address **is** the public key, so this needs no
+    signature and no lookup -- which is what makes those chains the cheapest
+    case for DX402.
+    """
+    try:
+        import base58
+    except ImportError:
+        # base58 is a small pure-python decode; avoid a dependency for it.
+        alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+        num = 0
+        for ch in address:
+            idx = alphabet.find(ch)
+            if idx < 0:
+                raise DX402Error(f"invalid base58 character {ch!r} in address")
+            num = num * 58 + idx
+        raw = num.to_bytes(32, "big") if num.bit_length() <= 256 else b""
+        leading = len(address) - len(address.lstrip("1"))
+        decoded = b"\x00" * leading + raw.lstrip(b"\x00")
+        decoded = decoded.rjust(32, b"\x00")
+        return _ed25519_pubkey_to_x25519(decoded)
+    return _ed25519_pubkey_to_x25519(base58.b58decode(address))
+
+
+def payer_key_from_ed25519_pubkey(pubkey: bytes) -> bytes:
+    """Derive the encryption target from a raw ed25519 public key.
+
+    Covers NEAR access keys, Stellar ``G...`` addresses and Algorand addresses
+    once decoded to their 32 raw bytes.
+    """
+    return _ed25519_pubkey_to_x25519(pubkey)
+
+
+def payer_key_from_evm_signature(signature: bytes | str, digest: bytes) -> bytes:
+    """Recover an EVM payer's secp256k1 public key from their payment signature.
+
+    ``digest`` is the EIP-712 digest the payer actually signed -- for an
+    EIP-3009 authorization, the ``TransferWithAuthorization`` hash under the
+    token's own domain.
+
+    Getting that digest wrong does not raise: it recovers a *different, perfectly
+    valid* public key, and the body would be sealed to a stranger while every log
+    line said success. The token's EIP-712 domain name varies per chain and even
+    flips between a chain's mainnet and testnet, so derive it from the same table
+    the facilitator uses rather than assuming.
+
+    Returns the SEC1-compressed public key (33 bytes).
+    """
+    try:
+        from eth_keys import KeyAPI
+    except ImportError as exc:
+        raise DX402Error(
+            "payer_key_from_evm_signature() needs eth-keys; install the 'dx402' extra"
+        ) from exc
+
+    if isinstance(signature, str):
+        signature = bytes.fromhex(signature.removeprefix("0x"))
+    if len(signature) != 65:
+        raise DX402Error(f"signature must be 65 bytes, got {len(signature)}")
+
+    v = signature[64]
+    if v in (27, 28):
+        v -= 27
+    elif v >= 35:
+        v = (v - 35) % 2
+    if v not in (0, 1):
+        raise DX402Error(f"invalid recovery id {signature[64]}")
+
+    keys = KeyAPI()
+    sig = keys.Signature(vrs=(v, int.from_bytes(signature[:32], "big"),
+                              int.from_bytes(signature[32:64], "big")))
+    pub = sig.recover_public_key_from_msg_hash(digest)
+
+    # eth-keys hands back the uncompressed 64-byte X||Y form; compress it to the
+    # 33-byte SEC1 encoding the wire format uses.
+    raw = pub.to_bytes()
+    x, y = raw[:32], raw[32:]
+    prefix = b"\x03" if y[-1] & 1 else b"\x02"
+    return prefix + x
+
+
+def seal_evidence(
+    body: bytes,
+    payer_key: bytes,
+    payment_id_value: str,
+) -> bytes:
+    """Seal ``body`` so that only the holder of the payer's private key can read it.
+
+    ``payer_key`` is either a 33-byte SEC1-compressed secp256k1 key (EVM, XRPL)
+    or a 32-byte X25519 key from one of the ``payer_key_from_*`` helpers.
+
+    ``payment_id_value`` is bound in as AEAD associated data, which is what stops
+    a ciphertext from being replayed as the evidence for a different payment.
+    Derive it with :func:`payment_id` so both sides agree; deriving it
+    differently makes decryption fail with no obvious cause.
+
+    Returns the bytes to upload. Nothing here talks to the network.
+    """
+    import os
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    aad = payment_id_value.encode()
+    cek = os.urandom(_CEK_LEN)
+    body_nonce = os.urandom(_NONCE_LEN)
+    cek_nonce = os.urandom(_NONCE_LEN)
+
+    ciphertext = AESGCM(cek).encrypt(body_nonce, body, aad)
+
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    if len(payer_key) == 33:
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        alg_byte = 1
+        curve = ec.SECP256K1()
+        eph = ec.generate_private_key(curve)
+        peer = ec.EllipticCurvePublicKey.from_encoded_point(curve, payer_key)
+        shared = eph.exchange(ec.ECDH(), peer)
+        ephemeral = eph.public_key().public_bytes(
+            encoding=Encoding.X962, format=PublicFormat.CompressedPoint
+        )
+    elif len(payer_key) == 32:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PrivateKey,
+            X25519PublicKey,
+        )
+
+        alg_byte = 2
+        eph = X25519PrivateKey.generate()
+        shared = eph.exchange(X25519PublicKey.from_public_bytes(payer_key))
+        ephemeral = eph.public_key().public_bytes(
+            encoding=Encoding.Raw, format=PublicFormat.Raw
+        )
+
+        # RFC 7748 section 6.1. A small-order payer key would drive the shared
+        # secret to a constant that whoever supplied that key could reproduce.
+        if shared == bytes(32):
+            raise DX402Error("degenerate ECDH result (small-order public key)")
+    else:
+        raise DX402Error(
+            f"payer key must be 33 bytes (secp256k1) or 32 (X25519), got {len(payer_key)}"
+        )
+
+    wrap_key = HKDF(
+        algorithm=hashes.SHA256(), length=32, salt=aad, info=_HKDF_INFO
+    ).derive(shared)
+    wrapped_cek = AESGCM(wrap_key).encrypt(cek_nonce, cek, aad)
+
+    out = bytearray()
+    out += _MAGIC
+    out.append(_FORMAT_VERSION)
+    out.append(alg_byte)
+    out.append(len(ephemeral))
+    out += ephemeral
+    out += cek_nonce
+    out += len(wrapped_cek).to_bytes(2, "big")
+    out += wrapped_cek
+    out += body_nonce
+    out += ciphertext
+    return bytes(out)
+
+
+def content_hash(body: bytes) -> str:
+    """keccak256 of a body, ``0x``-prefixed.
+
+    Over the **plaintext**, deliberately. Over the ciphertext it would only prove
+    the blob was not corrupted in storage; over the plaintext it proves the blob
+    decrypts to exactly what was delivered -- the check that catches a seller
+    anchoring something other than what it served.
+    """
+    try:
+        from eth_utils import keccak
+    except ImportError as exc:
+        raise DX402Error("content_hash() needs eth-utils; install the 'dx402' extra") from exc
+    return "0x" + keccak(body).hex()

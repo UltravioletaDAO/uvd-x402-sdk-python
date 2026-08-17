@@ -180,3 +180,122 @@ def test_a_missing_header_is_an_error():
 def test_a_malformed_header_is_an_error():
     with pytest.raises(DX402Error):
         parse_evidence_header("!!!not base64!!!")
+
+
+# ============================================================================
+# Seller side -- sealing
+# ============================================================================
+#
+# Note what these do NOT prove on their own: a seal/unseal round trip inside this
+# module would pass even if the envelope format or the ed25519->X25519 map were
+# wrong, because both halves would share the same mistake. The authoritative
+# check is `tests/dx402_cross_seal.rs` in x402-rs, where the RUST implementation
+# opens envelopes sealed here.
+
+
+def test_seal_round_trips_secp256k1():
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import seal_evidence
+
+    sk = ec.derive_private_key(int.from_bytes(SECP256K1_PRIV, "big"), ec.SECP256K1())
+    pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    blob = seal_evidence(BODY, pub, PAYMENT_ID)
+    sealed = _parse_sealed(blob)
+    assert sealed["alg"] == "secp256k1"
+    assert len(sealed["ephemeral"]) == 33
+    assert _unseal(sealed, SECP256K1_PRIV, PAYMENT_ID.encode()) == BODY
+
+
+def test_seal_round_trips_x25519():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import payer_key_from_ed25519_pubkey, seal_evidence
+
+    edsk = Ed25519PrivateKey.from_private_bytes(ED25519_SEED)
+    edpub = edsk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+    blob = seal_evidence(BODY, payer_key_from_ed25519_pubkey(edpub), PAYMENT_ID)
+    sealed = _parse_sealed(blob)
+    assert sealed["alg"] == "x25519"
+    assert len(sealed["ephemeral"]) == 32
+    assert _unseal(sealed, ED25519_SEED, PAYMENT_ID.encode()) == BODY
+
+
+def test_a_solana_address_derives_the_same_key_as_the_raw_pubkey():
+    """On ed25519 chains the address IS the public key."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import (
+        payer_key_from_ed25519_pubkey,
+        payer_key_from_solana_address,
+    )
+
+    edsk = Ed25519PrivateKey.from_private_bytes(ED25519_SEED)
+    edpub = edsk.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    assert payer_key_from_solana_address(ED25519_ADDRESS) == payer_key_from_ed25519_pubkey(edpub)
+
+
+def test_the_plaintext_never_appears_in_the_sealed_blob():
+    """The blob is what lands in durable storage."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import seal_evidence
+
+    sk = ec.derive_private_key(int.from_bytes(SECP256K1_PRIV, "big"), ec.SECP256K1())
+    pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    marker = b"SENSITIVE-MARKER-STRING"
+    blob = seal_evidence(marker, pub, PAYMENT_ID)
+    assert marker not in blob
+
+
+def test_two_seals_of_the_same_body_differ():
+    """Fresh CEK and nonces every time.
+
+    Identical blobs would let anyone with read access to the store learn that two
+    buyers received the same answer.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import seal_evidence
+
+    sk = ec.derive_private_key(int.from_bytes(SECP256K1_PRIV, "big"), ec.SECP256K1())
+    pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    assert seal_evidence(BODY, pub, PAYMENT_ID) != seal_evidence(BODY, pub, PAYMENT_ID)
+
+
+def test_a_wrong_sized_payer_key_is_rejected():
+    from uvd_x402_sdk.dx402 import seal_evidence
+
+    for bad in (b"", bytes(16), bytes(31), bytes(64)):
+        with pytest.raises(DX402Error):
+            seal_evidence(BODY, bad, PAYMENT_ID)
+
+
+def test_seal_binds_the_payment_id():
+    """A blob sealed for one payment must not open as evidence for another."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import seal_evidence
+
+    sk = ec.derive_private_key(int.from_bytes(SECP256K1_PRIV, "big"), ec.SECP256K1())
+    pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    blob = seal_evidence(BODY, pub, PAYMENT_ID)
+    with pytest.raises(Exception):
+        _unseal(_parse_sealed(blob), SECP256K1_PRIV, b"0xa-different-payment")
+
+
+def test_content_hash_matches_the_facilitator():
+    from uvd_x402_sdk.dx402 import content_hash
+
+    assert content_hash(BODY) == CONTENT_HASH
