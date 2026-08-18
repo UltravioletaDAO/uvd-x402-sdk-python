@@ -41,6 +41,14 @@ __all__ = [
     "dereference_pointer",
     "recover_evidence",
     "payment_id",
+    # Seller side. Omitted at first, so `from ... import *` brought back only
+    # the buyer half of the module -- reported by KarmaKadabra, 2026-08-17.
+    "seal_evidence",
+    "content_hash",
+    "sealed_roles",
+    "payer_key_from_solana_address",
+    "payer_key_from_ed25519_pubkey",
+    "payer_key_from_evm_signature",
 ]
 
 EVIDENCE_HEADER = "X-Durable-Evidence"
@@ -456,7 +464,16 @@ def payer_key_from_solana_address(address: str) -> bytes:
     On ed25519 chains the address **is** the public key, so this needs no
     signature and no lookup -- which is what makes those chains the cheapest
     case for DX402.
+
+    Rejects anything that does not decode to exactly 32 bytes. The pure-python
+    fallback below used to left-pad a short decode up to 32, so an **empty
+    address produced a syntactically valid key** (``0100...``) instead of an
+    error. That key is a small-order Curve25519 point, so sealing to it did fail
+    -- but a layer later, as a generic "Error computing shared key" that points
+    nowhere near the real cause. Reported by KarmaKadabra, 2026-08-17.
     """
+    if not address or not address.strip():
+        raise DX402Error("empty Solana address")
     try:
         import base58
     except ImportError:
@@ -468,12 +485,23 @@ def payer_key_from_solana_address(address: str) -> bytes:
             if idx < 0:
                 raise DX402Error(f"invalid base58 character {ch!r} in address")
             num = num * 58 + idx
-        raw = num.to_bytes(32, "big") if num.bit_length() <= 256 else b""
+        if num.bit_length() > 256:
+            raise DX402Error("Solana address decodes to more than 32 bytes")
+        raw = num.to_bytes(32, "big")
         leading = len(address) - len(address.lstrip("1"))
         decoded = b"\x00" * leading + raw.lstrip(b"\x00")
-        decoded = decoded.rjust(32, b"\x00")
+        # Left-padding here is what hid an empty address. A real Solana address
+        # is 32 bytes; anything shorter is malformed, not something to pad.
+        if len(decoded) != 32:
+            raise DX402Error(
+                f"Solana address decodes to {len(decoded)} bytes, expected 32"
+            )
         return _ed25519_pubkey_to_x25519(decoded)
-    return _ed25519_pubkey_to_x25519(base58.b58decode(address))
+
+    decoded = base58.b58decode(address)
+    if len(decoded) != 32:
+        raise DX402Error(f"Solana address decodes to {len(decoded)} bytes, expected 32")
+    return _ed25519_pubkey_to_x25519(decoded)
 
 
 def payer_key_from_ed25519_pubkey(pubkey: bytes) -> bytes:

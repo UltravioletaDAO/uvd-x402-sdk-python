@@ -359,3 +359,36 @@ def test_a_stranger_still_cannot_open_the_bidirectional_envelope():
     sealed = _parse_sealed(_load("multi.hex"))
     with pytest.raises(DX402Error):
         _unseal(sealed, bytes.fromhex("77" * 32), PAYMENT_ID.encode())
+
+
+# --- reportado por KarmaKadabra, 2026-08-17 ------------------------------------
+
+
+def test_an_empty_solana_address_is_refused():
+    """An empty address used to produce a syntactically valid key.
+
+    The pure-python base58 fallback left-padded a short decode up to 32 bytes,
+    so `""` yielded `0100...` — a small-order Curve25519 point. Sealing to it did
+    fail, but a layer later and as a generic "Error computing shared key", which
+    points nowhere near the real cause.
+    """
+    from uvd_x402_sdk.dx402 import payer_key_from_solana_address
+
+    for bad in ["", "   ", "1", "11"]:
+        with pytest.raises(DX402Error):
+            payer_key_from_solana_address(bad)
+
+
+def test_the_seller_side_is_exported():
+    """`from ... import *` used to bring back only the buyer half."""
+    import uvd_x402_sdk.dx402 as m
+
+    for name in (
+        "seal_evidence",
+        "content_hash",
+        "sealed_roles",
+        "payer_key_from_solana_address",
+        "payer_key_from_ed25519_pubkey",
+        "payer_key_from_evm_signature",
+    ):
+        assert name in m.__all__, f"{name} missing from __all__"
