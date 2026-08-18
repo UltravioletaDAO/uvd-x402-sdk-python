@@ -55,15 +55,15 @@ def test_content_hash_matches_the_rust_implementation():
 def test_python_decrypts_what_rust_sealed_secp256k1():
     """Cross-implementation: Rust sealed it, Python opens it."""
     sealed = _parse_sealed(_load("secp256k1.hex"))
-    assert sealed["alg"] == "secp256k1"
-    assert len(sealed["ephemeral"]) == 33
+    assert sealed["recipients"][0]["alg"] == "secp256k1"
+    assert len(sealed["recipients"][0]["ephemeral"]) == 33
     assert _unseal(sealed, SECP256K1_PRIV, PAYMENT_ID.encode()) == BODY
 
 
 def test_python_decrypts_what_rust_sealed_ed25519():
     sealed = _parse_sealed(_load("ed25519.hex"))
-    assert sealed["alg"] == "x25519"
-    assert len(sealed["ephemeral"]) == 32
+    assert sealed["recipients"][0]["alg"] == "x25519"
+    assert len(sealed["recipients"][0]["ephemeral"]) == 32
     assert _unseal(sealed, ED25519_SEED, PAYMENT_ID.encode()) == BODY
 
 
@@ -204,8 +204,8 @@ def test_seal_round_trips_secp256k1():
 
     blob = seal_evidence(BODY, pub, PAYMENT_ID)
     sealed = _parse_sealed(blob)
-    assert sealed["alg"] == "secp256k1"
-    assert len(sealed["ephemeral"]) == 33
+    assert sealed["recipients"][0]["alg"] == "secp256k1"
+    assert len(sealed["recipients"][0]["ephemeral"]) == 33
     assert _unseal(sealed, SECP256K1_PRIV, PAYMENT_ID.encode()) == BODY
 
 
@@ -220,8 +220,8 @@ def test_seal_round_trips_x25519():
 
     blob = seal_evidence(BODY, payer_key_from_ed25519_pubkey(edpub), PAYMENT_ID)
     sealed = _parse_sealed(blob)
-    assert sealed["alg"] == "x25519"
-    assert len(sealed["ephemeral"]) == 32
+    assert sealed["recipients"][0]["alg"] == "x25519"
+    assert len(sealed["recipients"][0]["ephemeral"]) == 32
     assert _unseal(sealed, ED25519_SEED, PAYMENT_ID.encode()) == BODY
 
 
@@ -299,3 +299,63 @@ def test_content_hash_matches_the_facilitator():
     from uvd_x402_sdk.dx402 import content_hash
 
     assert content_hash(BODY) == CONTENT_HASH
+
+
+def test_a_v1_blob_reads_as_a_single_payer_recipient():
+    """Backward compatibility, stated as a test.
+
+    Every blob anchored before v2 existed is v1. If this ever stopped parsing,
+    evidence already in the store would become unreadable.
+    """
+    from uvd_x402_sdk.dx402 import sealed_roles
+
+    assert sealed_roles(_load("secp256k1.hex")) == ["payer"]
+
+
+def test_roles_are_visible_without_decrypting():
+    """A buyer must be able to see who else holds a key.
+
+    Discovering afterwards that the seller could read the purchase would destroy
+    the privacy property, so the roles are readable from the blob itself.
+    """
+    from uvd_x402_sdk.dx402 import sealed_roles
+
+    roles = sealed_roles(_load("multi.hex")) if _has("multi.hex") else None
+    if roles is None:
+        pytest.skip("multi-recipient fixture not generated")
+    assert roles[0] == "payer"
+    assert "seller" in roles
+
+
+def _has(name: str) -> bool:
+    import pathlib
+
+    return (pathlib.Path(__file__).parent / "vectors" / name).exists()
+
+
+# --- multi-recipient (v2), sealed by RUST --------------------------------------
+
+MULTI_BUYER_PRIV = bytes.fromhex("42" * 32)
+MULTI_SELLER_PRIV = bytes.fromhex("55" * 32)
+
+
+def test_python_opens_a_rust_sealed_bidirectional_envelope_as_the_buyer():
+    sealed = _parse_sealed(_load("multi.hex"))
+    assert len(sealed["recipients"]) == 2
+    assert _unseal(sealed, MULTI_BUYER_PRIV, PAYMENT_ID.encode()) == BODY
+
+
+def test_python_opens_a_rust_sealed_bidirectional_envelope_as_the_seller():
+    """The property that did not exist before v2.
+
+    The seller can now answer a false "that is not what you sent", which it
+    could not do when the envelope was sealed to the buyer alone.
+    """
+    sealed = _parse_sealed(_load("multi.hex"))
+    assert _unseal(sealed, MULTI_SELLER_PRIV, PAYMENT_ID.encode()) == BODY
+
+
+def test_a_stranger_still_cannot_open_the_bidirectional_envelope():
+    sealed = _parse_sealed(_load("multi.hex"))
+    with pytest.raises(DX402Error):
+        _unseal(sealed, bytes.fromhex("77" * 32), PAYMENT_ID.encode())

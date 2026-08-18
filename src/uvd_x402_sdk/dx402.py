@@ -47,7 +47,16 @@ EVIDENCE_HEADER = "X-Durable-Evidence"
 
 #: Magic prefix of a sealed blob, so a stray file is identifiable.
 _MAGIC = b"DX402"
-_FORMAT_VERSION = 1
+#: One recipient (the payer). Still emitted for that case, so readers already
+#: deployed keep working.
+_FORMAT_V1 = 1
+#: Several recipients. A v2 blob is a positive signal that somebody besides the
+#: payer can open it.
+_FORMAT_V2 = 2
+
+#: Roles a recipient can hold, in wire order.
+ROLE_PAYER, ROLE_SELLER, ROLE_AUDITOR = 0, 1, 2
+_ROLE_NAMES = {ROLE_PAYER: "payer", ROLE_SELLER: "seller", ROLE_AUDITOR: "auditor"}
 _NONCE_LEN = 12
 _CEK_LEN = 32
 _HKDF_INFO = b"DX402-v1-wrap"
@@ -197,25 +206,18 @@ def payment_id(caip2_network: str, tx_hash: str) -> str:
 
 
 def _parse_sealed(raw: bytes) -> dict:
-    """Parse the sealed-blob layout.
+    """Parse the sealed-blob layout. Accepts v1 and v2.
 
-    ``MAGIC | version | alg | eph_len | eph | cek_nonce | wrapped_len | wrapped |
-    body_nonce | ciphertext``
+    v1: ``MAGIC | 1 | alg | ephLen | eph | cekNonce | wrappedLen | wrapped |
+        bodyNonce | ciphertext``
+    v2: ``MAGIC | 2 | count | count x (role | alg | ephLen | eph | cekNonce |
+        wrappedLen | wrapped) | bodyNonce | ciphertext``
+
+    Returns ``{"recipients": [...], "body_nonce": ..., "ciphertext": ...}``.
+    Every read is bounds-checked, so a truncated blob is a clear parse failure
+    rather than an unrelated exception type.
     """
-    if len(raw) < 7 or raw[:5] != _MAGIC:
-        raise DX402Error("not a DX402 sealed blob")
-    version = raw[5]
-    if version != _FORMAT_VERSION:
-        raise DX402Error(f"unsupported sealed-blob version {version}")
-
-    alg = raw[6]
-    if alg not in (1, 2):
-        raise DX402Error(f"unknown key algorithm {alg}")
-
-    # Every read is bounds-checked. Python slicing silently returns short slices
-    # and indexing raises IndexError, so without this a truncated blob surfaces
-    # as an unrelated exception type instead of a clear parse failure.
-    pos = 7
+    pos = 0
 
     def take(n: int, what: str) -> bytes:
         nonlocal pos
@@ -225,25 +227,59 @@ def _parse_sealed(raw: bytes) -> dict:
         pos += n
         return chunk
 
-    eph_len = take(1, "ephemeral key length")[0]
-    ephemeral = take(eph_len, "ephemeral key")
-    cek_nonce = take(_NONCE_LEN, "cek nonce")
-    wrapped_len = int.from_bytes(take(2, "wrapped key length"), "big")
-    wrapped_cek = take(wrapped_len, "wrapped cek")
-    body_nonce = take(_NONCE_LEN, "body nonce")
-    ciphertext = raw[pos:]
+    if take(len(_MAGIC), "magic") != _MAGIC:
+        raise DX402Error("not a DX402 sealed blob")
 
+    version = take(1, "version")[0]
+    if version == _FORMAT_V1:
+        count = 1
+    elif version == _FORMAT_V2:
+        count = take(1, "recipient count")[0]
+    else:
+        raise DX402Error(f"unsupported sealed-blob version {version}")
+    if count == 0:
+        # An envelope nobody can open is not evidence.
+        raise DX402Error("DX402 sealed blob has no recipients")
+
+    recipients = []
+    for _ in range(count):
+        role = ROLE_PAYER if version == _FORMAT_V1 else take(1, "role")[0]
+        alg = take(1, "alg")[0]
+        if alg not in (1, 2):
+            raise DX402Error(f"unknown key algorithm {alg}")
+        eph_len = take(1, "ephemeral key length")[0]
+        recipients.append(
+            {
+                "role": role,
+                "role_name": _ROLE_NAMES.get(role, f"unknown({role})"),
+                "alg": "secp256k1" if alg == 1 else "x25519",
+                "ephemeral": take(eph_len, "ephemeral key"),
+                "cek_nonce": take(_NONCE_LEN, "cek nonce"),
+                "wrapped_cek": take(
+                    int.from_bytes(take(2, "wrapped key length"), "big"), "wrapped cek"
+                ),
+            }
+        )
+
+    body_nonce = take(_NONCE_LEN, "body nonce")
     return {
-        "alg": "secp256k1" if alg == 1 else "x25519",
-        "ephemeral": ephemeral,
-        "cek_nonce": cek_nonce,
-        "wrapped_cek": wrapped_cek,
+        "recipients": recipients,
         "body_nonce": body_nonce,
-        "ciphertext": ciphertext,
+        "ciphertext": raw[pos:],
     }
 
 
+def sealed_roles(raw: bytes) -> list[str]:
+    """Who can open this blob.
+
+    Worth surfacing: a buyer has to be able to see that the seller -- or a
+    designated auditor -- also holds a key to what they bought.
+    """
+    return [r["role_name"] for r in _parse_sealed(raw)["recipients"]]
+
+
 def _shared_secret(sealed: dict, private_key: bytes) -> bytes:
+    """`sealed` here is ONE recipient slot, not the whole envelope."""
     if sealed["alg"] == "secp256k1":
         from cryptography.hazmat.primitives.asymmetric import ec
 
@@ -275,20 +311,47 @@ def _shared_secret(sealed: dict, private_key: bytes) -> bytes:
 
 
 def _unseal(sealed: dict, private_key: bytes, aad: bytes) -> bytes:
+    """Open an envelope with whichever recipient slot belongs to `private_key`.
+
+    Tries every slot on a matching curve: a holder does not necessarily know
+    which one is theirs, and in a multi-recipient envelope the payer is not
+    always first. A slot that does not open is skipped, not reported -- "that
+    one was not for me" is not an error.
+    """
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-    shared = _shared_secret(sealed, private_key)
-    wrap_key = HKDF(
-        algorithm=hashes.SHA256(), length=32, salt=aad, info=_HKDF_INFO
-    ).derive(shared)
+    want = "secp256k1" if len(private_key) == 32 else None  # both are 32 bytes
+    saw_candidate = False
 
-    cek = AESGCM(wrap_key).decrypt(sealed["cek_nonce"], sealed["wrapped_cek"], aad)
-    if len(cek) != _CEK_LEN:
-        raise DX402Error(f"unwrapped CEK is {len(cek)} bytes, expected {_CEK_LEN}")
+    for recipient in sealed["recipients"]:
+        try:
+            shared = _shared_secret(recipient, private_key)
+        except DX402Error:
+            raise
+        except Exception:
+            continue
 
-    return AESGCM(cek).decrypt(sealed["body_nonce"], sealed["ciphertext"], aad)
+        saw_candidate = True
+        wrap_key = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=aad, info=_HKDF_INFO
+        ).derive(shared)
+        try:
+            cek = AESGCM(wrap_key).decrypt(
+                recipient["cek_nonce"], recipient["wrapped_cek"], aad
+            )
+        except Exception:
+            continue  # not our slot
+
+        if len(cek) != _CEK_LEN:
+            raise DX402Error(f"unwrapped CEK is {len(cek)} bytes, expected {_CEK_LEN}")
+        return AESGCM(cek).decrypt(sealed["body_nonce"], sealed["ciphertext"], aad)
+
+    _ = (want, saw_candidate)
+    raise DX402Error(
+        "no recipient slot opened -- wrong key, or the blob belongs to another payment"
+    )
 
 
 def recover_evidence(
@@ -542,7 +605,7 @@ def seal_evidence(
 
     out = bytearray()
     out += _MAGIC
-    out.append(_FORMAT_VERSION)
+    out.append(_FORMAT_V1)
     out.append(alg_byte)
     out.append(len(ephemeral))
     out += ephemeral

@@ -302,6 +302,7 @@ from uvd_x402_sdk.dx402 import (
     payment_id,
     recover_evidence,
     seal_evidence,
+    sealed_roles,
 )
 from uvd_x402_sdk.money_safety import SAFE_TO_FALLBACK, is_fallback_safe
 from uvd_x402_sdk.erc7702 import (
@@ -361,6 +362,7 @@ __all__ = [
     "payer_key_from_solana_address",
     "payer_key_from_ed25519_pubkey",
     "payer_key_from_evm_signature",
+    "sealed_roles",
     "bazaar_extension",
     "SAFE_TO_FALLBACK",
     "is_fallback_safe",
