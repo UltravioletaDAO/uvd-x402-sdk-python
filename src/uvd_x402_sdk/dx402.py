@@ -46,6 +46,10 @@ __all__ = [
     "seal_evidence",
     "seal_evidence_to",
     "content_hash",
+    "anchor_digest",
+    "sign_anchor_ed25519",
+    "sign_anchor_evm",
+    "ZERO_ADDRESS",
     "sealed_roles",
     "payer_key_from_solana_address",
     "payer_key_from_ed25519_pubkey",
@@ -767,3 +771,145 @@ def content_hash(body: bytes) -> str:
     except ImportError as exc:
         raise DX402Error("content_hash() needs eth-utils; install the 'dx402' extra") from exc
     return "0x" + keccak(body).hex()
+
+
+# ============================================================================
+# Anchor authorization -- proving the anchor is yours
+# ============================================================================
+#
+# An anchor carrying a valid payee signature is `verified` and final. One
+# without is provisional: it still blocks a duplicate, but a verified anchor for
+# the same payment supersedes it.
+#
+# That asymmetry exists because the paymentId claim is permanent. Without it,
+# whoever anchored first owned the evidence of a payment forever and the real
+# seller was locked out. Reproduced against production by KarmaKadabra,
+# 2026-08-18.
+
+#: EIP-712 domain, per the facilitator's `authorization_digest`.
+_ANCHOR_DOMAIN_NAME = "DX402 Anchor"
+_ANCHOR_DOMAIN_VERSION = "1"
+
+_ANCHOR_TYPE = (
+    b"Dx402AnchorAuthorization(bytes32 paymentId,bytes32 contentHash,"
+    b"string pointer,address payee)"
+)
+_EIP712_DOMAIN_TYPE = b"EIP712Domain(string name,string version,uint256 chainId)"
+
+
+def _keccak(data: bytes) -> bytes:
+    try:
+        from eth_utils import keccak
+    except ImportError as exc:  # pragma: no cover
+        raise DX402Error("needs eth-utils; install the 'dx402' extra") from exc
+    return keccak(data)
+
+
+def anchor_digest(
+    payment_id: str,
+    content_hash: str,
+    pointer: str,
+    payee: str,
+    chain_id: int,
+) -> bytes:
+    """The 32-byte digest a seller signs to prove an anchor is theirs.
+
+    One canonical message across every curve. `payee` is the EVM address for a
+    secp256k1 payee, and the **zero address** for an ed25519 one — an ed25519
+    address does not fit the `address` field, and the binding is already
+    established by which key verifies the signature.
+
+    `pointer` is whatever you send in the anchor, or the **empty string** when
+    you send `sealed` and the facilitator issues the pointer itself: you cannot
+    sign a value you have not seen, and in that case the pointer is derived from
+    the paymentId, which is already covered.
+
+    Getting this wrong does not raise — it produces a signature that simply never
+    verifies, and the anchor stays provisional with no clue why. That is why the
+    tests pin it against digests emitted by the facilitator's own Rust
+    implementation rather than recomputed here.
+    """
+
+    def b32(value: str, field: str) -> bytes:
+        raw = bytes.fromhex(value.removeprefix("0x"))
+        if len(raw) != 32:
+            raise DX402Error(f"{field} must be 32 bytes, got {len(raw)}")
+        return raw
+
+    addr = bytes.fromhex(payee.removeprefix("0x"))
+    if len(addr) != 20:
+        raise DX402Error(f"payee must be a 20-byte address, got {len(addr)}")
+
+    domain_separator = _keccak(
+        _keccak(_EIP712_DOMAIN_TYPE)
+        + _keccak(_ANCHOR_DOMAIN_NAME.encode())
+        + _keccak(_ANCHOR_DOMAIN_VERSION.encode())
+        + chain_id.to_bytes(32, "big")
+    )
+
+    struct_hash = _keccak(
+        _keccak(_ANCHOR_TYPE)
+        + b32(payment_id, "paymentId")
+        + b32(content_hash, "contentHash")
+        + _keccak(pointer.encode())
+        + b"\x00" * 12
+        + addr
+    )
+
+    return _keccak(b"\x19\x01" + domain_separator + struct_hash)
+
+
+#: The zero address, for the ed25519 form of the digest.
+ZERO_ADDRESS = "0x" + "00" * 20
+
+
+def sign_anchor_ed25519(
+    private_key: bytes,
+    payment_id: str,
+    content_hash: str,
+    pointer: str = "",
+) -> str:
+    """Sign an anchor authorization with a Solana / Stellar ed25519 key.
+
+    A Solana payee cannot produce an EIP-712 signature at all — its address is
+    an ed25519 key — so requiring one would leave that chain unable to prove
+    authorship even once the on-chain gate is enforced. This closes it today,
+    with no RPC.
+
+    `chainId` is 0 and `payee` is the zero address for the ed25519 form; the
+    facilitator derives the same digest.
+    """
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    except ImportError as exc:  # pragma: no cover
+        raise DX402Error("needs cryptography; install the 'dx402' extra") from exc
+
+    if len(private_key) != 32:
+        raise DX402Error(f"ed25519 seed must be 32 bytes, got {len(private_key)}")
+
+    digest = anchor_digest(payment_id, content_hash, pointer, ZERO_ADDRESS, 0)
+    sk = Ed25519PrivateKey.from_private_bytes(private_key)
+    return "0x" + sk.sign(digest).hex()
+
+
+def sign_anchor_evm(
+    private_key: bytes,
+    payment_id: str,
+    content_hash: str,
+    pointer: str,
+    payee: str,
+    chain_id: int,
+) -> str:
+    """Sign an anchor authorization with an EVM secp256k1 key.
+
+    `payee` must be the address that received the payment — the facilitator
+    recovers the signer and compares.
+    """
+    try:
+        from eth_keys import KeyAPI
+    except ImportError as exc:  # pragma: no cover
+        raise DX402Error("needs eth-keys; install the 'dx402' extra") from exc
+
+    digest = anchor_digest(payment_id, content_hash, pointer, payee, chain_id)
+    sig = KeyAPI().PrivateKey(private_key).sign_msg_hash(digest)
+    return "0x" + sig.to_bytes().hex()

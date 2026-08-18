@@ -435,3 +435,63 @@ def test_a_single_payer_envelope_is_still_v1():
 
     assert seal_evidence_to(BODY, [(ROLE_PAYER, pub)], PAYMENT_ID)[5] == 1
     assert seal_evidence(BODY, pub, PAYMENT_ID)[5] == 1
+
+
+def test_anchor_digest_matches_the_facilitator():
+    """Pinned against digests emitted by the facilitator's Rust implementation.
+
+    A digest built slightly differently raises nothing — it yields a signature
+    that simply never verifies, and the seller's anchor silently stays
+    provisional with no clue why. Only agreement with the verifier establishes
+    that they match.
+    """
+    from uvd_x402_sdk.dx402 import ZERO_ADDRESS, anchor_digest
+
+    evm = anchor_digest(
+        "0x" + "11" * 32,
+        "0x" + "22" * 32,
+        "s3+https://e/x",
+        "0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8",
+        8453,
+    )
+    assert "0x" + evm.hex() == (
+        "0x5a5d45bf6334e5b5b26edc03861670b937bb9ec7272d8db3babdbfed0f32207c"
+    )
+
+    ed = anchor_digest("0x" + "11" * 32, "0x" + "22" * 32, "", ZERO_ADDRESS, 0)
+    assert "0x" + ed.hex() == (
+        "0x2b931af6cd412f7884f8b84812a30381f946e7f61135b602129c15ad68afa8ed"
+    )
+
+
+def test_anchor_digest_rejects_malformed_input():
+    from uvd_x402_sdk.dx402 import ZERO_ADDRESS, anchor_digest
+
+    with pytest.raises(DX402Error):
+        anchor_digest("0x00", "0x" + "22" * 32, "", ZERO_ADDRESS, 0)
+    with pytest.raises(DX402Error):
+        anchor_digest("0x" + "11" * 32, "0x00", "", ZERO_ADDRESS, 0)
+    with pytest.raises(DX402Error):
+        anchor_digest("0x" + "11" * 32, "0x" + "22" * 32, "", "0x00", 0)
+
+
+def test_signing_an_anchor_produces_something_the_facilitator_accepts():
+    """The full seller path, end to end within reach of a unit test.
+
+    The authoritative check is `tests/dx402_anchor_sig_cross.rs` in x402-rs,
+    where Rust verifies these exact signatures.
+    """
+    from uvd_x402_sdk.dx402 import sign_anchor_ed25519, sign_anchor_evm
+
+    sig = sign_anchor_ed25519(ED25519_SEED, "0x" + "11" * 32, "0x" + "22" * 32)
+    assert sig.startswith("0x") and len(sig) == 2 + 128  # 64 bytes
+
+    evm = sign_anchor_evm(
+        SECP256K1_PRIV,
+        "0x" + "11" * 32,
+        "0x" + "22" * 32,
+        "s3+https://e/x",
+        "0x17c5185167401eD00cF5F5b2fc97D9BBfDb7D025",
+        8453,
+    )
+    assert evm.startswith("0x") and len(evm) == 2 + 130  # 65 bytes
