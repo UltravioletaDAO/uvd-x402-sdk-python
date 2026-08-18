@@ -44,6 +44,7 @@ __all__ = [
     # Seller side. Omitted at first, so `from ... import *` brought back only
     # the buyer half of the module -- reported by KarmaKadabra, 2026-08-17.
     "seal_evidence",
+    "seal_evidence_to",
     "content_hash",
     "sealed_roles",
     "payer_key_from_solana_address",
@@ -559,6 +560,114 @@ def payer_key_from_evm_signature(signature: bytes | str, digest: bytes) -> bytes
     x, y = raw[:32], raw[32:]
     prefix = b"\x03" if y[-1] & 1 else b"\x02"
     return prefix + x
+
+
+def seal_evidence_to(
+    body: bytes,
+    recipients: "list[tuple[int, bytes]]",
+    payment_id_value: str,
+) -> bytes:
+    """Seal `body` so every listed recipient can read it, and nobody else.
+
+    `recipients` is a list of `(role, public_key)` where role is
+    :data:`ROLE_PAYER`, :data:`ROLE_SELLER` or :data:`ROLE_AUDITOR`.
+
+    The body is encrypted **once**; only the content key is wrapped per
+    recipient, so adding the seller costs about sixty bytes rather than a second
+    copy of the payload. That is what makes it practical for a seller to keep a
+    readable copy of what it delivered — and answer a false "that is not what
+    you sent" — instead of paying to anchor evidence it cannot open.
+
+    A single payer recipient is emitted as format **v1, byte-for-byte**, so
+    nothing already anchored becomes unreadable and readers still on v1 keep
+    working.
+    """
+    if not recipients:
+        raise DX402Error("an envelope with no recipients could never be opened")
+
+    import os
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    aad = payment_id_value.encode()
+    cek = os.urandom(_CEK_LEN)
+    body_nonce = os.urandom(_NONCE_LEN)
+    ciphertext = AESGCM(cek).encrypt(body_nonce, body, aad)
+
+    wrapped = []
+    for role, key in recipients:
+        alg_byte, ephemeral, shared = _ecdh_to(key)
+        wrap_key = HKDF(
+            algorithm=hashes.SHA256(), length=32, salt=aad, info=_HKDF_INFO
+        ).derive(shared)
+        cek_nonce = os.urandom(_NONCE_LEN)
+        wrapped.append(
+            (role, alg_byte, ephemeral, cek_nonce, AESGCM(wrap_key).encrypt(cek_nonce, cek, aad))
+        )
+
+    out = bytearray()
+    out += _MAGIC
+    single_payer = len(wrapped) == 1 and wrapped[0][0] == ROLE_PAYER
+    if single_payer:
+        out.append(_FORMAT_V1)
+    else:
+        out.append(_FORMAT_V2)
+        out.append(len(wrapped))
+
+    for role, alg_byte, ephemeral, cek_nonce, wrapped_cek in wrapped:
+        if not single_payer:
+            out.append(role)
+        out.append(alg_byte)
+        out.append(len(ephemeral))
+        out += ephemeral
+        out += cek_nonce
+        out += len(wrapped_cek).to_bytes(2, "big")
+        out += wrapped_cek
+
+    out += body_nonce
+    out += ciphertext
+    return bytes(out)
+
+
+def _ecdh_to(public_key: bytes):
+    """One ephemeral ECDH against `public_key`. Returns (alg_byte, eph_pub, shared)."""
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    if len(public_key) == 33:
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        curve = ec.SECP256K1()
+        eph = ec.generate_private_key(curve)
+        peer = ec.EllipticCurvePublicKey.from_encoded_point(curve, public_key)
+        return (
+            1,
+            eph.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint),
+            eph.exchange(ec.ECDH(), peer),
+        )
+
+    if len(public_key) == 32:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import (
+            X25519PrivateKey,
+            X25519PublicKey,
+        )
+
+        eph = X25519PrivateKey.generate()
+        shared = eph.exchange(X25519PublicKey.from_public_bytes(public_key))
+        # RFC 7748 section 6.1: a small-order key would drive the shared secret
+        # to a constant that whoever supplied it could reproduce.
+        if shared == bytes(32):
+            raise DX402Error("degenerate ECDH result (small-order public key)")
+        return (
+            2,
+            eph.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw),
+            shared,
+        )
+
+    raise DX402Error(
+        f"public key must be 33 bytes (secp256k1) or 32 (X25519), got {len(public_key)}"
+    )
 
 
 def seal_evidence(

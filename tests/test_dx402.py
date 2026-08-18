@@ -392,3 +392,46 @@ def test_the_seller_side_is_exported():
         "payer_key_from_evm_signature",
     ):
         assert name in m.__all__, f"{name} missing from __all__"
+
+
+def test_python_can_now_emit_a_bidirectional_envelope():
+    """The gap KarmaKadabra reported: reading v2 worked, writing it did not.
+
+    A Python seller could open a bidirectional envelope but not produce one, so
+    it could not keep a readable copy of what it delivered — which is the whole
+    point of the seller slot.
+    """
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import ROLE_PAYER, ROLE_SELLER, seal_evidence_to, sealed_roles
+
+    def pub(priv: bytes) -> bytes:
+        sk = ec.derive_private_key(int.from_bytes(priv, "big"), ec.SECP256K1())
+        return sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    seller_priv = bytes.fromhex("55" * 32)
+    blob = seal_evidence_to(
+        BODY,
+        [(ROLE_PAYER, pub(SECP256K1_PRIV)), (ROLE_SELLER, pub(seller_priv))],
+        PAYMENT_ID,
+    )
+
+    assert sealed_roles(blob) == ["payer", "seller"]
+    sealed = _parse_sealed(blob)
+    assert _unseal(sealed, SECP256K1_PRIV, PAYMENT_ID.encode()) == BODY
+    assert _unseal(sealed, seller_priv, PAYMENT_ID.encode()) == BODY
+
+
+def test_a_single_payer_envelope_is_still_v1():
+    """Nothing already anchored may become unreadable."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import ROLE_PAYER, seal_evidence, seal_evidence_to
+
+    sk = ec.derive_private_key(int.from_bytes(SECP256K1_PRIV, "big"), ec.SECP256K1())
+    pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+
+    assert seal_evidence_to(BODY, [(ROLE_PAYER, pub)], PAYMENT_ID)[5] == 1
+    assert seal_evidence(BODY, pub, PAYMENT_ID)[5] == 1
