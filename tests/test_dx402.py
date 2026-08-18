@@ -495,3 +495,54 @@ def test_signing_an_anchor_produces_something_the_facilitator_accepts():
         8453,
     )
     assert evm.startswith("0x") and len(evm) == 2 + 130  # 65 bytes
+
+
+def test_anchor_evidence_never_raises():
+    """Evidence is an addition to the payment path, never a gate in front of it.
+
+    An unreachable facilitator must cost the receipt, not the sale.
+    """
+    from uvd_x402_sdk.dx402 import anchor_evidence
+
+    result = anchor_evidence(
+        b"body",
+        payment_id_value=PAYMENT_ID,
+        network="solana",
+        tx_hash="abc",
+        payer="p",
+        payee="q",
+        payer_key=bytes(32),
+        facilitator="http://127.0.0.1:1",
+    )
+    assert result["skipped"] == "anchor_failed"
+
+
+def test_a_custodial_seller_signs_without_exposing_the_seed():
+    """`signer` is a callable, not a key.
+
+    A custodian receives the digest and returns the signature; the seed never
+    leaves it. That is the difference between a custodial seller whose anchors
+    stay provisional forever and one that can claim them.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from uvd_x402_sdk.dx402 import ZERO_ADDRESS, anchor_digest
+
+    seen = {}
+
+    def custodian(digest: bytes) -> str:
+        seen["digest"] = digest
+        return "0x" + Ed25519PrivateKey.from_private_bytes(ED25519_SEED).sign(digest).hex()
+
+    expected = anchor_digest(PAYMENT_ID, CONTENT_HASH, "", ZERO_ADDRESS, 0)
+    sig = custodian(expected)
+    assert seen["digest"] == expected
+    assert len(bytes.fromhex(sig[2:])) == 64
+
+
+def test_evidence_header_round_trips():
+    from uvd_x402_sdk.dx402 import evidence_header
+
+    header = evidence_header({"v": 1, "skipped": "too_large"})
+    with pytest.raises(EvidenceSkipped):
+        parse_evidence_header(header)

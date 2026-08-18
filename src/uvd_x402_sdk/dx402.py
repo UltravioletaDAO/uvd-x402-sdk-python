@@ -50,6 +50,11 @@ __all__ = [
     "sign_anchor_ed25519",
     "sign_anchor_evm",
     "ZERO_ADDRESS",
+    "anchor_evidence",
+    "evidence_header",
+    "ROLE_PAYER",
+    "ROLE_SELLER",
+    "ROLE_AUDITOR",
     "sealed_roles",
     "payer_key_from_solana_address",
     "payer_key_from_ed25519_pubkey",
@@ -913,3 +918,94 @@ def sign_anchor_evm(
     digest = anchor_digest(payment_id, content_hash, pointer, payee, chain_id)
     sig = KeyAPI().PrivateKey(private_key).sign_msg_hash(digest)
     return "0x" + sig.to_bytes().hex()
+
+
+# ============================================================================
+# The whole seller side, in one call
+# ============================================================================
+
+
+def anchor_evidence(
+    body: bytes,
+    *,
+    payment_id_value: str,
+    network: str,
+    tx_hash: str,
+    payer: str,
+    payee: str,
+    payer_key: bytes,
+    seller_encryption_key: "bytes | None" = None,
+    signer: "callable | None" = None,
+    retention: str = "90d",
+    facilitator: str = "https://facilitator.ultravioletadao.xyz",
+    timeout: float = 15.0,
+    client: "object | None" = None,
+) -> dict:
+    """Seal a response body, anchor it, and return the `X-Durable-Evidence` value.
+
+    One call for the whole seller side. It seals, signs, and posts; you attach
+    the result to the response.
+
+    **It never raises.** Every failure returns a skip notice, because evidence is
+    an addition to the payment path and must never be a gate in front of it — an
+    unreachable facilitator or an unsealable body has to cost the receipt, never
+    the sale. Check `result.get("skipped")` if you want to know.
+
+    - `seller_encryption_key`: your **public** key, to keep a readable copy so you
+      can answer a false "that is not what you sent". It does **not** have to be
+      your payment key, and should not be — a custodial payment wallet works fine
+      here because this key only ever decrypts.
+    - `signer`: `f(digest: bytes) -> str` returning a `0x`-prefixed signature.
+      Taking a callable rather than a private key is what lets a custodian sign:
+      it receives the digest and returns the signature without the seed ever
+      leaving it. Without a signer the anchor is **provisional** — it holds the
+      slot but a signed anchor for the same payment supersedes it.
+    """
+    try:
+        recipients = [(ROLE_PAYER, payer_key)]
+        if seller_encryption_key:
+            recipients.append((ROLE_SELLER, seller_encryption_key))
+        blob = seal_evidence_to(body, recipients, payment_id_value)
+
+        digest_hash = content_hash(body)
+        payload = {
+            "paymentId": payment_id_value,
+            "network": network,
+            "txHash": tx_hash,
+            "payer": payer,
+            "payee": payee,
+            "sealed": base64.b64encode(blob).decode(),
+            "backend": "s3",
+            "contentHash": digest_hash,
+            "keyAlg": "ECIES-X25519" if len(payer_key) == 32 else "ECIES-secp256k1",
+            "mode": "direct",
+            "retention": retention,
+        }
+
+        if signer is not None:
+            # The pointer is the empty string: the facilitator issues it from the
+            # sealed blob, and you cannot sign a value you have not seen.
+            payload["sellerSignature"] = signer(
+                anchor_digest(payment_id_value, digest_hash, "", ZERO_ADDRESS, 0)
+            )
+
+        if client is None:
+            import httpx
+
+            response = httpx.post(
+                f"{facilitator.rstrip('/')}/dx402/anchor", json=payload, timeout=timeout
+            )
+        else:
+            response = client.post(f"{facilitator.rstrip('/')}/dx402/anchor", json=payload)
+
+        response.raise_for_status()
+        return response.json()
+    except Exception:  # noqa: BLE001 - a failure here must never fail the sale
+        return {"v": 1, "skipped": "anchor_failed"}
+
+
+def evidence_header(evidence: dict) -> str:
+    """Encode an anchor result for the ``X-Durable-Evidence`` response header."""
+    return (
+        base64.urlsafe_b64encode(json.dumps(evidence).encode()).decode().rstrip("=")
+    )
