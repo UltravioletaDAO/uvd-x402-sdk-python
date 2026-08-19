@@ -303,6 +303,17 @@ from uvd_x402_sdk.dx402 import (
     recover_evidence,
     seal_evidence,
     sealed_roles,
+    # The seller half. Missing here, `anchor_evidence` was reachable only as
+    # `from uvd_x402_sdk.dx402 import ...` -- so the one call that exists
+    # precisely so nobody hand-builds a digest was the one you had to know about
+    # to find. Same for the helpers under it.
+    ANCHOR_MAX_REQUEST_BYTES,
+    anchor_digest,
+    anchor_evidence,
+    evidence_header,
+    seal_evidence_to,
+    sign_anchor_ed25519,
+    sign_anchor_evm,
 )
 from uvd_x402_sdk.money_safety import SAFE_TO_FALLBACK, is_fallback_safe
 from uvd_x402_sdk.erc7702 import (
@@ -345,6 +356,13 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "ANCHOR_MAX_REQUEST_BYTES",
+    "anchor_digest",
+    "anchor_evidence",
+    "evidence_header",
+    "seal_evidence_to",
+    "sign_anchor_ed25519",
+    "sign_anchor_evm",
     # DX402 durable-evidence
     "EVIDENCE_HEADER",
     "AnchoredEvidence",

@@ -763,3 +763,61 @@ def test_recovery_refuses_to_return_bytes_it_could_not_verify():
         assert "contentHash" in str(caught.value)
     finally:
         builtins.__import__ = real_import
+
+
+def test_the_seller_half_is_importable_from_the_package_root():
+    """A helper nobody can import is a helper nobody uses.
+
+    `anchor_evidence` exists precisely so no seller hand-builds an anchor
+    digest -- the thing that silently produced never-verifying signatures for
+    two releases. Reachable only as a deep import, you had to already know it
+    was there to find it.
+    """
+    import uvd_x402_sdk as pkg
+
+    for name in (
+        "anchor_evidence",
+        "anchor_digest",
+        "sign_anchor_evm",
+        "sign_anchor_ed25519",
+        "seal_evidence_to",
+        "evidence_header",
+        "ANCHOR_MAX_REQUEST_BYTES",
+    ):
+        assert hasattr(pkg, name), f"{name} is not importable from the package root"
+        assert name in pkg.__all__, f"{name} is missing from __all__"
+
+
+def test_anchor_evidence_can_carry_the_proof_that_reaches_verified():
+    """v1.85.0 made rung 2 require an on-chain proof.
+
+    With no way to send one, no SDK user could ever be certified: the security
+    fix and the SDK would disagree, silently and permanently.
+    """
+    from uvd_x402_sdk.dx402 import anchor_evidence
+
+    captured = {}
+
+    class Capture:
+        status_code = 201
+
+        def post(self, _url, json=None, **kwargs):
+            captured.update(json or {})
+            return self
+
+        def json(self):
+            return {"v": 1, "verified": True}
+
+    proof = {"transactionHash": "0x" + "cd" * 32, "blockNumber": 7, "network": "base"}
+    anchor_evidence(
+        b"body",
+        payment_id_value="0x" + "ab" * 32,
+        network="base",
+        tx_hash="0x" + "cd" * 32,
+        payer="0x" + "11" * 20,
+        payee="0x" + "22" * 20,
+        payer_key=bytes(range(32)),
+        proof_of_payment=proof,
+        client=Capture(),
+    )
+    assert captured.get("proofOfPayment") == proof

@@ -1030,6 +1030,7 @@ def anchor_evidence(
     payer_key: bytes,
     seller_encryption_key: "bytes | None" = None,
     signer: "callable | None" = None,
+    proof_of_payment: "dict | None" = None,
     retention: str = "90d",
     facilitator: str = "https://facilitator.ultravioletadao.xyz",
     timeout: float = 15.0,
@@ -1049,6 +1050,14 @@ def anchor_evidence(
       can answer a false "that is not what you sent". It does **not** have to be
       your payment key, and should not be — a custodial payment wallet works fine
       here because this key only ever decrypts.
+    - `proof_of_payment`: the settlement proof, in the facilitator's
+      `ProofOfPayment` shape (camelCase: `transactionHash`, `blockNumber`,
+      `network`, `payer`, `payee`, `amount`, `token`, `timestamp`,
+      `paymentHash`). **This is the only thing that reaches `verified: true`.**
+      Without it the facilitator has checked no chain, so it records the anchor
+      as provisional and answers `notVerifiedReason: "dx402_proof_missing"`: the
+      signature is accepted (`signed: true`) but authorship is not certified,
+      and a claim that proves more may supersede yours.
     - `signer`: `f(digest: bytes) -> str` returning a `0x`-prefixed signature.
       Taking a callable rather than a private key is what lets a custodian sign:
       it receives the digest and returns the signature without the seed ever
@@ -1075,6 +1084,12 @@ def anchor_evidence(
             "mode": "direct",
             "retention": retention,
         }
+
+        # The only thing that reaches `verified: true`. Without it the
+        # facilitator has checked no chain, so it records the anchor as
+        # provisional -- your signature is accepted, authorship is not certified.
+        if proof_of_payment is not None:
+            payload["proofOfPayment"] = proof_of_payment
 
         unsigned_reason = None
         if signer is not None:
