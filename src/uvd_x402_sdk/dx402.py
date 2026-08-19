@@ -925,6 +925,65 @@ def sign_anchor_evm(
 # ============================================================================
 
 
+
+def _is_evm_address(value: str) -> bool:
+    """`0x` + 40 hex. An ed25519 payee (Solana, Stellar) never matches."""
+    v = (value or "").strip()
+    if not v.startswith("0x") or len(v) != 42:
+        return False
+    try:
+        int(v[2:], 16)
+    except ValueError:
+        return False
+    return True
+
+
+def _chain_id_for(network: str) -> "int | None":
+    """The chain id behind a network name or CAIP-2 id, or None if unknown."""
+    try:
+        from uvd_x402_sdk.networks import get_network, parse_caip2_network
+
+        name = network
+        if ":" in (network or ""):
+            parsed = parse_caip2_network(network)
+            name = parsed if isinstance(parsed, str) else getattr(parsed, "name", network)
+        cfg = get_network(name)
+        chain_id = getattr(cfg, "chain_id", None)
+        return int(chain_id) if chain_id else None
+    except Exception:  # noqa: BLE001 - an unknown network just means no EVM form
+        return None
+
+
+def _seller_digest_for(
+    payment_id_value: str, content_hash_value: str, payee: str, network: str
+) -> bytes:
+    """The digest the facilitator will ACTUALLY verify, chosen by the payee's curve.
+
+    The gate dispatches on the payee and checks **one** form -- never both. So a
+    secp256k1 payee is verified against the digest built with its REAL address and
+    chain id, while an ed25519 payee (whose address does not fit the `address`
+    field) is verified against the zero address and chain id 0.
+
+    Signing the wrong form raises nothing. It produces a signature that never
+    verifies, the anchor silently stays **provisional**, and a provisional anchor
+    is superseded by anyone else's -- which is the hijack the signed anchor exists
+    to prevent. Reproduced against production by KarmaKadabra, 2026-08-19: with
+    everything else identical, the ed25519 form was refused
+    (``409 dx402_already_anchored``) and the EVM form superseded the provisional.
+
+    `pointer` stays the empty string on both branches: this call sends `sealed`,
+    so the facilitator issues the pointer and you cannot sign what you have not
+    seen.
+    """
+    if _is_evm_address(payee):
+        chain_id = _chain_id_for(network)
+        if chain_id:
+            return anchor_digest(
+                payment_id_value, content_hash_value, "", payee, chain_id
+            )
+    return anchor_digest(payment_id_value, content_hash_value, "", ZERO_ADDRESS, 0)
+
+
 def anchor_evidence(
     body: bytes,
     *,
@@ -983,10 +1042,8 @@ def anchor_evidence(
         }
 
         if signer is not None:
-            # The pointer is the empty string: the facilitator issues it from the
-            # sealed blob, and you cannot sign a value you have not seen.
             payload["sellerSignature"] = signer(
-                anchor_digest(payment_id_value, digest_hash, "", ZERO_ADDRESS, 0)
+                _seller_digest_for(payment_id_value, digest_hash, payee, network)
             )
 
         if client is None:

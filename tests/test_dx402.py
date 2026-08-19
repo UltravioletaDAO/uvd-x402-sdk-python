@@ -546,3 +546,47 @@ def test_evidence_header_round_trips():
     header = evidence_header({"v": 1, "skipped": "too_large"})
     with pytest.raises(EvidenceSkipped):
         parse_evidence_header(header)
+
+
+# ---- the digest form the facilitator actually verifies (KK, 2026-08-19) ----
+
+
+def test_evm_payee_gets_the_evm_digest_form():
+    """A secp256k1 payee must be signed against its REAL address and chain id.
+
+    The facilitator's gate dispatches on the payee's curve and verifies exactly
+    ONE form. Signing the ed25519 form for an EVM payee raises nothing -- it
+    produces a signature that never verifies and leaves the anchor provisional,
+    which is the hijack a signed anchor exists to prevent. Reproduced against
+    production: with everything else identical, the ed25519 form was refused
+    (409 dx402_already_anchored) and the EVM form superseded the provisional.
+    """
+    from uvd_x402_sdk.dx402 import _seller_digest_for, anchor_digest, ZERO_ADDRESS
+
+    pid = "0x" + "11" * 32
+    ch = "0x" + "22" * 32
+    payee = "0x" + "33" * 20
+
+    got = _seller_digest_for(pid, ch, payee, "base")
+    assert got == anchor_digest(pid, ch, "", payee, 8453)
+    assert got != anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
+
+
+def test_ed25519_payee_keeps_the_zero_address_form():
+    """A Solana address does not fit the `address` field -- zero address, chain 0."""
+    from uvd_x402_sdk.dx402 import _seller_digest_for, anchor_digest, ZERO_ADDRESS
+
+    pid = "0x" + "11" * 32
+    ch = "0x" + "22" * 32
+    got = _seller_digest_for(pid, ch, "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", "solana")
+    assert got == anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
+
+
+def test_unknown_network_falls_back_instead_of_crashing():
+    """An unresolvable chain id must not raise inside the anchor path."""
+    from uvd_x402_sdk.dx402 import _seller_digest_for, anchor_digest, ZERO_ADDRESS
+
+    pid = "0x" + "11" * 32
+    ch = "0x" + "22" * 32
+    got = _seller_digest_for(pid, ch, "0x" + "33" * 20, "not-a-network")
+    assert got == anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
