@@ -941,6 +941,15 @@ def _is_evm_address(value: str) -> bool:
 
 def _chain_id_for(network: str) -> "int | None":
     """The chain id behind a network name or CAIP-2 id, or None if unknown."""
+    # `eip155:8453` carries the chain id literally -- read it rather than going
+    # through the network table, which has no entry for any EVM TESTNET
+    # (measured 2026-08-19: base-sepolia, avalanche-fuji, polygon-amoy and
+    # others all resolve to None). Without this, a seller on a testnet cannot
+    # produce a verifiable anchor signature at all.
+    if network and network.lower().startswith("eip155:"):
+        tail = network.split(":", 1)[1]
+        if tail.isdigit():
+            return int(tail)
     try:
         from uvd_x402_sdk.networks import get_network, parse_caip2_network
 
@@ -957,7 +966,7 @@ def _chain_id_for(network: str) -> "int | None":
 
 def _seller_digest_for(
     payment_id_value: str, content_hash_value: str, payee: str, network: str
-) -> bytes:
+) -> "bytes | None":
     """The digest the facilitator will ACTUALLY verify, chosen by the payee's curve.
 
     The gate dispatches on the payee and checks **one** form -- never both. So a
@@ -978,10 +987,18 @@ def _seller_digest_for(
     """
     if _is_evm_address(payee):
         chain_id = _chain_id_for(network)
-        if chain_id:
-            return anchor_digest(
-                payment_id_value, content_hash_value, "", payee, chain_id
-            )
+        if not chain_id:
+            # An EVM payee whose chain id we cannot resolve. Falling through to
+            # the ed25519 form here is how this exact bug shipped in 0.53.0: it
+            # raises nothing and produces a signature that never verifies, so
+            # the anchor stays provisional forever with no error anywhere.
+            # Measured 2026-08-19: `base-sepolia`, `xdc` and `sei` all resolve
+            # to None, so every seller on them was signing the wrong form.
+            #
+            # Refuse instead. The caller anchors unsigned, which is honest and
+            # recoverable, rather than signed-but-worthless, which looks done.
+            return None
+        return anchor_digest(payment_id_value, content_hash_value, "", payee, chain_id)
     return anchor_digest(payment_id_value, content_hash_value, "", ZERO_ADDRESS, 0)
 
 
@@ -1049,10 +1066,15 @@ def anchor_evidence(
             "retention": retention,
         }
 
+        unsigned_reason = None
         if signer is not None:
-            payload["sellerSignature"] = signer(
-                _seller_digest_for(payment_id_value, digest_hash, payee, network)
-            )
+            digest = _seller_digest_for(payment_id_value, digest_hash, payee, network)
+            if digest is None:
+                # See `_seller_digest_for`: signing the wrong form is worse than
+                # not signing, because it looks like the seller did its part.
+                unsigned_reason = "unknown_chain_id"
+            else:
+                payload["sellerSignature"] = signer(digest)
 
         # Measure the SEALED, serialised request -- not the plaintext.
         # The envelope adds a nonce, the wrapped CEK and its JSON, and the
@@ -1089,7 +1111,10 @@ def anchor_evidence(
                 "status": response.status_code,
                 "error": detail.get("error"),
             }
-        return response.json()
+        result = response.json()
+        if unsigned_reason and isinstance(result, dict):
+            result["unsigned"] = unsigned_reason
+        return result
     except Exception:  # noqa: BLE001 - a failure here must never fail the sale
         return {"v": 1, "skipped": "anchor_failed"}
 

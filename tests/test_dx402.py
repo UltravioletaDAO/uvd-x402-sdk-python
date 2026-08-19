@@ -582,14 +582,19 @@ def test_ed25519_payee_keeps_the_zero_address_form():
     assert got == anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
 
 
-def test_unknown_network_falls_back_instead_of_crashing():
-    """An unresolvable chain id must not raise inside the anchor path."""
-    from uvd_x402_sdk.dx402 import _seller_digest_for, anchor_digest, ZERO_ADDRESS
+def test_unknown_network_declines_to_sign_instead_of_crashing_or_guessing():
+    """An unresolvable chain id must not raise -- and must not guess either.
+
+    This test used to assert the fallback to the ed25519 form, pinning the
+    0.53.0 bug as intended behaviour: for an EVM payee that form produces a
+    signature that never verifies, silently, leaving the anchor provisional
+    forever. Not raising is the part worth keeping; guessing is not.
+    """
+    from uvd_x402_sdk.dx402 import _seller_digest_for
 
     pid = "0x" + "11" * 32
     ch = "0x" + "22" * 32
-    got = _seller_digest_for(pid, ch, "0x" + "33" * 20, "not-a-network")
-    assert got == anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
+    assert _seller_digest_for(pid, ch, "0x" + "33" * 20, "not-a-network") is None
 
 
 def test_an_unanchorable_body_is_skipped_as_too_large_before_the_network():
@@ -651,3 +656,45 @@ def test_a_rejected_signature_keeps_the_facilitators_diagnosis():
     assert out["skipped"] == "anchor_failed"  # still never raises
     assert out["status"] == 422
     assert out["error"] == "dx402_signature_not_verified"
+
+
+def test_an_evm_payee_on_an_unresolvable_network_is_not_signed_with_the_wrong_form():
+    """Signing the ed25519 form for an EVM payee is the 0.53.0 bug.
+
+    It raises nothing and produces a signature that never verifies, so the anchor
+    stays provisional forever with no error anywhere. Measured 2026-08-19: the
+    SDK network table has no chain id for ANY EVM testnet, so every seller on
+    base-sepolia was signing the wrong form.
+    """
+
+    from uvd_x402_sdk.dx402 import _seller_digest_for, anchor_digest, ZERO_ADDRESS
+
+    pid, ch = "0x" + "ab" * 32, "0x" + "cd" * 32
+    evm = "0x" + "22" * 20
+
+    # Unresolvable network + EVM payee -> refuse, do not guess.
+    assert _seller_digest_for(pid, ch, evm, "totally-unknown-net") is None
+
+    # CAIP-2 carries the chain id literally, so a testnet resolves without the table.
+    assert _seller_digest_for(pid, ch, evm, "eip155:84532") == anchor_digest(
+        pid, ch, "", evm, 84532
+    )
+
+    # A known mainnet still uses the EVM form.
+    assert _seller_digest_for(pid, ch, evm, "base") == anchor_digest(pid, ch, "", evm, 8453)
+
+    # An ed25519 payee still uses the ed25519 form, on any network.
+    sol = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
+    assert _seller_digest_for(pid, ch, sol, "solana") == anchor_digest(
+        pid, ch, "", ZERO_ADDRESS, 0
+    )
+
+
+def test_the_two_digest_forms_are_actually_different():
+    """If they ever coincide the test above proves nothing."""
+
+    from uvd_x402_sdk.dx402 import anchor_digest, ZERO_ADDRESS
+
+    pid, ch = "0x" + "ab" * 32, "0x" + "cd" * 32
+    evm = "0x" + "22" * 20
+    assert anchor_digest(pid, ch, "", evm, 8453) != anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
