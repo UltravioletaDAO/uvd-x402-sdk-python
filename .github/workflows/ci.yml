@@ -17,7 +17,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install
-        run: pip install -e '.[signer,dev]'
+        # `dx402` is not optional for the test run: the durable-evidence suite
+        # seals and unseals, which needs `cryptography`. Without it the whole
+        # module's tests error with ModuleNotFoundError and CI has been red
+        # since dx402 landed.
+        run: pip install -e '.[signer,dev,dx402]'
 
       - name: Test
         run: python -m pytest -q
