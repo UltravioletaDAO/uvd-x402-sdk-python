@@ -698,3 +698,68 @@ def test_the_two_digest_forms_are_actually_different():
     pid, ch = "0x" + "ab" * 32, "0x" + "cd" * 32
     evm = "0x" + "22" * 20
     assert anchor_digest(pid, ch, "", evm, 8453) != anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
+
+
+def test_recovery_refuses_to_return_bytes_it_could_not_verify():
+    """A missing hashing backend must fail loudly, not hand back unverified bytes.
+
+    `content_hash()` already raises on exactly this dependency. Answering the
+    same missing dependency two opposite ways -- and picking the SILENT one for
+    the integrity check -- leaves the caller believing it verified something it
+    did not. The contentHash check is the only thing that catches a seller
+    anchoring something other than what it delivered.
+    """
+    import builtins
+
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    from uvd_x402_sdk.dx402 import (
+        AnchoredEvidence,
+        DX402Error,
+        recover_evidence,
+        seal_evidence,
+    )
+
+    # Same shape as the working secp256k1 round trip above.
+    payer_priv = SECP256K1_PRIV
+    sk = ec.derive_private_key(int.from_bytes(payer_priv, "big"), ec.SECP256K1())
+    payer_pub = sk.public_key().public_bytes(Encoding.X962, PublicFormat.CompressedPoint)
+    pid = "0x" + "ab" * 32
+    blob = seal_evidence(b"the delivered bytes", payer_pub, pid)
+
+    evidence = AnchoredEvidence(
+        payment_id=pid,
+        pointer="mem://x",
+        backend="s3",
+        content_hash="0x" + "00" * 32,
+        cipher="AES-256-GCM",
+        key_alg="ECIES-secp256k1",
+        mode="direct",
+        retention="90d",
+    )
+
+    class Blob:
+        status_code = 200
+        content = blob
+
+        def get(self, *a, **k):
+            return self
+
+        def raise_for_status(self):
+            return self
+
+    real_import = builtins.__import__
+
+    def without_eth_utils(name, *args, **kwargs):
+        if name == "eth_utils":
+            raise ImportError("simulated: no hashing backend")
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = without_eth_utils
+    try:
+        with pytest.raises(DX402Error) as caught:
+            recover_evidence(evidence, payer_priv, client=Blob())
+        assert "contentHash" in str(caught.value)
+    finally:
+        builtins.__import__ = real_import

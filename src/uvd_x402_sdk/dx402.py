@@ -419,13 +419,23 @@ def recover_evidence(
             "decryption failed -- wrong key, or the blob belongs to another payment"
         ) from exc
 
+    # NOT optional. This is the one check that catches a seller anchoring
+    # something other than what it delivered, and skipping it silently is worse
+    # than failing: the caller believes it verified integrity and did not.
+    #
+    # `content_hash()` already raises on the same missing dependency. Answering
+    # the identical problem two opposite ways -- and choosing the silent one for
+    # the security check -- is how a missing hashing backend went unnoticed
+    # through a release.
     try:
         from eth_utils import keccak
+    except ImportError as exc:  # pragma: no cover - depends on the extra
+        raise DX402Error(
+            "cannot verify contentHash without eth-utils; install the 'dx402' extra. "
+            "Refusing to return a payload whose integrity was not checked."
+        ) from exc
 
-        actual = "0x" + keccak(plaintext).hex()
-    except ImportError:  # pragma: no cover - depends on the extra
-        return plaintext
-
+    actual = "0x" + keccak(plaintext).hex()
     if actual.lower() != evidence.content_hash.lower():
         raise ContentHashMismatch(evidence.content_hash, actual)
 
