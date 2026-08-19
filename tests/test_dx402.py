@@ -590,3 +590,64 @@ def test_unknown_network_falls_back_instead_of_crashing():
     ch = "0x" + "22" * 32
     got = _seller_digest_for(pid, ch, "0x" + "33" * 20, "not-a-network")
     assert got == anchor_digest(pid, ch, "", ZERO_ADDRESS, 0)
+
+
+def test_an_unanchorable_body_is_skipped_as_too_large_before_the_network():
+    """The cut must be measured on the SEALED request, not the plaintext.
+
+    Measured against production by KarmaKadabra, 2026-08-19: 47 KB of plaintext
+    fits in the facilitator's 64 KiB request limit, 48 KB does not. Checking the
+    plaintext would let the 48 KB case through and turn a knowable size problem
+    into a generic `anchor_failed` after the sealing work was already done.
+    """
+
+    from uvd_x402_sdk.dx402 import anchor_evidence
+
+    class NeverCalled:
+        def post(self, *a, **k):  # pragma: no cover - reaching it is the failure
+            raise AssertionError("a too-large body must not reach the network")
+
+    common = dict(
+        payment_id_value="0x" + "ab" * 32,
+        network="base",
+        tx_hash="0x" + "cd" * 32,
+        payer="0x" + "11" * 20,
+        payee="0x" + "22" * 20,
+        payer_key=bytes(range(32)),
+        client=NeverCalled(),
+    )
+
+    assert anchor_evidence(b"x" * (48 * 1024), **common)["skipped"] == "too_large"
+
+    # And it does not over-reject: 47 KB is allowed through to the network,
+    # where the stub client is what fails it.
+    assert anchor_evidence(b"x" * (47 * 1024), **common)["skipped"] == "anchor_failed"
+
+
+def test_a_rejected_signature_keeps_the_facilitators_diagnosis():
+    """`anchor_failed` alone would repeat, one layer down, the bug this fixes."""
+
+    from uvd_x402_sdk.dx402 import anchor_evidence
+
+    class Rejects:
+        status_code = 422
+
+        def post(self, *a, **k):
+            return self
+
+        def json(self):
+            return {"error": "dx402_signature_not_verified", "retryable": False}
+
+    out = anchor_evidence(
+        b"hello",
+        payment_id_value="0x" + "ab" * 32,
+        network="base",
+        tx_hash="0x" + "cd" * 32,
+        payer="0x" + "11" * 20,
+        payee="0x" + "22" * 20,
+        payer_key=bytes(range(32)),
+        client=Rejects(),
+    )
+    assert out["skipped"] == "anchor_failed"  # still never raises
+    assert out["status"] == 422
+    assert out["error"] == "dx402_signature_not_verified"

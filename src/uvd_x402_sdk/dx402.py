@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 __all__ = [
+    "ANCHOR_MAX_REQUEST_BYTES",
     "EVIDENCE_HEADER",
     "DX402Error",
     "EvidenceSkipped",
@@ -984,6 +985,13 @@ def _seller_digest_for(
     return anchor_digest(payment_id_value, content_hash_value, "", ZERO_ADDRESS, 0)
 
 
+#: Largest `POST /dx402/anchor` request the facilitator accepts, mirroring its
+#: `MAX_REQUEST_BODY_BYTES` (default 64 KiB, an anti-OOM bound on every route).
+#: With base64 inflation and ~600 bytes of metadata this leaves ~47 KB of
+#: plaintext.
+ANCHOR_MAX_REQUEST_BYTES = 64 * 1024
+
+
 def anchor_evidence(
     body: bytes,
     *,
@@ -1046,6 +1054,16 @@ def anchor_evidence(
                 _seller_digest_for(payment_id_value, digest_hash, payee, network)
             )
 
+        # Measure the SEALED, serialised request -- not the plaintext.
+        # The envelope adds a nonce, the wrapped CEK and its JSON, and the
+        # ciphertext travels base64 (4/3). Checking the plaintext lets through
+        # bodies the facilitator then rejects, which arrives as a generic
+        # failure long after the work of sealing was done.
+        # Measured by KarmaKadabra, 2026-08-19: 47 KB of plaintext fits, 48 KB
+        # does not.
+        if len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
+            return {"v": 1, "skipped": "too_large"}
+
         if client is None:
             import httpx
 
@@ -1055,7 +1073,22 @@ def anchor_evidence(
         else:
             response = client.post(f"{facilitator.rstrip('/')}/dx402/anchor", json=payload)
 
-        response.raise_for_status()
+        # Carry the facilitator's own diagnosis out rather than flattening every
+        # failure to "anchor_failed". A rejected signature answers 422
+        # `dx402_signature_not_verified`; erasing that here would reproduce, one
+        # layer down, the exact problem that code exists to solve.
+        if response.status_code >= 400:
+            detail = {}
+            try:
+                detail = response.json()
+            except Exception:  # noqa: BLE001 - a non-JSON error body is still a failure
+                pass
+            return {
+                "v": 1,
+                "skipped": "anchor_failed",
+                "status": response.status_code,
+                "error": detail.get("error"),
+            }
         return response.json()
     except Exception:  # noqa: BLE001 - a failure here must never fail the sale
         return {"v": 1, "skipped": "anchor_failed"}
