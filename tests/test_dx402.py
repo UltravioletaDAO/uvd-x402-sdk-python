@@ -821,3 +821,81 @@ def test_anchor_evidence_can_carry_the_proof_that_reaches_verified():
         client=Capture(),
     )
     assert captured.get("proofOfPayment") == proof
+
+
+def test_the_storage_choice_reaches_the_facilitator():
+    """v1.87.0 lets a seller pick a backend. Dropping it silently would anchor
+    somewhere the seller did not choose, which for `ipfs-public` is irreversible.
+    """
+    from uvd_x402_sdk.dx402 import anchor_evidence
+
+    captured = {}
+
+    class Capture:
+        status_code = 201
+
+        def post(self, _url, json=None, **kwargs):
+            captured.update(json or {})
+            return self
+
+        def json(self):
+            return {"v": 1}
+
+    anchor_evidence(
+        b"body",
+        payment_id_value="0x" + "ab" * 32,
+        network="base",
+        tx_hash="0x" + "cd" * 32,
+        payer="0x" + "11" * 20,
+        payee="0x" + "22" * 20,
+        payer_key=bytes(range(32)),
+        storage="ipfs-private",
+        client=Capture(),
+    )
+    assert captured.get("storage") == "ipfs-private"
+
+
+def test_backend_discovery_reports_what_cannot_be_deleted():
+    """`revocable` decides whether the SIGNED retentionUntil is true.
+
+    A caller that ignores it can promise a deletion that never happens: on
+    public IPFS, unpinning removes the facilitator's copy and not the network's.
+    """
+    from uvd_x402_sdk import available_backends
+
+    class Stats:
+        status_code = 200
+
+        def get(self, _url, **kwargs):
+            return self
+
+        def json(self):
+            return {
+                "anchored": 1,
+                "backends": [
+                    {"id": "s3", "retention": "90d", "revocable": True, "public": False,
+                     "enabled": True},
+                    {"id": "ipfs-public", "retention": "permanent", "revocable": False,
+                     "public": True, "enabled": False,
+                     "disabledReason": "irreversible; awaiting buyer opt-in"},
+                ],
+            }
+
+    backends = available_backends("https://f.test", client=Stats())
+    assert [b["id"] for b in backends] == ["s3", "ipfs-public"]
+    pub = next(b for b in backends if b["id"] == "ipfs-public")
+    assert pub["revocable"] is False
+    assert "irreversible" in pub["disabledReason"]
+
+
+def test_discovery_is_never_a_gate():
+    """A facilitator without DX402 404s. That must be an empty list, not a raise."""
+    from uvd_x402_sdk import available_backends
+
+    class Gone:
+        status_code = 404
+
+        def get(self, _url, **kwargs):
+            return self
+
+    assert available_backends("https://f.test", client=Gone()) == []

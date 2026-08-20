@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 __all__ = [
+    "available_backends",
     "ANCHOR_MAX_REQUEST_BYTES",
     "EVIDENCE_HEADER",
     "DX402Error",
@@ -1031,6 +1032,7 @@ def anchor_evidence(
     seller_encryption_key: "bytes | None" = None,
     signer: "callable | None" = None,
     proof_of_payment: "dict | None" = None,
+    storage: "str | None" = None,
     retention: str = "90d",
     facilitator: str = "https://facilitator.ultravioletadao.xyz",
     timeout: float = 15.0,
@@ -1058,6 +1060,13 @@ def anchor_evidence(
       as provisional and answers `notVerifiedReason: "dx402_proof_missing"`: the
       signature is accepted (`signed: true`) but authorship is not certified,
       and a claim that proves more may supersede yours.
+    - `storage`: which backend to anchor to (`"s3"`, `"ipfs-private"`,
+      `"ipfs-public"`). Omit to take the facilitator's default. Ask
+      :func:`available_backends` what a given facilitator offers rather than
+      assuming -- it depends on the deployment, and you may be pointed at one
+      that is not ours. **`ipfs-public` is irreversible**: the bytes become
+      permanently resolvable by anyone and no one, including the facilitator,
+      can take them down.
     - `signer`: `f(digest: bytes) -> str` returning a `0x`-prefixed signature.
       Taking a callable rather than a private key is what lets a custodian sign:
       it receives the digest and returns the signature without the seed ever
@@ -1090,6 +1099,9 @@ def anchor_evidence(
         # provisional -- your signature is accepted, authorship is not certified.
         if proof_of_payment is not None:
             payload["proofOfPayment"] = proof_of_payment
+
+        if storage is not None:
+            payload["storage"] = storage
 
         unsigned_reason = None
         if signer is not None:
@@ -1142,6 +1154,48 @@ def anchor_evidence(
         return result
     except Exception:  # noqa: BLE001 - a failure here must never fail the sale
         return {"v": 1, "skipped": "anchor_failed"}
+
+
+def available_backends(
+    facilitator: str = "https://facilitator.ultravioletadao.xyz",
+    *,
+    timeout: float = 10.0,
+    client: "object | None" = None,
+) -> list:
+    """Ask a facilitator which storage backends it actually offers.
+
+    Returns the ``backends`` array from ``GET /dx402/stats``: each entry has
+    ``id``, ``retention``, ``revocable``, ``public``, ``enabled`` and, when it is
+    not enabled, ``disabledReason``.
+
+    Ask instead of assuming. What exists depends on the deployment -- a
+    facilitator without a Pinata credential offers only ``s3`` -- and an
+    integrator may be pointed at one that is not ours. A hardcoded list in your
+    code is a promise somebody else has to keep.
+
+    Two fields carry the actual difference between the options:
+
+    * ``revocable: False`` means the ``retentionUntil`` in the signed receipt
+      **cannot be honoured**. On public IPFS, unpinning removes the
+      facilitator's copy, not the network's.
+    * ``public: True`` means anyone resolves the bytes without the facilitator.
+
+    Returns ``[]`` rather than raising if the facilitator is unreachable or does
+    not run DX402 -- same discipline as :func:`anchor_evidence`.
+    """
+    try:
+        url = f"{facilitator.rstrip('/')}/dx402/stats"
+        if client is None:
+            import httpx
+
+            response = httpx.get(url, timeout=timeout)
+        else:
+            response = client.get(url)
+        if response.status_code >= 400:
+            return []
+        return response.json().get("backends") or []
+    except Exception:  # noqa: BLE001 - discovery must never be a gate
+        return []
 
 
 def evidence_header(evidence: dict) -> str:

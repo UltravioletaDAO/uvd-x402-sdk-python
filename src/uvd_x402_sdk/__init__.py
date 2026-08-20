@@ -310,6 +310,7 @@ from uvd_x402_sdk.dx402 import (
     ANCHOR_MAX_REQUEST_BYTES,
     anchor_digest,
     anchor_evidence,
+    available_backends,
     evidence_header,
     seal_evidence_to,
     sign_anchor_ed25519,
@@ -356,6 +357,7 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "available_backends",
     "ANCHOR_MAX_REQUEST_BYTES",
     "anchor_digest",
     "anchor_evidence",
