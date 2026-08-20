@@ -17,11 +17,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install
-        # `dx402` is not optional for the test run: the durable-evidence suite
-        # seals and unseals, which needs `cryptography`. Without it the whole
-        # module's tests error with ModuleNotFoundError and CI has been red
-        # since dx402 landed.
-        run: pip install -e '.[signer,dev,dx402]'
+        # `dx402` and `escrow` are not optional for the TEST run, whatever they
+        # are for a consumer: durable-evidence seals and unseals (needs
+        # `cryptography`) and advanced_escrow imports web3 at module level. A
+        # module with no installable deps here is a module with no tests, and
+        # the failure looks like ModuleNotFoundError rather than a gap.
+        run: pip install -e '.[signer,dev,dx402,escrow]'
 
       - name: Test
         run: python -m pytest -q
