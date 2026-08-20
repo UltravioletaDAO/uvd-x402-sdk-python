@@ -429,6 +429,11 @@ class TaskTier(str, Enum):
     ENTERPRISE = "enterprise"  # $200+: 24h accept, 7d complete, 30d dispute
 
 
+# The review windows are defined ONCE, in escrow_signing, so the two escrow
+# paths in this SDK cannot drift apart again -- which is exactly how this bug
+# happened.
+from uvd_x402_sdk.escrow_signing import REFUND_WINDOW_SEC, REVIEW_WINDOW_SEC  # noqa: E402
+
 TIER_TIMINGS = {
     TaskTier.MICRO: {"pre": 3600, "auth": 7200, "refund": 86400},
     TaskTier.STANDARD: {"pre": 7200, "auth": 86400, "refund": 604800},
@@ -779,9 +784,25 @@ class AdvancedEscrowClient:
         salt: Optional[str] = None,
         min_fee_bps: int = 0,
         max_fee_bps: int = 800,
+        deadline: Optional[int] = None,
+        review_window_sec: int = REVIEW_WINDOW_SEC,
     ) -> PaymentInfo:
         """
         Build a PaymentInfo struct with appropriate timing for the task tier.
+
+        The release window is floored so a release is still possible AFTER the
+        work is reviewed. The tier windows alone are not: ``MICRO`` gives two
+        hours, and a buyer who approves later than that gets
+        ``AfterAuthorizationExpiry`` on-chain -- the release reverts, the worker
+        is not paid, and the funds sit until only the payer's ``reclaim()`` can
+        move them. Measured in production 2026-08-19: a release attempted **26.2
+        hours** past the expiry, with 8 escrows stuck on one network in 24h.
+
+        This is not a new policy. ``escrow_signing.build_escrow_pre_auth`` -- the
+        other path in this same SDK -- already floors both windows at
+        ``REVIEW_WINDOW_SEC`` for exactly this reason, and says so in a comment.
+        Only this path never got the memo, and it is the one the marketplace
+        documents as recommended.
 
         Args:
             receiver: Worker's wallet address
@@ -790,9 +811,18 @@ class AdvancedEscrowClient:
             salt: Random salt (auto-generated if not provided)
             min_fee_bps: Minimum fee in basis points
             max_fee_bps: Maximum fee in basis points
+            deadline: Unix ts the work is due. The release window is floored to
+                ``deadline + review_window_sec``, so approving after the deadline
+                still settles. Omit it and the floor is measured from now.
+            review_window_sec: How long after the deadline a release must remain
+                possible. Defaults to the SDK-wide 7 days.
         """
         now = int(time.time())
         t = TIER_TIMINGS[tier]
+
+        review_base = max(now, deadline or now)
+        authorization_expiry = max(now + t["auth"], review_base + review_window_sec)
+        refund_expiry = max(now + t["refund"], authorization_expiry + REFUND_WINDOW_SEC)
 
         return PaymentInfo(
             operator=self.contracts["operator"],
@@ -800,8 +830,8 @@ class AdvancedEscrowClient:
             token=self.contracts["usdc"],
             max_amount=amount,
             pre_approval_expiry=now + t["pre"],
-            authorization_expiry=now + t["auth"],
-            refund_expiry=now + t["refund"],
+            authorization_expiry=authorization_expiry,
+            refund_expiry=refund_expiry,
             min_fee_bps=min_fee_bps,
             max_fee_bps=max_fee_bps,
             fee_receiver=self.contracts["operator"],
