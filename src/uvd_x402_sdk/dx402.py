@@ -1283,4 +1283,13 @@ def _is_challenge(v) -> bool:
     """
     if not isinstance(v, dict):
         return False
-    return isinstance(v.get("accepts"), list) or isinstance(v.get("payTo"), str)
+    # `paymentRequirements` is the v1 spelling of `accepts`. KarmaKadabra's buyer
+    # matched both keys in production and this reader missed the v1 one -- a seller
+    # answering `{"paymentRequirements": [...]}` looked like "no terms here" and its
+    # 402 died as unpayable. Contributed upstream 2026-08-20 so the SDK is a strict
+    # superset of what KK already handled, before KK drops its own reader for this one.
+    return (
+        isinstance(v.get("accepts"), list)
+        or isinstance(v.get("paymentRequirements"), list)
+        or isinstance(v.get("payTo"), str)
+    )

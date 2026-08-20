@@ -70,3 +70,16 @@ def test_nothing_anywhere_is_none_not_an_empty_dict():
     """'No terms here' must be distinguishable from 'terms with nothing in them'."""
     assert payment_challenge_from({}, None) is None
     assert payment_challenge_from({}, "not json") is None
+
+
+def test_the_v1_paymentRequirements_key_counts():
+    """The v1 spelling of `accepts`. KarmaKadabra's buyer matched it in production
+    and the header reader missed it — a seller answering `{"paymentRequirements":
+    [...]}` looked like "no terms" and its 402 was unpayable. Upstreamed 2026-08-20."""
+    body = {"paymentRequirements": [{"payTo": "0xEEEE", "maxAmountRequired": "1000"}]}
+    assert payment_challenge_from({}, body) is not None
+    # and in the header transport too
+    import base64 as _b64
+    import json as _json
+    hdr = _b64.b64encode(_json.dumps(body).encode()).decode()
+    assert payment_challenge_from({"payment-required": hdr}) is not None
