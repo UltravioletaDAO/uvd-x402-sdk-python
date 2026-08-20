@@ -2183,3 +2183,107 @@ Reported by KarmaCadabra against uvd-x402-sdk 0.26.0.
 - EVM, Solana, Stellar network support
 - Flask, FastAPI, Django, Lambda integrations
 - Full Pydantic models
+
+## DX402 — evidence that outlives the session
+
+x402 settles payment on-chain forever but delivers the resource **once** and
+keeps nothing. DX402 seals a copy of the response to the payer's own public key
+— recovered from the payment signature itself — and anchors it. No registration,
+no extra round trip: paying *is* publishing your encryption key.
+
+```bash
+pip install 'uvd-x402-sdk[dx402]'
+```
+
+### Seller: one call
+
+```python
+from uvd_x402_sdk import anchor_evidence, evidence_header
+
+result = anchor_evidence(
+    body,                                   # the bytes you are about to deliver
+    payment_id_value=payment_id, network="base", tx_hash=tx,
+    payer=payer_addr, payee=my_addr, payer_key=payer_pubkey,
+    signer=lambda digest: my_custodian.sign(digest),   # a callable, not a key
+)
+response.headers["X-Durable-Evidence"] = evidence_header(result)
+```
+
+**It never raises.** Every failure comes back as `result["skipped"]`, because
+evidence is an addition to the payment path and must never be a gate in front of
+it. An unreachable facilitator costs the receipt, never the sale.
+
+`signer` takes a **callable rather than a private key** so a custodian can sign:
+it receives the 32-byte digest and returns a signature without the seed ever
+leaving it.
+
+### Buyer: come back months later
+
+```python
+from uvd_x402_sdk import recover_evidence, evidence_from_headers
+
+evidence = evidence_from_headers(response.headers)
+body = recover_evidence(evidence, my_private_key)
+```
+
+This needs permission from nobody. The ciphertext was sealed to the wallet that
+paid, so recovery is arithmetic rather than an access-control decision anyone
+could refuse. The `contentHash` check runs automatically and raises on
+mismatch — it is what catches a seller who anchored something other than what it
+served.
+
+### `verified` vs `signed` — read this before you branch on either
+
+Since facilitator **1.87.0** a signature alone does not make an anchor final:
+
+| field | means | supersedable by |
+|---|---|---|
+| `verified: true` | the **chain** confirmed this address is the payee | nothing — final |
+| `signed: true` | the claimant controls the address it *declared* | a verified anchor |
+| neither | anyone could have written it | either of the above |
+
+To reach `verified` you must send `proof_of_payment`. Without it the facilitator
+has checked no chain and answers `notVerifiedReason: "dx402_proof_missing"` —
+your signature was still accepted (`signed: true`), authorship simply was not
+certified.
+
+Why the split: `verified` was previously decided against the `payee` field *in
+the request*, which the caller supplies. Proving "I control the address I typed
+into my own request" was enough to own a stranger's evidence permanently.
+
+### Choosing where evidence is stored
+
+```python
+from uvd_x402_sdk import available_backends
+
+for b in available_backends("https://facilitator.ultravioletadao.xyz"):
+    print(b["id"], b["retention"], "deletable" if b["revocable"] else "IRREVERSIBLE")
+
+anchor_evidence(body, ..., storage="ipfs-private")
+```
+
+Ask rather than assume: what exists depends on the deployment, and you may be
+pointed at a facilitator that is not ours. `revocable: False` means the
+`retentionUntil` in the **signed** receipt cannot be honoured — on public IPFS,
+unpinning removes the facilitator's copy, not the network's.
+
+### Runnable examples
+
+Not snippets — files, and CI runs them:
+
+| file | shows |
+|---|---|
+| [`examples/dx402/seller_anchor.py`](examples/dx402/seller_anchor.py) | the whole seller side in one call |
+| [`examples/dx402/buyer_recover.py`](examples/dx402/buyer_recover.py) | recovery, tamper detection, and that another wallet cannot open it |
+| [`examples/dx402/verified_anchor.py`](examples/dx402/verified_anchor.py) | reaching `verified: true` with `proof_of_payment` |
+| [`examples/dx402/choose_storage.py`](examples/dx402/choose_storage.py) | discovering backends and what each one promises |
+
+### Limits
+
+- Inline anchors cap at **64 KiB of request** (~47 KB of plaintext); the SDK
+  returns `skipped: "too_large"` before touching the network.
+- Anchoring with `retention: permanent` is **irrevocable**.
+- On Solana, `verified` is not reachable yet — the on-chain gate cannot read
+  that payment, so `signed: true` is the honest maximum.
+
+Full guide: [DX402.md](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/DX402.md)
