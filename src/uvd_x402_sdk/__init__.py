@@ -299,6 +299,7 @@ from uvd_x402_sdk.dx402 import (
     payer_key_from_ed25519_pubkey,
     payer_key_from_evm_signature,
     payer_key_from_solana_address,
+    payment_challenge_from,
     payment_id,
     recover_evidence,
     seal_evidence,
@@ -357,6 +358,7 @@ except ImportError:
     ADVANCED_ESCROW_AVAILABLE = False
 
 __all__ = [
+    "payment_challenge_from",
     "available_backends",
     "ANCHOR_MAX_REQUEST_BYTES",
     "anchor_digest",

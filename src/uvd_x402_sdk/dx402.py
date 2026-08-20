@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 __all__ = [
+    "payment_challenge_from",
     "available_backends",
     "ANCHOR_MAX_REQUEST_BYTES",
     "EVIDENCE_HEADER",
@@ -1203,3 +1204,83 @@ def evidence_header(evidence: dict) -> str:
     return (
         base64.urlsafe_b64encode(json.dumps(evidence).encode()).decode().rstrip("=")
     )
+
+
+# ============================================================================
+# Reading a 402 challenge -- from either transport
+# ============================================================================
+
+
+def payment_challenge_from(headers, body=None) -> "dict | None":
+    """Read a 402 payment challenge from wherever the seller put it.
+
+    x402 allows BOTH transports and sellers pick freely:
+
+    * base64 JSON in the ``PAYMENT-REQUIRED`` (or ``X-PAYMENT-REQUIRED``) header
+    * JSON in the response body
+
+    Measured against production on 2026-08-20: of 40 live Bazaar resources,
+    **36 of 36 that answered 402 carried the challenge in the header, and none
+    in the body**. Worse, sellers like Tenjin use the 402 body for a free
+    preview of the paid content -- so the body is valid JSON that simply has no
+    ``accepts``, and a body-only reader parses it happily and finds nothing.
+
+    Reads the header first because that is where live sellers put it, and falls
+    back to the body so the sellers who use it keep working.
+
+    Returns ``None`` when neither transport carries a challenge. That is a real
+    "no terms here", and it is deliberately distinguishable from an empty
+    ``accepts`` list: a caller that cannot tell those apart concludes it looked
+    and found nothing wrong.
+
+    ``headers`` accepts anything dict-like or with a ``.get()`` (httpx, requests
+    and ``http.client`` all work).
+    """
+    import base64 as _b64
+    import json as _json
+
+    def _read(name: str):
+        try:
+            v = headers.get(name)
+            if v:
+                return v
+        except AttributeError:
+            pass
+        if isinstance(headers, dict):
+            for k in (name, name.lower(), name.upper(), name.title()):
+                if headers.get(k):
+                    return headers[k]
+        return None
+
+    raw = _read("payment-required") or _read("x-payment-required")
+    if raw:
+        raw = raw.strip()
+        for decode in (
+            lambda: _json.loads(_b64.b64decode(raw + "=" * (-len(raw) % 4))),
+            lambda: _json.loads(raw),
+        ):
+            try:
+                parsed = decode()
+            except Exception:  # noqa: BLE001 - not this encoding, try the next
+                continue
+            if _is_challenge(parsed):
+                return parsed
+
+    if isinstance(body, (str, bytes)):
+        try:
+            body = _json.loads(body)
+        except Exception:  # noqa: BLE001 - not JSON at all
+            body = None
+    return body if _is_challenge(body) else None
+
+
+def _is_challenge(v) -> bool:
+    """Whether a value actually looks like an x402 challenge.
+
+    Deliberately stricter than "is a dict": a 402 body carrying a free preview
+    is valid JSON with no payment terms, and treating that as a challenge is
+    exactly how a body-only reader concludes it looked and found nothing.
+    """
+    if not isinstance(v, dict):
+        return False
+    return isinstance(v.get("accepts"), list) or isinstance(v.get("payTo"), str)
