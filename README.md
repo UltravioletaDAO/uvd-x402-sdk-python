@@ -16,7 +16,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
-- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (20 networks: 18 EVM + Solana + Solana-devnet)
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (21 networks: 19 EVM + Solana + Solana-devnet)
 - **Escrow & Refunds**: Hold payments in escrow with dispute resolution (11 EVM chains + SKALE via CREATE3)
 - **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
@@ -1270,7 +1270,10 @@ except X402Error as e:
 
 ## ERC-8004 Trustless Agents
 
-Build verifiable on-chain reputation for AI agents and services. Supports **20 networks** (18 EVM + Solana + Solana devnet).
+Build verifiable on-chain reputation for AI agents and services. Supports **21 networks** (19 EVM + Solana + Solana devnet).
+
+> Name Base as `"base"`. The old `"base-mainnet"` spelling is rejected by the facilitator
+> (`400 Invalid network`); the SDK now rewrites it for you, but new code should use `"base"`.
 
 On EVM networks, agent IDs are sequential `uint256` integers. On Solana, agent IDs are base58 pubkey strings (NFT asset addresses). The `AgentId` type (`Union[int, str]`) handles both.
 

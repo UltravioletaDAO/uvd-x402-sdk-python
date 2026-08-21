@@ -47,17 +47,38 @@ ERC8004_EXTENSION_ID = "8004-reputation"
 # Agent ID type: EVM uses sequential uint256, Solana uses base58 pubkey strings
 AgentId = Union[int, str]
 
-# Supported networks for ERC-8004 (20 networks: 18 EVM + 2 Solana)
+# Supported networks for ERC-8004 (21 networks: 19 EVM + 2 Solana)
+#
+# These are the names the FACILITATOR accepts, verified against
+# GET /feedback -> supportedNetworks. "base-mainnet" is kept only as a
+# deprecated alias: the facilitator rejects it outright (400 "Invalid network"),
+# so anything passed through this module is normalised to "base" before it
+# reaches the wire. Use "base".
 Erc8004Network = Literal[
     # EVM Mainnets
-    "ethereum", "base-mainnet", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
-    "skale-base",
+    "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
+    "scroll", "skale-base",
+    # Deprecated alias, normalised to "base" on the wire
+    "base-mainnet",
     # EVM Testnets
     "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji",
     "skale-base-sepolia",
     # Solana (uses QuantuLabs 8004-solana Anchor program + ATOM Engine)
     "solana", "solana-devnet",
 ]
+
+
+
+def _wire(network: str) -> str:
+    """Return the network name the facilitator actually accepts.
+
+    ``base-mainnet`` reads like the canonical spelling and is not: the
+    facilitator answers ``400 {"error": "Invalid network: base-mainnet"}``.
+    Every name is passed through here before it reaches a URL or a request
+    body, so callers holding the old spelling keep working instead of being
+    rejected at the edge.
+    """
+    return "base" if network == "base-mainnet" else network
 
 
 class Erc8004ContractAddresses(BaseModel):
@@ -74,6 +95,10 @@ class Erc8004ContractAddresses(BaseModel):
 # EVM Mainnet addresses (CREATE2 deterministic - same on all mainnets)
 _MAINNET_IDENTITY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432"
 _MAINNET_REPUTATION = "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
+# Deployed after the identity/reputation pair, which is why it was missing here.
+# Verified live on all ten EVM mainnets below; SKALE Base has no code at this
+# address and is the one mainnet that legitimately has no validation registry.
+_MAINNET_VALIDATION = "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
 
 # EVM Testnet addresses (same on all testnets)
 _TESTNET_IDENTITY = "0x8004A818BFB912233c491871b3d84c89A494BD9e"
@@ -84,48 +109,70 @@ _TESTNET_VALIDATION = "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
 _SOLANA_AGENT_REGISTRY = "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
 _SOLANA_ATOM_ENGINE = "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb"
 
-# Contract addresses per network (20 networks: 18 EVM + 2 Solana)
+# Contract addresses per network (21 networks: 19 EVM + 2 Solana)
 ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
-    # Mainnets (10)
+    # Mainnets (11)
     "ethereum": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
-    "base-mainnet": Erc8004ContractAddresses(
+    "base": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "polygon": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "arbitrum": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "optimism": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "celo": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "bsc": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "monad": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     "avalanche": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
+    "scroll": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
+    ),
+    # SKALE Base is the one mainnet without a validation registry (no code at
+    # the canonical address), so leaving it None is correct, not an omission.
     "skale-base": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
+    ),
+    # Deprecated alias for "base" -- kept so existing lookups keep resolving.
+    "base-mainnet": Erc8004ContractAddresses(
+        identity_registry=_MAINNET_IDENTITY,
+        reputation_registry=_MAINNET_REPUTATION,
+        validation_registry=_MAINNET_VALIDATION,
     ),
     # Testnets (8)
     "ethereum-sepolia": Erc8004ContractAddresses(
@@ -588,7 +635,7 @@ class Erc8004Client:
         Raises:
             httpx.HTTPStatusError: If the request fails
         """
-        url = f"{self.base_url}/identity/{network}/{agent_id}"
+        url = f"{self.base_url}/identity/{_wire(network)}/{agent_id}"
         response = await self._client.get(url)
         response.raise_for_status()
         return AgentIdentity.model_validate(response.json())
@@ -621,7 +668,7 @@ class Erc8004Client:
             httpx.HTTPStatusError: 404 if the address owns no agent, or any
                 other non-success status.
         """
-        url = f"{self.base_url}/identity/{network}/owner/{address}"
+        url = f"{self.base_url}/identity/{_wire(network)}/owner/{address}"
         response = await self._client.get(url)
         if response.status_code == 503:
             raise LookupInconclusiveError(
@@ -693,7 +740,7 @@ class Erc8004Client:
         if client_addresses:
             params["clientAddresses"] = client_addresses
 
-        url = f"{self.base_url}/reputation/{network}/{agent_id}"
+        url = f"{self.base_url}/reputation/{_wire(network)}/{agent_id}"
         response = await self._client.get(url, params=params or None)
         response.raise_for_status()
         return ReputationResponse.model_validate(response.json())
@@ -825,7 +872,7 @@ class Erc8004Client:
         url = f"{self.base_url}/feedback/revoke"
         payload: dict[str, Any] = {
             "x402Version": x402_version,
-            "network": network,
+            "network": _wire(network),
             "agentId": agent_id,
             "feedbackIndex": feedback_index,
         }
@@ -933,7 +980,7 @@ class Erc8004Client:
         url = f"{self.base_url}/feedback/response"
         payload: dict[str, Any] = {
             "x402Version": x402_version,
-            "network": network,
+            "network": _wire(network),
             "agentId": agent_id,
             "feedbackIndex": feedback_index,
             "response": response_text,
@@ -1021,7 +1068,7 @@ class Erc8004Client:
 
         payload: dict[str, Any] = {
             "x402Version": x402_version,
-            "network": network,
+            "network": _wire(network),
             "agentUri": agent_uri,
         }
         if metadata:
@@ -1099,7 +1146,7 @@ class Erc8004Client:
         """
         payload: dict[str, Any] = {
             "x402Version": x402_version,
-            "network": network,
+            "network": _wire(network),
             "agentUri": agent_uri,
         }
         if metadata:
@@ -1212,7 +1259,7 @@ class Erc8004Client:
         Raises:
             httpx.HTTPStatusError: If the request fails
         """
-        url = f"{self.base_url}/identity/{network}/{agent_id}/metadata/{key}"
+        url = f"{self.base_url}/identity/{_wire(network)}/{agent_id}/metadata/{key}"
         response = await self._client.get(url)
         response.raise_for_status()
         return IdentityMetadataResponse.model_validate(response.json())
@@ -1233,7 +1280,7 @@ class Erc8004Client:
         Raises:
             httpx.HTTPStatusError: If the request fails
         """
-        url = f"{self.base_url}/identity/{network}/total-supply"
+        url = f"{self.base_url}/identity/{_wire(network)}/total-supply"
         response = await self._client.get(url)
         response.raise_for_status()
         return IdentityTotalSupplyResponse.model_validate(response.json())
@@ -1280,7 +1327,7 @@ def build_erc8004_payment_requirements(
     """
     return {
         "scheme": "exact",
-        "network": network,
+        "network": _wire(network),
         "maxAmountRequired": str(int(float(amount) * 1_000_000)),  # 6 decimals
         "resource": resource,
         "description": description,
