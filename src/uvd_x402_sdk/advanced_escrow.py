@@ -1018,12 +1018,43 @@ class AdvancedEscrowClient:
                     transaction_hash=result.get("transaction"),
                 )
             else:
+                # `dict.get(k, default)` does NOT fall back when the key is
+                # PRESENT and empty, and the facilitator sends `errorReason:
+                # ""` often enough that the default never fired. An empty
+                # `error` is what reached three integrators as "the approve
+                # returns an empty string" (EM/KK, 2026-08-19..22) — a failure
+                # that cannot name itself is undebuggable from both sides.
+                # `or` fires on empty; the last resort names what DID come back.
                 return TransactionResult(
                     success=False,
-                    error=result.get("errorReason", result.get("error", "Unknown error")),
+                    error=(
+                        result.get("errorReason")
+                        or result.get("error")
+                        or f"{action} refused with no reason "
+                        f"(HTTP {response.status_code}, body keys: "
+                        f"{sorted(result.keys())})"
+                    ),
                 )
+        except httpx.HTTPStatusError as e:
+            # `str(e)` on an HTTPStatusError is "Client error '400 Bad Request'
+            # for url ..." and DROPS the body — which is the only place the
+            # facilitator says WHY. Losing it turns a precise refusal into a
+            # status code nobody can act on.
+            try:
+                body = e.response.text[:600]
+            except Exception:
+                body = ""
+            return TransactionResult(
+                success=False,
+                error=f"{e}{(' | body=' + body) if body else ' | body was empty'}",
+            )
         except Exception as e:
-            return TransactionResult(success=False, error=str(e))
+            # A ReadTimeout stringifies to "" — say what happened instead of
+            # handing the caller an empty string.
+            return TransactionResult(
+                success=False,
+                error=str(e) or f"{type(e).__name__} with no message during {action}",
+            )
 
     def release_via_facilitator(
         self, payment_info: PaymentInfo, amount: Optional[int] = None
