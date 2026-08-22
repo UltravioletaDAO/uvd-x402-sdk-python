@@ -193,12 +193,24 @@ def evidence_from_headers(headers: Mapping[str, str]) -> AnchoredEvidence:
 def dereference_pointer(pointer: str) -> str:
     """Turn a DX402 pointer into a fetchable URL.
 
-    ``s3+https://...`` is a scheme tag over an ordinary HTTPS URL; ``ipfs://`` and
-    ``ar://`` go through public gateways. Anything else passes through untouched,
-    so a caller with their own resolver is not blocked by this function.
+    ``<backend>+https://...`` is a SCHEME TAG over an ordinary HTTP(S) URL: the tag names
+    which store wrote the bytes, and what follows is already fetchable. ``ipfs://`` and
+    ``ar://`` are true protocols and go through public gateways. Anything else passes
+    through untouched, so a caller with their own resolver is not blocked here.
+
+    The tag is stripped GENERICALLY, not case by case. Reason, measured 2026-08-22: the
+    facilitator turned Pinata on and started emitting ``ipfs+https://...`` pointers. This
+    function only knew ``s3+``, so the tagged URL went to ``httpx`` verbatim and every read
+    died with ``UnsupportedProtocol`` — **0 of 19 anchored evidences could be opened**,
+    with the bytes sitting there fine. Nothing was broken except this reader's vocabulary.
+    Enumerating tags one at a time guarantees the next backend breaks it again.
     """
-    if pointer.startswith("s3+"):
-        return pointer[3:]
+    tag, sep, rest = pointer.partition("+")
+    if sep and rest[:8] in ("https://", "http://") or (
+            sep and rest.startswith(("https://", "http://"))):
+        # `s3+https://…`, `ipfs+https://…`, and whatever ships next. A fragment
+        # (`#<cid>`) may ride along — it is metadata for the caller and HTTP ignores it.
+        return rest
     if pointer.startswith("ipfs://"):
         return f"https://ipfs.io/ipfs/{pointer[len('ipfs://'):]}"
     if pointer.startswith("ar://"):
