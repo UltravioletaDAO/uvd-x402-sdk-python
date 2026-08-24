@@ -68,6 +68,43 @@ Erc8004Network = Literal[
 ]
 
 
+# Networks where the facilitator serves the RELAYED feedback rail, i.e. where
+# Execution Market has deployed a ``FeedbackDelegate`` and the facilitator
+# verified it on-chain (code present, and its ``REPUTATION_REGISTRY()`` reads
+# back that network's registry).
+#
+# Anywhere else, ``POST /feedback/evm/prepare`` answers 400 -- and it should:
+# an invented delegate address would send a type-4 transaction to an account
+# with no code behind it, and in the EVM a ``.call()`` to an address with no
+# code RETURNS SUCCESS. The failure would look exactly like a rating that
+# rated nobody.
+#
+# ``avalanche`` is absent and is not waiting to join: the C-Chain rejects the
+# transaction type itself (``-32000 transaction type not supported``), so there
+# is nothing to deploy against. Anchor the rating on a chain that supports
+# EIP-7702; the payment stays where it was made.
+RELAYED_FEEDBACK_NETWORKS = frozenset({
+    "base",
+    "ethereum",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "celo",
+    "bsc",
+    "monad",
+    "base-sepolia",
+})
+
+
+def supports_relayed_feedback(network: str) -> bool:
+    """Whether ``network`` serves the rater-authored feedback rail.
+
+    Lets a caller route without paying a round trip for a 400. The facilitator
+    re-checks the delegate on-chain on every request regardless -- this list is
+    a routing hint, never the authority.
+    """
+    return _wire(network) in RELAYED_FEEDBACK_NETWORKS
+
 
 def _wire(network: str) -> str:
     """Return the network name the facilitator actually accepts.
@@ -424,6 +461,73 @@ class FeedbackResponse(BaseModel):
         populate_by_name = True
 
 
+class RelayAuthorizationParams(BaseModel):
+    """An EIP-7702 authorization, as a wallet produces it.
+
+    Needed only the first time a rater rates: it points their EOA at the
+    ``FeedbackDelegate``. Once delegated, ``prepare`` answers
+    ``delegated=True`` and the submission carries no authorization at all.
+    """
+
+    chain_id: int = Field(..., alias="chainId")
+    """Chain the authorization is for.
+
+    ``0`` is EIP-7702's wildcard and is valid on EVERY chain -- a far broader
+    grant than pinning this one. Send the chain id ``prepare`` returned.
+    """
+    address: str
+    """The delegate the account is pointed at.
+
+    Must be the address ``prepare`` offered; the facilitator refuses anything
+    else before it pays for a transaction.
+    """
+    nonce: int
+    """The rater account's nonce at the moment the authorization executes."""
+    y_parity: int = Field(..., alias="yParity")
+    r: str
+    s: str
+
+    class Config:
+        populate_by_name = True
+
+
+class PrepareRelayFeedbackResponse(BaseModel):
+    """Response from ``POST /feedback/evm/prepare``.
+
+    Everything the rater has to sign so the CHAIN records them as the author
+    while the facilitator pays the gas.
+    """
+
+    success: bool
+    delegate: Optional[str] = None
+    """The ``FeedbackDelegate`` the rater's EOA must be delegated to."""
+    data: Optional[str] = None
+    """Registry calldata the rater is authorising, hex-encoded."""
+    digest: Optional[str] = None
+    """EIP-191 digest to sign with the rater's key."""
+    deadline: Optional[int] = None
+    """Unix seconds after which the authorisation is void.
+
+    Short on purpose: relaying is permissionless, so a signed authorisation is
+    live in the wild until it expires.
+    """
+    nonce: Optional[str] = None
+    """Single-use value binding this authorisation. Echo it back on submit."""
+    delegated: bool = False
+    """Whether the account is already delegated.
+
+    When ``False`` the submission MUST carry an ``authorization``.
+    """
+    account_nonce: Optional[int] = Field(None, alias="accountNonce")
+    """The account nonce to put in the EIP-7702 authorization, when needed."""
+    chain_id: int = Field(0, alias="chainId")
+    error: Optional[str] = None
+    network: str
+
+    class Config:
+        populate_by_name = True
+
+
 class MetadataEntryParam(BaseModel):
     """Key-value metadata entry for agent registration."""
 
@@ -766,6 +870,16 @@ class Erc8004Client:
 
         Requires proof of payment for authorized feedback submission.
 
+        .. deprecated::
+            On this route the facilitator is the AUTHOR: the registry records
+            ``msg.sender``, and that is the facilitator's wallet -- which can
+            also revoke what it wrote. On the networks in
+            :data:`RELAYED_FEEDBACK_NETWORKS` use
+            :meth:`prepare_relayed_feedback` + :meth:`submit_relayed_feedback`
+            instead, which record the RATER as author. This route still works
+            and is not going away without notice: it is the only one available
+            where no ``FeedbackDelegate`` is deployed.
+
         Args:
             network: Network where feedback will be submitted
             agent_id: Agent's tokenId
@@ -822,6 +936,225 @@ class Erc8004Client:
                 url,
                 json=request.model_dump(by_alias=True, exclude_none=True),
             )
+            response.raise_for_status()
+            return FeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return FeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return FeedbackResponse(
+                success=False,
+                error=str(e),
+                network=network,
+            )
+
+    async def prepare_relayed_feedback(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        rater: str,
+        value: int,
+        *,
+        value_decimals: int = 0,
+        tag1: str = "",
+        tag2: str = "",
+        endpoint: str = "",
+        feedback_uri: str = "",
+        feedback_hash: Optional[str] = None,
+        score: Optional[int] = None,
+        proof: Optional[ProofOfPayment] = None,
+        x402_version: int = 1,
+    ) -> PrepareRelayFeedbackResponse:
+        """Ask the facilitator what the rater must sign to author a rating.
+
+        Step 1 of the rater-authored rail. Writes nothing on-chain and costs
+        nothing: it reads the delegate, the rater's delegation state and their
+        account nonce, then hands back a digest, a deadline and a single-use
+        nonce.
+
+        Why this exists: the ERC-8004 Reputation Registry records
+        ``msg.sender`` as the author, and the deployed implementation has no
+        delegation path -- no ``giveFeedbackWithSignature``, no ERC-2771
+        forwarder. So a rating the facilitator relays the ordinary way is a
+        rating attributed to the FACILITATOR. EIP-7702 fixes it without
+        touching the registry: the rater delegates their own EOA to the
+        ``FeedbackDelegate`` and the transaction is sent TO THE RATER'S
+        ADDRESS, so the registry sees the rater while the facilitator pays.
+
+        What the caller does with the answer:
+
+        1. Sign ``digest`` with the rater's key (EIP-191 personal-sign).
+        2. If ``delegated`` is ``False``, also produce an EIP-7702
+           authorization over ``(chain_id, delegate, account_nonce)``.
+        3. Hand both to :meth:`submit_relayed_feedback` together with the SAME
+           feedback parameters, ``deadline`` and ``nonce``.
+
+        Args:
+            network: An EVM network in :data:`RELAYED_FEEDBACK_NETWORKS`.
+                Anywhere else answers 400 rather than inventing a delegate.
+            agent_id: Agent's tokenId.
+            rater: The address that will appear on-chain as the author.
+            value: Feedback value (e.g. 95 for 95/100).
+            value_decimals: Decimal places for ``value`` (0-18).
+            tag1: Primary categorization tag.
+            tag2: Secondary categorization tag.
+            endpoint: Service endpoint that was used.
+            feedback_uri: URI to the off-chain feedback file.
+            feedback_hash: Keccak256 hash of the feedback content.
+            score: Quality score 0-100.
+            proof: Proof of payment.
+            x402_version: x402 protocol version.
+
+        Returns:
+            Everything needed to sign, including whether an EIP-7702
+            authorization is still required.
+
+        Example:
+            >>> prep = await client.prepare_relayed_feedback(
+            ...     network="base",
+            ...     agent_id=18896,
+            ...     rater="0xRaterEOA",
+            ...     value=95,
+            ...     tag1="quality",
+            ... )
+            >>> prep.delegated
+            False
+        """
+        if score is not None and not 0 <= score <= 100:
+            raise ValueError(f"score must be between 0 and 100, got {score}")
+
+        params = FeedbackParams(
+            agent_id=agent_id,
+            value=value,
+            value_decimals=value_decimals,
+            tag1=tag1,
+            tag2=tag2,
+            endpoint=endpoint,
+            feedback_uri=feedback_uri,
+            feedback_hash=feedback_hash,
+            score=score,
+            proof=proof,
+        )
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "feedback": params.model_dump(by_alias=True, exclude_none=True),
+        }
+        body["feedback"]["rater"] = rater
+
+        url = f"{self.base_url}/feedback/evm/prepare"
+        try:
+            response = await self._client.post(url, json=body)
+            response.raise_for_status()
+            return PrepareRelayFeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return PrepareRelayFeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return PrepareRelayFeedbackResponse(
+                success=False,
+                error=str(e),
+                network=network,
+            )
+
+    async def submit_relayed_feedback(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        rater: str,
+        value: int,
+        *,
+        deadline: int,
+        nonce: str,
+        signature: str,
+        authorization: Optional[RelayAuthorizationParams] = None,
+        value_decimals: int = 0,
+        tag1: str = "",
+        tag2: str = "",
+        endpoint: str = "",
+        feedback_uri: str = "",
+        feedback_hash: Optional[str] = None,
+        score: Optional[int] = None,
+        proof: Optional[ProofOfPayment] = None,
+        x402_version: int = 1,
+    ) -> FeedbackResponse:
+        """Relay a rater-authored rating; the facilitator pays the gas.
+
+        Step 2 of the rater-authored rail. The on-chain record that comes out
+        of it has the RATER as ``msg.sender``, so ``getClients(agentId)`` shows
+        the rater rather than the facilitator.
+
+        Pass back the same feedback parameters, ``deadline`` and ``nonce`` that
+        :meth:`prepare_relayed_feedback` returned. They are not redundant: the
+        facilitator rebuilds the registry calldata from them and requires the
+        rater's signature to cover exactly that. It does not relay calldata it
+        was handed.
+
+        ``authorization`` is required only when ``prepare`` answered
+        ``delegated=False``. One that names a different delegate than the one
+        ``prepare`` offered is refused before any gas is spent.
+
+        Args:
+            network: The same network passed to ``prepare``.
+            agent_id: Agent's tokenId.
+            rater: The address that authored the signature.
+            value: Feedback value.
+            deadline: The deadline ``prepare`` returned. Short by design; past
+                it the facilitator refuses rather than relaying a stale
+                authorisation.
+            nonce: The single-use nonce ``prepare`` returned.
+            signature: The rater's EIP-191 signature over ``digest``.
+            authorization: EIP-7702 authorization, when the account is not yet
+                delegated.
+            value_decimals: Decimal places for ``value`` (0-18).
+            tag1: Primary categorization tag.
+            tag2: Secondary categorization tag.
+            endpoint: Service endpoint that was used.
+            feedback_uri: URI to the off-chain feedback file.
+            feedback_hash: Keccak256 hash of the feedback content.
+            score: Quality score 0-100.
+            proof: Proof of payment.
+            x402_version: x402 protocol version.
+
+        Returns:
+            Feedback response with the transaction hash.
+        """
+        if score is not None and not 0 <= score <= 100:
+            raise ValueError(f"score must be between 0 and 100, got {score}")
+
+        params = FeedbackParams(
+            agent_id=agent_id,
+            value=value,
+            value_decimals=value_decimals,
+            tag1=tag1,
+            tag2=tag2,
+            endpoint=endpoint,
+            feedback_uri=feedback_uri,
+            feedback_hash=feedback_hash,
+            score=score,
+            proof=proof,
+        )
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "feedback": params.model_dump(by_alias=True, exclude_none=True),
+            "deadline": deadline,
+            "nonce": nonce,
+            "signature": signature,
+        }
+        body["feedback"]["rater"] = rater
+        if authorization is not None:
+            body["authorization"] = authorization.model_dump(by_alias=True)
+
+        url = f"{self.base_url}/feedback/evm/submit"
+        try:
+            response = await self._client.post(url, json=body)
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:

@@ -1312,6 +1312,77 @@ async with Erc8004Client() as client:
     )
 ```
 
+### Ratings the chain attributes to the rater
+
+`submit_feedback()` above works, but the registry records `msg.sender` as the
+author -- and on that route `msg.sender` is the **facilitator**. It is why 87,2%
+of the reputation on Base (1.384 of 1.587 feedbacks) is attributed to one
+wallet, which can also revoke it.
+
+EIP-7702 fixes it without touching the registry: the rater delegates their own
+EOA to a `FeedbackDelegate`, and the transaction is sent **to the rater's
+address**, so the registry sees the rater while the facilitator still pays the
+gas.
+
+```python
+from uvd_x402_sdk import (
+    Erc8004Client,
+    RelayAuthorizationParams,
+    supports_relayed_feedback,
+)
+
+async with Erc8004Client() as client:
+    if not supports_relayed_feedback("base"):
+        ...  # fall back to submit_feedback(); the facilitator is the author
+
+    prep = await client.prepare_relayed_feedback(
+        network="base",
+        agent_id=18896,
+        rater=rater_address,     # who the chain will record as the author
+        value=95,
+        tag1="quality",
+    )
+
+    # 1. Sign the digest with the RATER's key (EIP-191 personal-sign).
+    signature = sign_message(prep.digest)
+
+    # 2. Only the first time this rater rates: point their EOA at the delegate.
+    authorization = None
+    if not prep.delegated:
+        authorization = RelayAuthorizationParams(
+            chainId=prep.chain_id,       # 0 is EIP-7702's wildcard: every chain
+            address=prep.delegate,
+            nonce=prep.account_nonce,
+            **sign_authorization(prep.chain_id, prep.delegate, prep.account_nonce),
+        )
+
+    result = await client.submit_relayed_feedback(
+        network="base",
+        agent_id=18896,
+        rater=rater_address,
+        value=95,
+        tag1="quality",
+        deadline=prep.deadline,          # short by design; past it, refused
+        nonce=prep.nonce,
+        signature=signature,
+        authorization=authorization,
+    )
+```
+
+Pass the **same** feedback parameters, `deadline` and `nonce` back to
+`submit_relayed_feedback()`. They are not redundant: the facilitator rebuilds
+the registry calldata from them and refuses to relay anything the rater's
+signature does not cover.
+
+Available on the nine networks in `RELAYED_FEEDBACK_NETWORKS` -- the eight
+mainnets with a deployed `FeedbackDelegate` (base, ethereum, polygon, arbitrum,
+optimism, celo, bsc, monad) plus base-sepolia. **Avalanche is not one of them
+and is not waiting to become one**: its C-Chain rejects the transaction type
+itself (`-32000 transaction type not supported`), so anchor the rating on a
+chain that supports EIP-7702 -- the payment stays where it was made.
+
+Requires facilitator v1.93.0+ for the mainnets; base-sepolia since v1.74.0.
+
 ## Server-Side Signing
 
 Create signed EIP-3009 payment headers from your backend without a browser wallet. Useful for server-to-server x402 payments, automated agents, and testing.
