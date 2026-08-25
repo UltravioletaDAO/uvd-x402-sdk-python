@@ -513,6 +513,21 @@ class PrepareRelayFeedbackResponse(BaseModel):
     recovers an address that is not the rater. Wallets sign
     :attr:`signing_payload`.
     """
+    typed_data: Optional[dict[str, Any]] = Field(None, alias="typedData")
+    """The full ``eth_signTypedData_v4`` payload. **v4 delegates only.**
+
+    Present exactly when the delegate deployed on that chain is v4, which the
+    facilitator reads from the chain per request rather than assuming from a
+    release. **When it is present, sign IT** — the wallet renders the agent, the
+    score, the tags and the deadline as named fields, so the rater sees what
+    they authorise instead of a hex blob.
+
+    v4 carries no :attr:`signing_payload` and needs none: ``signTypedData`` has
+    no envelope to apply twice, which is the entire class of bug that kept the
+    v3 rail at zero signatures for days.
+
+    Requires facilitator v1.96.0+.
+    """
     signing_payload: Optional[str] = Field(None, alias="signingPayload")
     """The same hash with the envelope still OFF -- what a wallet signs.
 
@@ -1017,6 +1032,11 @@ class Erc8004Client:
              ``signing_payload``. ``personal_sign`` adds the envelope itself,
              so signing ``digest`` with it wraps the value TWICE and recovers a
              stranger -- the only symptom is ``relay_bad_signature``.
+
+           **Unless ``typed_data`` came back**, which means the chain runs a v4
+           delegate. Then sign THAT with ``eth_signTypedData_v4`` and ignore the
+           other two: it is the only form the rater can actually read, and it
+           has no envelope ambiguity at all.
         2. If ``delegated`` is ``False``, also produce an EIP-7702
            authorization over ``(chain_id, delegate, account_nonce)``.
         3. Hand both to :meth:`submit_relayed_feedback` together with the SAME

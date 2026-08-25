@@ -121,6 +121,53 @@ def test_the_signing_payload_is_the_digest_without_the_envelope():
     )
 
 
+def test_a_v4_delegate_returns_typed_data_and_no_signing_payload():
+    """Two versions on the wire, and they are mutually exclusive by design.
+
+    A v4 chain sends ``typedData`` and no ``signingPayload``: ``signTypedData``
+    has no envelope to apply twice, so the field that exists only to anticipate
+    that envelope has nothing to do. A client that keeps reaching for
+    ``signing_payload`` on a v4 chain gets ``None`` and must fall through to the
+    typed data, not to ``digest``.
+    """
+    parsed = PrepareRelayFeedbackResponse.model_validate({
+        "success": True,
+        "digest": "0x" + "cd" * 32,
+        "typedData": {
+            "primaryType": "RelayedGiveFeedback",
+            "domain": {"name": "FeedbackDelegate", "version": "1", "chainId": 8453,
+                       "verifyingContract": "0x09C32b8FC0a94A1EeD424499A42180e29667bEeE"},
+            "types": {"RelayedGiveFeedback": [{"name": "registry", "type": "address"}]},
+            "message": {"agentId": "2106"},
+        },
+        "delegated": True,
+        "chainId": 8453,
+        "network": "base",
+    })
+    assert parsed.typed_data is not None
+    assert parsed.typed_data["primaryType"] == "RelayedGiveFeedback"
+    # The domain names the RATER, not the delegate: with the delegate as
+    # verifyingContract every account pointed at it would share a domain and the
+    # signature would replay across them.
+    assert parsed.typed_data["domain"]["verifyingContract"] == (
+        "0x09C32b8FC0a94A1EeD424499A42180e29667bEeE"
+    )
+    assert parsed.signing_payload is None
+
+
+def test_a_v3_delegate_returns_no_typed_data():
+    parsed = PrepareRelayFeedbackResponse.model_validate({
+        "success": True,
+        "digest": "0x" + "cd" * 32,
+        "signingPayload": "0x" + "ab" * 32,
+        "delegated": True,
+        "chainId": 84532,
+        "network": "base-sepolia",
+    })
+    assert parsed.typed_data is None
+    assert parsed.signing_payload == "0x" + "ab" * 32
+
+
 def test_an_older_facilitator_omits_the_signing_payload():
     """It must parse as absent, not crash -- and never silently equal `digest`.
 
