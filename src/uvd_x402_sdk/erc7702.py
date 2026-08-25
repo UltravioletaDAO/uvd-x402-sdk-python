@@ -52,17 +52,48 @@ from typing import Any, Callable, Optional, Union
 
 __all__ = [
     "DELEGATE_PREFIX",
+    "SMA_WRAP_TARGETS",
     "DelegationResolver",
     "delegate_target",
     "eip712_digest",
     "is_delegated",
+    "needs_account_wrap",
     "replay_safe_typed_data",
+    "resolve_delegation",
     "rpc_delegation_resolver",
     "sign_eip3009_for_delegated",
     "wrap_signature",
 ]
 
 DELEGATE_PREFIX = "ef0100"          # EIP-7702 delegation designator
+
+# THE WRAP IS DELEGATE-SPECIFIC, NOT "delegated == wrap" (fixed 2026-08-25).
+# The replay-safe hash + fallback locator in `sign_eip3009_for_delegated` is the dialect
+# of ONE implementation: Alchemy's SemiModularAccount7702. Applying it to any OTHER
+# delegate produces an invalid ERC-1271 signature. This bit us the day an agent got
+# delegated to a plain-ECDSA 1271 account (Execution Market's FeedbackDelegate, which
+# does `ECDSA.recover(hash, sig) == address(this)`): the wrap turned a settleable escrow
+# into an unsettleable one — the SAME silent-at-lock-time failure the wrap was built to
+# fix, now caused by over-applying it.
+#
+# So the wrap gates on the TARGET: only a known Alchemy SMA implementation needs it.
+# Every other delegate signs PLAIN (the standard 1271 "smart-EOA" pattern accepts the
+# EOA's own ECDSA), and if some exotic future delegate needs a third dialect it fails
+# VISIBLY at lock time — never silently. The set is a frozenset so a caller can extend
+# it if another wrap-requiring implementation appears, without editing this module.
+SMA_WRAP_TARGETS = frozenset({
+    "0x69007702764179f14f51cdce752f4f775d74e139",   # Alchemy SemiModularAccount7702
+})
+
+
+def needs_account_wrap(target: Optional[str]) -> bool:
+    """``True`` only when this delegate target needs the account-envelope wrap.
+
+    Today that means "is an Alchemy SMA". A plain EOA (``target is None``) and any
+    other delegate (FeedbackDelegate, a standard 1271 smart-EOA) do NOT — they take the
+    ordinary ECDSA signature.
+    """
+    return bool(target) and target.lower() in SMA_WRAP_TARGETS
 
 # Account fallback-validation locator + final-segment marker + EOA signature type.
 #   0x00 00000000 : validation type 0, entity id 0 (FALLBACK_VALIDATION_LOOKUP_KEY)
@@ -72,8 +103,12 @@ _WRAP_PREFIX = bytes([0x00, 0, 0, 0, 0, 0xFF, 0x00])
 
 _REPLAY_SAFE_TYPES = {"ReplaySafeHash": [{"name": "hash", "type": "bytes32"}]}
 
-#: ``(address, network) -> True | False | None``. ``None`` means UNKNOWN, never "no".
-DelegationResolver = Callable[[str, str], Optional[bool]]
+#: ``(address, network) -> target | True | False | None``. Four answers, richer than a
+#: bool on purpose (see 2026-08-25 fix): a resolver MAY return the delegate **target
+#: address** (a ``str``) instead of just ``True`` — that is what lets the caller pick the
+#: right signing dialect (SMA wrap vs plain). ``True`` = delegated, target unknown;
+#: ``False`` = not delegated; ``None`` = UNKNOWN (unreadable chain), never "no".
+DelegationResolver = Callable[[str, str], "Optional[bool] | str"]
 
 
 def delegate_target(code: Union[bytes, bytearray, str, None]) -> Optional[str]:
@@ -190,10 +225,49 @@ def rpc_delegation_resolver(
             except Exception:  # noqa: BLE001 - rotate to the next endpoint
                 continue
             if isinstance(code, str) and code.startswith("0x"):
-                return delegate_target(code) is not None
+                # Return the TARGET (a str) when delegated, so the caller can pick the
+                # signing dialect; ``False`` for a plain EOA (readable, no delegation).
+                return delegate_target(code) or False
         return None
 
     return _resolver
+
+
+def resolve_delegation(
+    address: str,
+    network: str,
+    resolver: Optional[DelegationResolver] = None,
+) -> "tuple[Optional[bool], Optional[str]]":
+    """``(delegated, target)`` for one address on one network.
+
+    - ``(None, None)``  — unknown (no resolver, or an unreadable chain). NEVER "no".
+    - ``(False, None)`` — a plain EOA.
+    - ``(True, "0x…")`` — delegated, and we know to WHAT (pick the dialect from it).
+    - ``(True, None)``  — delegated, target unknown (a legacy bool-only resolver). The
+      caller keeps the pre-2026-08-25 behaviour for this case, because that is what such
+      a resolver always got; upgrade the resolver to return the target to get the
+      dialect-correct path.
+    """
+    if resolver is None:
+        return (None, None)
+    try:
+        v = resolver(address, network)
+    except Exception:  # noqa: BLE001 - a broken resolver is UNKNOWN, not a negative
+        return (None, None)
+    if isinstance(v, str):
+        t = v.strip()
+        # Only a real 20-byte address counts as a target. A non-address string is
+        # garbage, and garbage is UNKNOWN — never a delegation verdict we sign on.
+        if t.lower().startswith("0x") and len(t) == 42:
+            try:
+                int(t, 16)
+                return (True, t)
+            except ValueError:
+                pass
+        return (None, None)
+    if isinstance(v, bool):
+        return (v, None)
+    return (None, None)
 
 
 def is_delegated(
@@ -205,11 +279,6 @@ def is_delegated(
 
     Without a resolver the answer is ``None``, never ``False``: "nobody asked" and "the
     address is a plain EOA" are different facts and only one of them is safe to sign on.
+    A resolver that returns the target **string** counts as ``True`` (delegated).
     """
-    if resolver is None:
-        return None
-    try:
-        v = resolver(address, network)
-    except Exception:  # noqa: BLE001 - a broken resolver is UNKNOWN, not a negative
-        return None
-    return v if isinstance(v, bool) else None
+    return resolve_delegation(address, network, resolver)[0]

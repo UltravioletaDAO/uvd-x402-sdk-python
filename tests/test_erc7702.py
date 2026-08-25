@@ -212,3 +212,88 @@ def test_una_cadena_DESCONOCIDA_avisa_pero_no_bloquea(caplog):
         amount_usd=0.05, deadline=None, wallet=w)
     assert w.llamadas, "una cadena desconocida sí se firma"
     assert any("UNVERIFIED chain" in r.getMessage() for r in caplog.records)
+
+
+# ── El dialecto depende del TARGET, no de "delegado sí/no" (fix 2026-08-25) ──
+# El wrap del account-envelope es de UNA implementacion (el SMA de Alchemy). Aplicarlo a
+# cualquier otro delegate produce una firma ERC-1271 invalida — el mismo fallo mudo-al-
+# lock que el wrap venia a arreglar, ahora por sobre-aplicarlo. Nos paso el dia que un
+# agente quedo delegado al FeedbackDelegate de Execution Market (que valida ECDSA plana).
+
+FEEDBACK_DELEGATE = "0xa7ca33CaE3c5890F25DfD08079DB82701C9deBc6"
+SMA_ALCHEMY = "0x69007702764179f14f51cdce752f4f775d74e139"
+
+
+def test_solo_el_SMA_de_alchemy_necesita_el_wrap():
+    assert erc7702.needs_account_wrap(SMA_ALCHEMY) is True
+    assert erc7702.needs_account_wrap(SMA_ALCHEMY.upper()) is True  # case-insensitive
+    # el FeedbackDelegate y una EOA pura NO se envuelven — firman plano
+    assert erc7702.needs_account_wrap(FEEDBACK_DELEGATE) is False
+    assert erc7702.needs_account_wrap(None) is False
+
+
+def test_resolve_delegation_devuelve_target_cuando_el_resolver_lo_da():
+    # un resolver que devuelve la direccion del target
+    d, t = erc7702.resolve_delegation("0xabc", "base", lambda a, n: FEEDBACK_DELEGATE)
+    assert d is True and t == FEEDBACK_DELEGATE
+
+
+def test_resolve_delegation_bool_no_trae_target():
+    # un resolver LEGACY (bool) sigue funcionando: delegado, target desconocido
+    d, t = erc7702.resolve_delegation("0xabc", "base", lambda a, n: True)
+    assert d is True and t is None
+    d, t = erc7702.resolve_delegation("0xabc", "base", lambda a, n: False)
+    assert d is False and t is None
+
+
+def test_un_str_que_no_es_direccion_sigue_siendo_DESCONOCIDO():
+    # preserva la semantica vieja: basura del resolver != veredicto
+    d, t = erc7702.resolve_delegation("0xabc", "base", lambda a, n: "sí")
+    assert d is None and t is None
+    assert erc7702.is_delegated("0xabc", "base", lambda a, n: "sí") is None
+
+
+def test_el_rpc_resolver_devuelve_el_target(monkeypatch):
+    # code 7702 -> el resolver por RPC ahora informa el target (no solo bool)
+    import httpx
+
+    class _R:
+        def __init__(self, code): self._c = code
+        def raise_for_status(self): pass
+        def json(self): return {"result": self._c}
+
+    code = "0xef0100" + SMA_ALCHEMY[2:] + "00"
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _R(code))
+    r = erc7702.rpc_delegation_resolver(["http://x"])
+    assert r("0xpayer", "base") == SMA_ALCHEMY          # el target, no True
+    # una EOA pura (code 0x) -> False, no None
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _R("0x"))
+    assert r("0xpayer", "base") is False
+
+
+def test_e2e_el_dialecto_se_elige_por_target():
+    """La prueba que importa: mismo payer delegado, dos targets, DOS firmas distintas.
+
+    Es lo que el fix garantiza end-to-end sin tocar la red: a un delegate SMA se le
+    aplica el wrap (locator + replay-safe); a un FeedbackDelegate se le da la firma
+    plana. Antes se envolvia a los dos y el segundo era unsettleable.
+    """
+    class _Wallet:
+        def sign_typed_data(self, td):
+            # devuelve una firma reconocible segun el dominio que le pidan firmar
+            dom = td.get("domain", td) if isinstance(td, dict) else {}
+            vc = str((dom.get("domain") or dom).get("verifyingContract", "")).lower()
+            # el wrap firma sobre el dominio de LA CUENTA (payer); la plana sobre USDC
+            marca = "aa" if "replaysafe-marker" else "bb"
+            return {"signature": "0x" + "cc" * 65}
+
+    # camino SMA -> pasa por sign_eip3009_for_delegated -> wrap_signature (prefijo locator)
+    inner = b"\x11" * 32
+    envuelta = erc7702.sign_eip3009_for_delegated(
+        wallet=type("W", (), {"sign_typed_data": lambda self, td: {"signature": "0x" + "cc" * 65}})(),
+        inner_digest=inner, chain_id=8453, account="0x" + "22" * 20)
+    assert envuelta == erc7702.wrap_signature("0x" + "cc" * 65)
+    assert envuelta.startswith("0x0000000000ff00")   # el locator del fallback (7 bytes)
+
+    # y needs_account_wrap discrimina los dos targets
+    assert erc7702.needs_account_wrap(SMA_ALCHEMY) and not erc7702.needs_account_wrap(FEEDBACK_DELEGATE)

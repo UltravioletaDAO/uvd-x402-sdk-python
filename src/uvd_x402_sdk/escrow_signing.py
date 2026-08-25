@@ -430,7 +430,13 @@ def build_escrow_pre_auth(
     # THREE STATES, and the third is the one that matters: an UNKNOWN delegation is
     # NOT "not delegated". Collapsing None to False is exactly how this survived eight
     # days — signing raw for an account that can never settle it, silently.
-    delegated = _erc7702.is_delegated(payer, network, delegation_resolver)
+    #
+    # AND THE DIALECT DEPENDS ON THE TARGET (fixed 2026-08-25). "Delegated" is not one
+    # signature scheme: the account-envelope wrap is Alchemy-SMA-specific. A delegate
+    # that validates plain ECDSA via ERC-1271 (Execution Market's FeedbackDelegate, and
+    # the standard 1271 smart-EOA pattern) needs the ORDINARY signature — wrapping it is
+    # as unsettleable as signing raw for an SMA. So gate the wrap on the target.
+    delegated, target = _erc7702.resolve_delegation(payer, network, delegation_resolver)
     if delegated is None and delegation_resolver is not None:
         raise ValueError(
             f"could not determine whether {payer} is EIP-7702-delegated on "
@@ -438,7 +444,11 @@ def build_escrow_pre_auth(
             f"authorization blindly: the wrong dialect is unsettleable on-chain and "
             f"the failure only shows up at lock time. Retry when the chain is readable."
         )
-    if delegated:
+    if delegated and (_erc7702.needs_account_wrap(target) or target is None):
+        # SMA-wrap: the known Alchemy account, OR a legacy bool-only resolver that could
+        # not tell us the target (target is None) — for which we keep the pre-fix
+        # behaviour rather than silently changing what those callers got. A resolver that
+        # returns the target lands a non-SMA delegate in the `else` (plain) branch below.
         inner = _erc7702.eip712_digest(typed["domain"], typed["types"], typed["message"])
         signature = _erc7702.sign_eip3009_for_delegated(
             wallet=wallet, inner_digest=inner,
@@ -446,6 +456,8 @@ def build_escrow_pre_auth(
         )
         signed = {"signature": signature}
     else:
+        # Plain ECDSA — a non-delegated EOA, OR a delegate that accepts the EOA's own
+        # signature via ERC-1271 (FeedbackDelegate et al.).
         signed = wallet.sign_typed_data(typed)
 
     # Raw JSON (NOT base64): the backend relays this verbatim to the
