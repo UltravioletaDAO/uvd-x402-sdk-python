@@ -1343,8 +1343,18 @@ async with Erc8004Client() as client:
         tag1="quality",
     )
 
-    # 1. Sign the digest with the RATER's key (EIP-191 personal-sign).
-    signature = sign_message(prep.digest)
+    # 1. Sign with the RATER's key. WHICH value you sign depends on HOW you
+    #    sign it -- get this wrong and you produce a well-formed signature that
+    #    authorises nobody, and the only symptom is `relay_bad_signature`.
+    #
+    #    `prep.digest` already carries the EIP-191 envelope. A raw key signs it
+    #    as a prehash; a wallet's personal_sign would add the envelope a SECOND
+    #    time, so wallets sign `prep.signing_payload` instead.
+    from eth_account import Account
+
+    signature = Account.unsafe_sign_hash(prep.digest, rater_key).signature.hex()
+    # ...or, from a browser/mobile wallet:
+    #   signature = await wallet.personal_sign(prep.signing_payload)
 
     # 2. Only the first time this rater rates: point their EOA at the delegate.
     authorization = None

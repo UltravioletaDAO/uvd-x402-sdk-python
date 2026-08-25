@@ -504,7 +504,27 @@ class PrepareRelayFeedbackResponse(BaseModel):
     data: Optional[str] = None
     """Registry calldata the rater is authorising, hex-encoded."""
     digest: Optional[str] = None
-    """EIP-191 digest to sign with the rater's key."""
+    """The value the rater's signature must recover against.
+
+    **The EIP-191 envelope is already applied here.** A holder of a raw key
+    signs this directly as a prehash (``eth_account``'s
+    ``Account.unsafe_sign_hash``). A WALLET must not be handed this value:
+    ``personal_sign`` applies the envelope itself, so it gets wrapped twice and
+    recovers an address that is not the rater. Wallets sign
+    :attr:`signing_payload`.
+    """
+    signing_payload: Optional[str] = Field(None, alias="signingPayload")
+    """The same hash with the envelope still OFF -- what a wallet signs.
+
+    ``keccak256(b"\\x19Ethereum Signed Message:\\n32" + signing_payload)`` is
+    exactly :attr:`digest`, so a client can check the two against each other
+    rather than rebuilding the preimage from ``data``.
+
+    Requires facilitator v1.95.0+. Older facilitators omit it; a client that
+    needs it should fail loudly rather than fall back to signing ``digest``
+    through a wallet, which produces a well-formed signature that authorises
+    nobody.
+    """
     deadline: Optional[int] = None
     """Unix seconds after which the authorisation is void.
 
@@ -986,7 +1006,17 @@ class Erc8004Client:
 
         What the caller does with the answer:
 
-        1. Sign ``digest`` with the rater's key (EIP-191 personal-sign).
+        1. Produce the rater's signature. **Which value you sign depends on
+           how you sign it**, and getting this wrong yields a well-formed
+           signature that authorises nobody:
+
+           - raw key: sign ``digest`` as a **prehash**
+             (``Account.unsafe_sign_hash(prep.digest)``). ``digest`` already
+             carries the EIP-191 envelope.
+           - wallet (browser, mobile, custodian): ``personal_sign`` over
+             ``signing_payload``. ``personal_sign`` adds the envelope itself,
+             so signing ``digest`` with it wraps the value TWICE and recovers a
+             stranger -- the only symptom is ``relay_bad_signature``.
         2. If ``delegated`` is ``False``, also produce an EIP-7702
            authorization over ``(chain_id, delegate, account_nonce)``.
         3. Hand both to :meth:`submit_relayed_feedback` together with the SAME
@@ -1109,7 +1139,10 @@ class Erc8004Client:
                 it the facilitator refuses rather than relaying a stale
                 authorisation.
             nonce: The single-use nonce ``prepare`` returned.
-            signature: The rater's EIP-191 signature over ``digest``.
+            signature: The rater's signature. It must recover to ``rater``
+                over ``digest`` -- so either a raw-key prehash signature over
+                ``digest``, or a wallet ``personal_sign`` over
+                ``signing_payload``. Not ``personal_sign`` over ``digest``.
             authorization: EIP-7702 authorization, when the account is not yet
                 delegated.
             value_decimals: Decimal places for ``value`` (0-18).

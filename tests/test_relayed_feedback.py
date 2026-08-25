@@ -31,6 +31,7 @@ import pytest
 from uvd_x402_sdk.erc8004 import (
     RELAYED_FEEDBACK_NETWORKS,
     Erc8004Client,
+    PrepareRelayFeedbackResponse,
     RelayAuthorizationParams,
     supports_relayed_feedback,
 )
@@ -82,6 +83,58 @@ def _client(handler) -> Erc8004Client:
     client = Erc8004Client(base_url="https://facilitator.example")
     client._client = httpx.AsyncClient(transport=transport)
     return client
+
+
+def test_the_signing_payload_is_the_digest_without_the_envelope():
+    """The two fields differ by exactly the EIP-191 envelope, and both are served.
+
+    `digest` is what the signature must recover against and ALREADY carries the
+    envelope; `signing_payload` is the same hash before it. A raw key signs the
+    first as a prehash; a wallet's ``personal_sign`` signs the second, because
+    ``personal_sign`` applies the envelope itself.
+
+    Signing ``digest`` through a wallet wraps it TWICE and recovers a stranger.
+    That is not hypothetical: it is what every wallet surface did, and what THIS
+    SDK's own documentation prescribed until 2026-08-25, which is why the rail
+    ran for days without a single successful signed rating.
+    """
+    from eth_hash.auto import keccak
+
+    payload = bytes.fromhex("16f16acc" + "11" * 30)
+    digest = keccak(b"\x19Ethereum Signed Message:\n32" + payload)
+
+    parsed = PrepareRelayFeedbackResponse.model_validate({
+        "success": True,
+        "digest": "0x" + digest.hex(),
+        "signingPayload": "0x" + payload.hex(),
+        "delegated": True,
+        "chainId": 8453,
+        "network": "base",
+    })
+    assert parsed.signing_payload == "0x" + payload.hex()
+    assert parsed.digest == "0x" + digest.hex()
+    # The relationship a client can check instead of rebuilding the preimage.
+    assert (
+        keccak(b"\x19Ethereum Signed Message:\n32"
+               + bytes.fromhex(parsed.signing_payload[2:])).hex()
+        == parsed.digest[2:]
+    )
+
+
+def test_an_older_facilitator_omits_the_signing_payload():
+    """It must parse as absent, not crash -- and never silently equal `digest`.
+
+    A client that needs it should fail loudly. Defaulting it to `digest` would
+    hand a wallet the value that cannot be signed.
+    """
+    parsed = PrepareRelayFeedbackResponse.model_validate({
+        "success": True,
+        "digest": "0x" + "ab" * 32,
+        "delegated": True,
+        "chainId": 8453,
+        "network": "base",
+    })
+    assert parsed.signing_payload is None
 
 
 @pytest.mark.asyncio
