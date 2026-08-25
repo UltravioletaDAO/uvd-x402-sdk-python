@@ -1326,6 +1326,133 @@ class Erc8004Client:
         response.raise_for_status()
         return response.json()
 
+    async def prepare_relayed_response(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        responder: str,
+        client_address: str,
+        feedback_index: int,
+        response_uri: str,
+        *,
+        response_hash: Optional[str] = None,
+        x402_version: int = 1,
+    ) -> PrepareRelayFeedbackResponse:
+        """Ask what the RESPONDER must sign to author a response on-chain.
+
+        The mirror of :meth:`prepare_relayed_feedback`, for the other write the
+        registry accepts from anybody. ``appendResponse`` is not agent-only --
+        the registry takes it from any address -- so on the plain
+        :meth:`append_response` route the ``responder`` recorded on-chain is the
+        FACILITATOR. That does not destroy anyone's reputation the way a revoke
+        would; it ties the facilitator's on-chain identity to a third party's
+        content, which is its own kind of wrong.
+
+        **v4 delegates only.** The v3 delegate accepts exactly two selectors and
+        ``appendResponse`` is not one of them, so a v3 network answers 400
+        ``relay_response_needs_v4`` rather than silently falling back to the
+        route this replaces. Check with :func:`supports_relayed_feedback` for the
+        network, and be ready for that refusal on a chain still running v3.
+
+        Args:
+            network: An EVM network whose delegate is v4.
+            agent_id: The agent the feedback was about.
+            responder: The address that will appear on-chain as the author.
+            client_address: WHOSE feedback is being answered. It is inside the
+                signed struct: without it one signature would answer any
+                client's rating at that index.
+            feedback_index: Which feedback (1-indexed). Also inside the struct,
+                for the same reason.
+            response_uri: URI of the response content.
+            response_hash: Keccak256 hash of the response content.
+            x402_version: x402 protocol version.
+
+        Returns:
+            The typed data to sign, plus whether an EIP-7702 authorization is
+            still needed.
+        """
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "responder": responder,
+            "agentId": agent_id,
+            "clientAddress": client_address,
+            "feedbackIndex": feedback_index,
+            "responseUri": response_uri,
+        }
+        if response_hash is not None:
+            body["responseHash"] = response_hash
+
+        url = f"{self.base_url}/feedback/response/evm/prepare"
+        try:
+            response = await self._client.post(url, json=body)
+            response.raise_for_status()
+            return PrepareRelayFeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return PrepareRelayFeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return PrepareRelayFeedbackResponse(
+                success=False, error=str(e), network=network
+            )
+
+    async def submit_relayed_response(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        responder: str,
+        client_address: str,
+        feedback_index: int,
+        response_uri: str,
+        *,
+        deadline: int,
+        nonce: str,
+        signature: str,
+        response_hash: Optional[str] = None,
+        authorization: Optional[RelayAuthorizationParams] = None,
+        x402_version: int = 1,
+    ) -> FeedbackResponse:
+        """Relay a responder-authored response; the facilitator pays the gas.
+
+        Pass back the same parameters, ``deadline`` and ``nonce`` that
+        :meth:`prepare_relayed_response` returned: the facilitator rebuilds the
+        struct from them and refuses to relay anything the signature does not
+        cover.
+        """
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "responder": responder,
+            "agentId": agent_id,
+            "clientAddress": client_address,
+            "feedbackIndex": feedback_index,
+            "responseUri": response_uri,
+            "deadline": deadline,
+            "nonce": nonce,
+            "signature": signature,
+        }
+        if response_hash is not None:
+            body["responseHash"] = response_hash
+        if authorization is not None:
+            body["authorization"] = authorization.model_dump(by_alias=True)
+
+        url = f"{self.base_url}/feedback/response/evm/submit"
+        try:
+            response = await self._client.post(url, json=body)
+            response.raise_for_status()
+            return FeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return FeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return FeedbackResponse(success=False, error=str(e), network=network)
+
     async def append_response(
         self,
         network: Erc8004Network,
@@ -1340,8 +1467,22 @@ class Erc8004Client:
         """
         Append a response to existing feedback.
 
-        Allows agents to respond to feedback they received.
-        Only the agent (identity owner) can append responses.
+        .. deprecated::
+            On this route the facilitator is the AUTHOR: the registry records
+            ``msg.sender`` as the ``responder``, and that is the facilitator's
+            wallet. Where the delegate is **v4**, use
+            :meth:`prepare_relayed_response` + :meth:`submit_relayed_response`
+            instead, which record the RESPONDER. This route still works and is
+            the only one available where the delegate is still v3, since v3
+            accepts two selectors and ``appendResponse`` is not one of them.
+
+        .. warning::
+            **This is NOT agent-only**, despite what this docstring claimed
+            until 2026-08-25. Verified on-chain on 2026-08-18: the registry
+            accepts ``appendResponse`` from ANY address. There is no
+            identity-owner check, here or in the contract. Anyone can append a
+            response to anyone's feedback, and on this route it is signed by the
+            facilitator.
 
         Args:
             network: Network where feedback was submitted
