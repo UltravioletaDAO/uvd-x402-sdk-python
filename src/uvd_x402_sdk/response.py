@@ -33,6 +33,9 @@ def create_402_response(
     config: X402Config,
     message: Optional[str] = None,
     resource_description: Optional[str] = None,
+    *,
+    omit_unused_solana_facilitator: bool = False,
+    require_recipient: bool = False,
 ) -> Dict[str, Any]:
     """
     Create a standard 402 Payment Required response body.
@@ -45,6 +48,23 @@ def create_402_response(
         config: X402Config with recipient addresses
         message: Optional custom message (default: generated)
         resource_description: Optional description of what's being purchased
+        omit_unused_solana_facilitator: When True, the `facilitator` field (a
+            Solana fee-payer pubkey) is omitted unless some OFFERED and enabled
+            network is actually SVM. Default False keeps the historical body
+            byte-for-byte. Why it exists (measured in production, describe.net
+            2026-08-11..30): an EVM-only API advertised a base58 Solana
+            fee-payer in every 402 it served -- a field no client of that API
+            could ever use, and a standing source of "is this Solana?"
+            confusion for integrators reading the challenge.
+        require_recipient: When True, the v1 `supportedChains` list only
+            includes networks for which the config actually has a recipient --
+            parity with the v2 builder, which always checks (see
+            create_402_response_v2). Default False keeps the historical body:
+            with the SDK's default 25-network config, the v1 challenge
+            advertises chains the treasury cannot receive on, and consumers
+            have been working around it by pre-constraining
+            `supported_networks` (describe.net `build_config` does exactly
+            that).
 
     Returns:
         Dictionary suitable for JSON response body
@@ -76,9 +96,16 @@ def create_402_response(
     # Get supported chain IDs and network names
     supported_chains: List[Union[int, str]] = []
 
+    any_svm_offered = False
     for network_name in config.supported_networks:
         network = get_network(network_name)
         if network and network.enabled and config.is_network_enabled(network_name):
+            if require_recipient and not config.get_recipient(network_name):
+                # Opt-in parity with v2: a chain nobody can pay the treasury
+                # on is not "supported", it is an advertisement of a dead end.
+                continue
+            if network.network_type == NetworkType.SVM:
+                any_svm_offered = True
             if network.network_type == NetworkType.EVM and network.chain_id > 0:
                 supported_chains.append(network.chain_id)
             else:
@@ -95,7 +122,11 @@ def create_402_response(
         error="Payment required",
         recipient=config.recipient_evm,  # Default for backward compatibility
         recipients=recipients if recipients else None,
-        facilitator=config.facilitator_solana,
+        facilitator=(
+            None
+            if omit_unused_solana_facilitator and not any_svm_offered
+            else config.facilitator_solana
+        ),
         amount=str(amount),
         token="USDC",
         supportedChains=supported_chains,
@@ -242,8 +273,12 @@ class Payment402Builder:
 
 
 def bazaar_extension(
-    input_schema: Dict[str, Any],
-    output_example: Dict[str, Any],
+    input_schema: Optional[Dict[str, Any]] = None,
+    output_example: Optional[Dict[str, Any]] = None,
+    *,
+    method: Optional[str] = None,
+    query_params: Optional[Dict[str, Any]] = None,
+    discoverable: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Build the `bazaar` extension block for an x402 v2 challenge.
@@ -256,9 +291,31 @@ def bazaar_extension(
     402milly shipped this by hand and it is what made the resource classifiable
     by x402scan's crawler.
 
+    Two shapes, and the caller picks by what the endpoint IS:
+
+    * **Body shape** (historical, unchanged): pass ``input_schema`` -- the
+      JSON Schema of the request body. Calls that only use the two positional
+      arguments produce a dict byte-for-byte identical to every prior version.
+    * **HTTP/GET shape** (new): pass ``method`` (and optionally
+      ``query_params``) for endpoints whose input travels in the path/query,
+      not in a body. This is the form live crawlers already publish (Agent
+      Arena, trust-agent.io: ``{"type": "http", "method": "GET",
+      "queryParams": {...}}``) and the only one usable by a GET-priced API --
+      describe.net documented this exact gap in its paywall for two SDK
+      generations before it landed here.
+
     Args:
-        input_schema: JSON Schema of the request body
+        input_schema: JSON Schema of the request body (body shape)
         output_example: A representative successful response body
+        method: HTTP method for the HTTP shape ("GET", ...). Mutually
+            exclusive with input_schema.
+        query_params: JSON Schema (or plain description map) of the query
+            parameters, for the HTTP shape
+        discoverable: When set, emitted as `"discoverable": <bool>` inside
+            the bazaar block -- the flag crawlers use to index the resource
+
+    Raises:
+        ValueError: if neither shape is complete, or both are mixed
 
     Returns:
         `{"bazaar": {...}}`, ready to pass as `extensions`
@@ -269,16 +326,36 @@ def bazaar_extension(
         ...     output_example={"ok": True},
         ... )
     """
-    return {
-        "bazaar": {
-            "schema": {
-                "properties": {
-                    "input": {"properties": {"body": input_schema}},
-                    "output": {"properties": {"example": output_example}},
-                }
+    if method is not None and input_schema is not None:
+        raise ValueError(
+            "bazaar_extension: pass input_schema (body shape) OR method "
+            "(HTTP shape), not both -- an endpoint has one input channel"
+        )
+    if method is not None:
+        entrada: Dict[str, Any] = {"type": "http", "method": method}
+        if query_params is not None:
+            entrada["queryParams"] = query_params
+    elif input_schema is not None:
+        entrada = {"properties": {"body": input_schema}}
+    else:
+        raise ValueError(
+            "bazaar_extension: neither shape is complete -- pass input_schema "
+            "or method"
+        )
+    if output_example is None:
+        raise ValueError("bazaar_extension: output_example is required")
+
+    bloque: Dict[str, Any] = {
+        "schema": {
+            "properties": {
+                "input": entrada,
+                "output": {"properties": {"example": output_example}},
             }
         }
     }
+    if discoverable is not None:
+        bloque["discoverable"] = discoverable
+    return {"bazaar": bloque}
 
 
 def create_402_response_v2(

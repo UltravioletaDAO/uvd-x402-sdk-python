@@ -71,7 +71,7 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error
 from uvd_x402_sdk.config import (
     X402Config,
     NetworkConfig,
@@ -408,6 +408,7 @@ __all__ = [
     "__version__",
     # Main client
     "X402Client",
+    "is_transient_error",
     # Configuration
     "X402Config",
     "NetworkConfig",

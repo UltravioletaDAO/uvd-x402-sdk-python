@@ -126,6 +126,52 @@ def _is_retryable_settle_error(exc: Exception) -> bool:
     return False
 
 
+def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bool:
+    """Public verdict: is this payment-path failure transient (retry-later) or final?
+
+    The question every x402 SERVER has to answer when the facilitator
+    misbehaves: does this failure mean "the payment was rejected" (answer 402,
+    the client must sign a new authorization) or "I could not find out"
+    (answer 503, the client must retry the SAME credential — never pay twice
+    for one unknown)? Getting it wrong in either direction costs someone
+    money. Until now every consumer wrote its own classifier: describe.net
+    carried `paywall._is_transient` for three SDK generations, and this SDK
+    kept its own private `_is_retryable_settle_error` with a guard the
+    consumers' copies lacked. This merges both criteria in one public place.
+
+    The matrix:
+
+    * ``X402TimeoutError`` -> transient. The facilitator is idempotent per
+      EIP-3009 nonce; re-presenting the same credential is safe.
+    * ``FacilitatorError`` with ``status_code`` None (wrapped transport
+      error), 429, or >=500 -> transient — EXCEPT a 5xx whose body already
+      carries a transaction hash when ``anti_double_settle`` is True (the
+      default): the facilitator can fail AFTER broadcasting, and treating
+      that as retryable risks a double-settle. That guard lived only in the
+      private settle path until now.
+    * Any other ``X402Error`` -> respects ``details["retryable"]`` when the
+      raiser set it; otherwise final.
+    * Non-x402 exceptions -> final (this function judges the payment path,
+      not the world).
+    """
+    if isinstance(exc, X402TimeoutError):
+        return True
+    if isinstance(exc, FacilitatorError):
+        if exc.status_code is None:
+            return True
+        if exc.status_code == 429:
+            return True
+        if exc.status_code >= 500:
+            if anti_double_settle and _facilitator_error_tx_hash(exc) is not None:
+                return False
+            return True
+        return False
+    if isinstance(exc, X402Error):
+        details = getattr(exc, "details", None) or {}
+        return bool(details.get("retryable", False))
+    return False
+
+
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
     """Validate a caller-supplied EIP-712 domain override and normalise it.
 
