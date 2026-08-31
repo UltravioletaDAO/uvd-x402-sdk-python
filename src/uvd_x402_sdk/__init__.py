@@ -183,6 +183,9 @@ from uvd_x402_sdk.facilitator import (
 
 # ERC-8004 Trustless Agents support
 from uvd_x402_sdk.erc8004 import (
+    UVD_FEEDBACK_ROLES,
+    UVD_PRODUCTS,
+    build_uvd_feedback_params,
     Erc8004Client,
     ERC8004_EXTENSION_ID,
     ERC8004_CONTRACTS,
@@ -409,6 +412,9 @@ __all__ = [
     # Main client
     "X402Client",
     "is_transient_error",
+    "build_uvd_feedback_params",
+    "UVD_FEEDBACK_ROLES",
+    "UVD_PRODUCTS",
     # Configuration
     "X402Config",
     "NetworkConfig",

@@ -1,3 +1,4 @@
+import re
 """
 ERC-8004 Trustless Agents client for x402 SDK.
 
@@ -409,6 +410,117 @@ class ReputationResponse(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+# ---------------------------------------------------------------------------
+# TAGGING-UVD: the house convention for feedback tags, as a fail-loud builder.
+#
+# The convention (describe-net docs/TAGGING-UVD.md, 2026-08-28):
+#     tag1 = "{role}:{category}"     e.g. "worker_rating:research"
+#     tag2 = "{product}|{context}"   e.g. "em|0xe4dc963c"
+#
+# Why a HELPER and not four free strings (measured, D7 audit E5, 2026-08-30):
+# every emitter of the DAO hand-builds these strings today, and the reader
+# side (describe.net rating_roles.py) resolves the role by ALLOWLIST — a typo
+# like "dexter:reputation" does not error anywhere, it just publishes as
+# `direction: null` and the rating loses its axis silently. Building through
+# this function turns that silent loss into a ValueError at emit time.
+#
+# THE ROLE ALLOWLIST MIRRORS THE READER, and the reader's rule governs: a role
+# enters when it is EMITTED and ratified, not when it is promised
+# (describe-net rating_roles.ROLES, 5 roles as of 2026-08-29; seller_rating
+# stays out at zero emissions). If you legitimately emit a new role: announce
+# it in #agents FIRST (the reader adds it same-day when measured), then extend
+# this set in the same release that starts emitting.
+# ---------------------------------------------------------------------------
+UVD_FEEDBACK_ROLES: frozenset = frozenset(
+    {
+        "worker_rating",
+        "agent_rating",
+        "executor_rating",
+        "requester_rating",
+        "buyer_rating",
+    }
+)
+UVD_PRODUCTS: frozenset = frozenset({"em", "kk", "mesh", "dn"})
+
+
+def build_uvd_feedback_params(
+    *,
+    agent_id: AgentId,
+    value: int,
+    role: str,
+    category: str,
+    product: str,
+    context: str = "",
+    endpoint: str = "",
+    feedback_uri: str = "",
+    feedback_hash: Optional[str] = None,
+    value_decimals: int = 0,
+    score: Optional[int] = None,
+    proof: Optional["ProofOfPayment"] = None,
+) -> "FeedbackParams":
+    """FeedbackParams with tag1/tag2 built per the TAGGING-UVD convention.
+
+    tag1 = f"{role}:{category}" - tag2 = f"{product}|{context}" (or just the
+    product when context is empty). Fails LOUD on anything the reader side
+    would silently degrade:
+
+    * role not in UVD_FEEDBACK_ROLES -> the reader publishes direction null.
+    * product not in UVD_PRODUCTS -> the house filter cannot attribute it.
+    * ':' inside category, or '|' inside context -> each field would be parsed
+      with the other field's grammar.
+    * feedback_uri without an https host -> issuer_host/issuer provenance is
+      derived from the URI host on the reader side; ipfs:// and data: URIs
+      have no host and lose provenance silently (82.26% of the index carries
+      a resolvable host today - do not join the other 17%).
+    * feedback_hash not 0x + 64 hex, value_decimals outside 0..18.
+    """
+    if role not in UVD_FEEDBACK_ROLES:
+        raise ValueError(
+            f"role {role!r} is not a ratified UVD feedback role "
+            f"({sorted(UVD_FEEDBACK_ROLES)}). The reader resolves roles by "
+            "allowlist: an unknown role publishes as direction null. If this "
+            "is a genuinely new role, announce it in #agents first."
+        )
+    if product not in UVD_PRODUCTS:
+        raise ValueError(
+            f"product {product!r} is not a UVD product ({sorted(UVD_PRODUCTS)})"
+        )
+    if not category or ":" in category or "|" in category:
+        raise ValueError(
+            "category must be non-empty and free of ':' and '|' - they are "
+            "the tag separators"
+        )
+    if "|" in context or ":" in context:
+        raise ValueError("context must be free of '|' and ':'")
+    if feedback_uri:
+        if not feedback_uri.startswith("https://") or len(feedback_uri) <= len(
+            "https://"
+        ):
+            raise ValueError(
+                "feedback_uri must be an absolute https:// URI with a host - "
+                "issuer provenance is derived from it on the reader side"
+            )
+    if feedback_hash is not None and not re.fullmatch(
+        r"0x[0-9a-fA-F]{64}", feedback_hash
+    ):
+        raise ValueError("feedback_hash must match ^0x[0-9a-fA-F]{64}$")
+    if not 0 <= value_decimals <= 18:
+        raise ValueError("value_decimals must be within 0..18")
+
+    return FeedbackParams(
+        agent_id=agent_id,
+        value=value,
+        value_decimals=value_decimals,
+        tag1=f"{role}:{category}",
+        tag2=f"{product}|{context}" if context else product,
+        endpoint=endpoint,
+        feedback_uri=feedback_uri,
+        feedback_hash=feedback_hash,
+        score=score,
+        proof=proof,
+    )
 
 
 class FeedbackParams(BaseModel):
