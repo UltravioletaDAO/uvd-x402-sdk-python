@@ -5,6 +5,7 @@ These exceptions provide clear, actionable error messages for different
 failure scenarios in the payment flow.
 """
 
+from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
 
@@ -205,11 +206,89 @@ class ConfigurationError(X402Error):
         self.config_key = config_key
 
 
+#: Values of the facilitator's ``reason`` field on a 503 from the EVM writer
+#: lease, for which the write provably NEVER RAN. The facilitator returns these
+#: BEFORE it touches the lease holder, so re-presenting the same request is
+#: safe — including a mint, which is the one request that must never be
+#: repeated blind.
+WRITE_NOT_ATTEMPTED_REASONS = frozenset(
+    {
+        "holder_unknown",
+        "forwarding_disabled",
+        "forwarded_but_not_writer",
+        "body_unreadable",
+    }
+)
+
+#: Values of ``reason`` for which the write is AMBIGUOUS: the forward to the
+#: lease holder failed AFTER the attempt, so the holder may have processed the
+#: write and only the response was lost. Treat exactly like a timeout.
+#:
+#: On ``POST /register`` this must never be resolved by re-POSTing the mint.
+#: Resolve it with ``GET /identity/{network}/owner/{recipient}`` first, honouring
+#: that endpoint's 404-vs-503 distinction; re-POSTing an ambiguous mint is what
+#: produced five duplicate agents.
+WRITE_AMBIGUOUS_REASONS = frozenset({"forward_failed"})
+
+#: Hard ceiling, in seconds, on any ``Retry-After`` the SDK will honour by
+#: sleeping or by echoing to a caller. A misconfigured facilitator answering
+#: ``Retry-After: 3600`` must not be able to hang a request for an hour; the
+#: header is advice, not an instruction.
+MAX_RETRY_AFTER_SECONDS = 30.0
+
+
+def parse_retry_after(value: Any) -> Optional[float]:
+    """Parse a ``Retry-After`` header into seconds, clamped to a sane ceiling.
+
+    Returns ``None`` for a missing, non-numeric or non-positive value — the
+    HTTP-date form included, which the facilitator never sends and which is not
+    worth a dependency. Anything above :data:`MAX_RETRY_AFTER_SECONDS` is
+    clamped rather than rejected: a server asking for longer still means
+    "later", and dropping the header entirely would retry immediately.
+    """
+    if value is None:
+        return None
+    try:
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return min(seconds, MAX_RETRY_AFTER_SECONDS)
+
+
+def write_retry_is_safe(reason: Optional[str]) -> bool:
+    """Is a write carrying this facilitator ``reason`` safe to re-send verbatim?
+
+    ``True`` only for the reasons the facilitator emits BEFORE reaching the
+    lease holder. ``False`` for ``forward_failed`` and for anything unknown —
+    a ``reason`` this SDK has never heard of is ambiguous by construction, and
+    guessing optimistically about an unknown is how a duplicate mint happens.
+    """
+    return reason in WRITE_NOT_ATTEMPTED_REASONS
+
+
 class FacilitatorError(X402Error):
     """
     Raised when the facilitator returns an error.
 
     Contains the raw error response from the facilitator for debugging.
+
+    Carries the two fields that decide what a server should answer its buyer:
+
+    * ``reason`` — the facilitator's own machine-readable diagnosis. On a 503
+      from the EVM writer lease this is one of ``holder_unknown``,
+      ``forwarding_disabled``, ``forwarded_but_not_writer``, ``body_unreadable``
+      (the write never ran, retry is safe) or ``forward_failed`` (ambiguous,
+      like a timeout). Use :func:`write_retry_is_safe` rather than comparing
+      strings, and treat an unknown value as ambiguous.
+    * ``retry_after`` — the server's ``Retry-After``, in seconds, already
+      clamped to :data:`MAX_RETRY_AFTER_SECONDS`.
+
+    ``retryable`` mirrors the transient/final verdict so this class stops being
+    the only one in the hierarchy without the attribute that
+    ``LookupInconclusiveError`` and ``RegistrationPendingError`` already carry.
+    A 5xx is transient; a 4xx other than 429 is final.
     """
 
     def __init__(
@@ -217,17 +296,35 @@ class FacilitatorError(X402Error):
         message: str,
         status_code: Optional[int] = None,
         response_body: Optional[str] = None,
+        *,
+        reason: Optional[str] = None,
+        retry_after: Optional[float] = None,
     ) -> None:
+        retryable = (
+            status_code is None or status_code == 429 or status_code >= 500
+        )
+        details: Dict[str, Any] = {
+            "statusCode": status_code,
+            "response": response_body,
+        }
+        # Added only when present, so the ``to_dict()`` of every error raised
+        # before this release keeps exactly the shape it had.
+        if reason is not None:
+            details["reason"] = reason
+        if retry_after is not None:
+            details["retryAfter"] = retry_after
+        if retryable:
+            details["retryable"] = True
         super().__init__(
             message=message,
             code="FACILITATOR_ERROR",
-            details={
-                "statusCode": status_code,
-                "response": response_body,
-            },
+            details=details,
         )
         self.status_code = status_code
         self.response_body = response_body
+        self.reason = reason
+        self.retry_after = retry_after
+        self.retryable = retryable
 
 
 class LookupInconclusiveError(X402Error):
@@ -262,6 +359,52 @@ class LookupInconclusiveError(X402Error):
         self.status_code = status_code
         self.response_body = response_body
         self.retryable = True
+
+
+class WriterUnavailableError(X402Error):
+    """
+    Raised when the facilitator could not reach a verdict because no instance
+    of it held the EVM writer lease.
+
+    **This is not a rejection.** The facilitator answers 503 with
+    ``Retry-After`` and a ``reason``; the credential presented is still valid
+    and the correct recovery is to re-present the SAME request. A server that
+    reports this to its buyer as a 402 makes them sign a second authorization
+    for a payment that was never refused.
+
+    ``safe_to_retry`` is ``False`` for ``forward_failed`` and for any ``reason``
+    this SDK does not recognise: the holder may have executed the write and
+    only the reply was lost. On a mint, resolve that with
+    ``GET /identity/{network}/owner/{recipient}`` before re-sending anything.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        response_body: Optional[str] = None,
+        *,
+        reason: Optional[str] = None,
+        retry_after: Optional[float] = None,
+    ) -> None:
+        super().__init__(
+            message=message,
+            code="WRITER_UNAVAILABLE",
+            details={
+                "statusCode": status_code,
+                "response": response_body,
+                "reason": reason,
+                "retryAfter": retry_after,
+                "retryable": True,
+                "safeToRetry": write_retry_is_safe(reason),
+            },
+        )
+        self.status_code = status_code
+        self.response_body = response_body
+        self.reason = reason
+        self.retry_after = retry_after
+        self.retryable = True
+        self.safe_to_retry = write_retry_is_safe(reason)
 
 
 class RegistrationPendingError(X402Error):
@@ -327,3 +470,55 @@ class TimeoutError(X402Error):
         )
         self.operation = operation
         self.timeout_seconds = timeout_seconds
+
+
+class PaymentExceedsMaxError(X402Error):
+    """
+    Raised by :meth:`X402Client.fetch` when a resource asks for more than the
+    caller authorised via ``max_amount``.
+
+    The buyer loop never pays more than the caller allowed: a 402 whose price
+    exceeds ``max_amount`` raises this instead of silently signing an
+    authorization. It is the seed of a spend guardrail — the caller sets the
+    ceiling, the loop refuses anything above it.
+    """
+
+    def __init__(
+        self,
+        required: "Decimal",
+        max_amount: "Decimal",
+        *,
+        resource: Optional[str] = None,
+    ) -> None:
+        msg = (
+            f"Resource requires {required} but max_amount is {max_amount}"
+            + (f" ({resource})" if resource else "")
+        )
+        super().__init__(
+            message=msg,
+            code="PAYMENT_EXCEEDS_MAX",
+            details={
+                "required": str(required),
+                "maxAmount": str(max_amount),
+                **({"resource": resource} if resource else {}),
+            },
+        )
+        self.required = required
+        self.max_amount = max_amount
+        self.resource = resource
+
+
+class NoAcceptablePaymentError(X402Error):
+    """
+    Raised by :meth:`X402Client.fetch` when a 402 offers no payment option the
+    client can satisfy (no option under ``max_amount``, or the selector returned
+    nothing).
+    """
+
+    def __init__(self, message: str, *, resource: Optional[str] = None) -> None:
+        super().__init__(
+            message=message,
+            code="NO_ACCEPTABLE_PAYMENT",
+            details={"resource": resource} if resource else {},
+        )
+        self.resource = resource

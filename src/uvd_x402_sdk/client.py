@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from decimal import Decimal
-from typing import Optional, Tuple, Dict, Any, Union
+from typing import Optional, Tuple, List, Dict, Any, Union
 
 import httpx
 
@@ -27,6 +27,11 @@ from uvd_x402_sdk.exceptions import (
     UnsupportedNetworkError,
     FacilitatorError,
     TimeoutError as X402TimeoutError,
+    PaymentExceedsMaxError,
+    NoAcceptablePaymentError,
+    MAX_RETRY_AFTER_SECONDS,
+    parse_retry_after,
+    write_retry_is_safe,
 )
 from uvd_x402_sdk.models import (
     PaymentPayload,
@@ -96,6 +101,61 @@ def _facilitator_error_tx_hash(exc: FacilitatorError) -> Optional[str]:
     except (ValueError, TypeError):
         return None
     return _extract_tx_hash_from_body(body)
+
+
+def _facilitator_reason(body: Optional[str]) -> Optional[str]:
+    """Pull the facilitator's ``reason`` out of an error body, tolerantly.
+
+    The 503 the EVM writer lease emits carries ``{"error": ..., "reason": ...}``.
+    Parsed with the same discipline as :func:`_extract_tx_hash_from_body`: no
+    model, no required fields, no exception. A ``reason`` value this SDK has
+    never seen must reach the caller untouched rather than raise here — the
+    facilitator is free to add one, and a parser that refuses unknown values
+    turns a new diagnosis into an outage.
+    """
+    if not body:
+        return None
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    reason = parsed.get("reason")
+    return str(reason) if isinstance(reason, str) and reason else None
+
+
+def _response_retry_after(response: Any) -> Optional[float]:
+    """Read ``Retry-After`` off an httpx response, clamped. Never raises."""
+    try:
+        return parse_retry_after(response.headers.get("retry-after"))
+    except Exception:  # noqa: BLE001 - a header read must not break error handling
+        return None
+
+
+def retry_after_seconds(exc: Exception, default: Optional[float] = None) -> Optional[float]:
+    """The ``Retry-After`` the facilitator asked for, in seconds, or ``default``.
+
+    Already clamped to ``MAX_RETRY_AFTER_SECONDS``: a server answering
+    ``Retry-After: 3600`` gets to say "later", not to hold a request open for an
+    hour.
+    """
+    value = getattr(exc, "retry_after", None)
+    if value is None:
+        details = getattr(exc, "details", None) or {}
+        value = details.get("retryAfter")
+    parsed = parse_retry_after(value)
+    return parsed if parsed is not None else default
+
+
+def facilitator_reason(exc: Exception) -> Optional[str]:
+    """The facilitator's machine-readable ``reason`` for a failure, if it sent one."""
+    value = getattr(exc, "reason", None)
+    if isinstance(value, str) and value:
+        return value
+    details = getattr(exc, "details", None) or {}
+    value = details.get("reason")
+    return value if isinstance(value, str) and value else None
 
 
 def _is_retryable_settle_error(exc: Exception) -> bool:
@@ -170,6 +230,50 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
         details = getattr(exc, "details", None) or {}
         return bool(details.get("retryable", False))
     return False
+
+
+#: What a paywall waits before inviting a retry when the facilitator gave no
+#: ``Retry-After`` of its own. Matches the facilitator's own value for the EVM
+#: writer lease.
+DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS = 5.0
+
+
+def transient_503_response(
+    exc: X402Error,
+    *,
+    default_retry_after: float = DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS,
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Build the ``(body, headers)`` a paywall should answer with a **503**.
+
+    Call it only when :func:`is_transient_error` said the failure was transient.
+    The distinction it serves is the whole point of the pair: a 402 tells the
+    buyer "your payment was REJECTED, sign a new authorization", and a buyer
+    that obeys pays twice for a payment nobody ever refused. A 503 says "no
+    verdict — present the SAME credential again".
+
+    The body keeps the exception's own ``to_dict()`` shape and adds ``retryable``,
+    the facilitator's ``reason`` when it sent one, and ``safeToRetry``:
+    ``False`` for ``forward_failed`` and for any unrecognised ``reason``, where
+    the write may already have executed.
+
+    ``Retry-After`` is the facilitator's value clamped to
+    ``MAX_RETRY_AFTER_SECONDS`` — a misconfigured deployment answering
+    ``Retry-After: 3600`` gets to say "later", not to park a buyer for an hour.
+    """
+    retry_after = retry_after_seconds(exc, default_retry_after) or default_retry_after
+    retry_after = min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
+    reason = facilitator_reason(exc)
+
+    body: Dict[str, Any] = dict(exc.to_dict())
+    body["retryable"] = True
+    body["retryAfter"] = retry_after
+    if reason is not None:
+        body["reason"] = reason
+        body["safeToRetry"] = write_retry_is_safe(reason)
+    return body, {
+        "Content-Type": "application/json",
+        "Retry-After": str(int(retry_after)) if retry_after == int(retry_after) else str(retry_after),
+    }
 
 
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
@@ -739,6 +843,8 @@ class X402Client:
                     message=f"Facilitator verify failed with status {response.status_code}",
                     status_code=response.status_code,
                     response_body=response.text,
+                    reason=_facilitator_reason(response.text),
+                    retry_after=_response_retry_after(response),
                 )
 
             data = response.json()
@@ -818,10 +924,23 @@ class X402Client:
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
                     raise
+                # The server's own Retry-After wins when it asks for LONGER
+                # than the exponential schedule. The writer lease sends
+                # `Retry-After: 5` while the local schedule sleeps 1s then 2s,
+                # so all three attempts used to land inside the single window
+                # the facilitator asked us to wait out, and all three failed.
+                # Still floored by the exponential value and still capped by
+                # _SETTLE_RETRY_MAX_BACKOFF_SECONDS, so a server cannot stretch
+                # one settle indefinitely.
                 backoff = min(float(2 ** (attempt - 1)), _SETTLE_RETRY_MAX_BACKOFF_SECONDS)
+                asked = retry_after_seconds(exc)
+                if asked is not None:
+                    backoff = min(max(backoff, asked), _SETTLE_RETRY_MAX_BACKOFF_SECONDS)
                 logger.warning(
-                    "Settle attempt %d/%d failed (%s) — retrying in %.0fs",
-                    attempt, SETTLE_RETRY_ATTEMPTS, exc, backoff,
+                    "Settle attempt %d/%d failed (%s%s) — retrying in %.0fs",
+                    attempt, SETTLE_RETRY_ATTEMPTS, exc,
+                    f", reason={facilitator_reason(exc)}" if facilitator_reason(exc) else "",
+                    backoff,
                 )
                 time.sleep(backoff)
 
@@ -926,6 +1045,8 @@ class X402Client:
                     message=f"Facilitator settle failed with status {response.status_code}",
                     status_code=response.status_code,
                     response_body=response.text,
+                    reason=_facilitator_reason(response.text),
+                    retry_after=_response_retry_after(response),
                 )
 
             data = response.json()
@@ -1843,3 +1964,182 @@ class X402Client:
         # Encode to base64
         json_bytes = json.dumps(payload).encode("utf-8")
         return base64.b64encode(json_bytes).decode("utf-8")
+
+    # =========================================================================
+    # Buyer loop (payer side): fetch a resource, pay the 402, retry
+    # =========================================================================
+
+    def _parse_402(self, body: Dict[str, Any]) -> Tuple[int, List[Dict[str, Any]]]:
+        """Normalise a 402 body into (x402_version, [payment options]).
+
+        Handles both the spec shape ``{x402Version, accepts: [...]}`` (v1 and v2)
+        and the non-spec shape where a single requirement sits at the top level.
+        Each option is normalised to ``{network, asset, amount, payTo,
+        eip712_domain, raw}`` -- ``amount`` in token base units, ``raw`` the
+        original accept object (echoed verbatim for v2).
+        """
+        version = int(body.get("x402Version", 1))
+        accepts = body.get("accepts")
+        if accepts is None:
+            accepts = [body] if body.get("payTo") else []
+
+        options: List[Dict[str, Any]] = []
+        for entry in accepts:
+            if not isinstance(entry, dict):
+                continue
+            # v1 uses `maxAmountRequired`; v2 PaymentOption uses `amount`.
+            amount = entry.get("amount")
+            if amount is None:
+                amount = entry.get("maxAmountRequired")
+            pay_to = entry.get("payTo")
+            network = entry.get("network")
+            if amount is None or not pay_to or not network:
+                continue
+            options.append(
+                {
+                    "network": network,
+                    "asset": entry.get("asset"),
+                    "amount": str(amount),
+                    "payTo": pay_to,
+                    "eip712_domain": entry.get("extra"),
+                    "raw": entry,
+                }
+            )
+        return version, options
+
+    def _select_payment_option(
+        self,
+        options: List[Dict[str, Any]],
+        token_decimals: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Default selector: the cheapest option, ignoring the ceiling.
+
+        The ``max_amount`` ceiling is NOT applied here on purpose: if even the
+        cheapest option is over budget, the caller wants a clear "this costs
+        more than you allowed" (:class:`PaymentExceedsMaxError`), not a vague
+        "no acceptable option". So this always returns the cheapest, and
+        :meth:`fetch` enforces the ceiling with one explicit check afterwards.
+        """
+        if not options:
+            return None
+        scale = Decimal(10) ** token_decimals
+        return min(options, key=lambda opt: Decimal(opt["amount"]) / scale)
+
+    def fetch(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        max_amount: Optional[Union[Decimal, str, float]] = None,
+        token_type: str = "usdc",
+        token_decimals: int = 6,
+        select: Optional[Any] = None,
+        valid_duration: int = 3600,
+        eip712_domain: Optional[Dict[str, str]] = None,
+        http_client: Optional[httpx.Client] = None,
+        **request_kwargs: Any,
+    ) -> httpx.Response:
+        """Fetch a resource, paying the x402 ``402`` challenge if there is one.
+
+        The BUYER side of x402, and the piece that was missing: request the
+        resource; if the server answers ``402 Payment Required``, parse the
+        ``accepts``, pick an option, sign an EIP-3009 authorization with the
+        connected wallet, and retry the request with the ``X-PAYMENT`` header --
+        the manual three-step flow from :meth:`create_authorization`, automated.
+
+        Safe by default: ``max_amount`` is a hard ceiling. A 402 that asks for
+        more raises :class:`PaymentExceedsMaxError` instead of silently signing.
+        This is the seed of a spend guardrail -- the caller sets the limit, the
+        loop never crosses it.
+
+        A non-402 response (including a first-try 200, or a 4xx/5xx that is not
+        402) is returned untouched -- ``fetch`` only pays when payment is asked.
+
+        Args:
+            url: Resource URL.
+            method: HTTP method (default ``GET``).
+            max_amount: Ceiling in token units (e.g. ``Decimal("0.10")``). None
+                = no ceiling (pay whatever is asked -- discouraged for untrusted
+                resources).
+            token_type: Token to pay with (default ``usdc``).
+            token_decimals: Decimals of ``token_type`` (default 6 for USDC).
+            select: Optional ``callable(options) -> option`` to override the
+                default cheapest-within-ceiling selection.
+            valid_duration: Authorization validity in seconds.
+            eip712_domain: Override the signing domain (see
+                :meth:`create_authorization`); by default the domain from the
+                chosen accept's ``extra`` is used when present.
+            http_client: Reuse a specific ``httpx.Client`` (default: the SDK's).
+            **request_kwargs: Passed through to the probe and the paid retry
+                (``headers``, ``params``, ``json``, ``timeout``, ...).
+
+        Returns:
+            The ``httpx.Response`` -- the paid one after a 402, or the original.
+
+        Raises:
+            RuntimeError: No signer connected.
+            PaymentExceedsMaxError: The price exceeds ``max_amount``.
+            NoAcceptablePaymentError: The 402 offered no option within the ceiling.
+
+        Example:
+            >>> client.connect_with_private_key(key, chain_name="base")
+            >>> resp = client.fetch(
+            ...     "https://api.example.com/data",
+            ...     max_amount="0.05",
+            ... )
+            >>> resp.json()
+        """
+        if not self._sign_typed_data:
+            raise RuntimeError(
+                "No signer connected. Call connect_with_private_key() or "
+                "connect_with_signer() first."
+            )
+
+        ceiling = None if max_amount is None else Decimal(str(max_amount))
+        client = http_client or self._get_http_client()
+
+        resp = client.request(method, url, **request_kwargs)
+        if resp.status_code != 402:
+            return resp
+
+        try:
+            body = resp.json()
+        except Exception as exc:  # noqa: BLE001 - a 402 must carry JSON accepts
+            raise InvalidPayloadError(
+                f"402 response body is not JSON: {exc}"
+            ) from exc
+
+        version, options = self._parse_402(body)
+        if not options:
+            raise NoAcceptablePaymentError(
+                "402 response offered no usable payment options", resource=url
+            )
+
+        chosen = (
+            select(options) if select is not None
+            else self._select_payment_option(options, token_decimals)
+        )
+        if not chosen:
+            raise NoAcceptablePaymentError(
+                "no payment option within max_amount", resource=url
+            )
+
+        price = Decimal(chosen["amount"]) / (Decimal(10) ** token_decimals)
+        if ceiling is not None and price > ceiling:
+            raise PaymentExceedsMaxError(price, ceiling, resource=url)
+
+        header = self.create_authorization(
+            pay_to=chosen["payTo"],
+            amount_usd=price,
+            chain_name=chosen["network"],
+            token_type=token_type,
+            x402_version=version,
+            accepted=(chosen["raw"] if version >= 2 else None),
+            resource=url,
+            valid_duration=valid_duration,
+            eip712_domain=eip712_domain or chosen.get("eip712_domain"),
+        )
+
+        paid_headers = dict(request_kwargs.pop("headers", None) or {})
+        paid_headers["X-PAYMENT"] = header
+        return client.request(method, url, headers=paid_headers, **request_kwargs)
