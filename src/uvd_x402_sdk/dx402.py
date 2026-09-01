@@ -1028,9 +1028,27 @@ def _seller_digest_for(
 
 #: Largest `POST /dx402/anchor` request the facilitator accepts, mirroring its
 #: `MAX_REQUEST_BODY_BYTES` (default 64 KiB, an anti-OOM bound on every route).
-#: With base64 inflation and ~600 bytes of metadata this leaves ~47 KB of
-#: plaintext.
 ANCHOR_MAX_REQUEST_BYTES = 64 * 1024
+
+
+
+def _backend_for(pointer: "str | None") -> str:
+    """The backend a pointer names, or `s3` for the facilitator-hosted path.
+
+    Declared, not measured. Since x402-rs 2.3.0 the facilitator records the
+    store that ACTUALLY took the bytes and returns that, so a response may name
+    a different backend than the request did -- `ipfs` where you said `s3`,
+    because a deployment whose primary is Pinata wrote there. That is the
+    facilitator correcting the record, not an error, and nothing here should
+    assert the two match.
+    """
+    if not pointer:
+        return "s3"
+    if pointer.startswith("ipfs"):
+        return "ipfs"
+    if pointer.startswith("ar"):
+        return "arweave"
+    return "s3"
 
 
 def anchor_evidence(
@@ -1046,6 +1064,7 @@ def anchor_evidence(
     signer: "callable | None" = None,
     proof_of_payment: "dict | None" = None,
     storage: "str | None" = None,
+    pointer: "str | None" = None,
     retention: str = "90d",
     facilitator: str = "https://facilitator.ultravioletadao.xyz",
     timeout: float = 15.0,
@@ -1099,8 +1118,16 @@ def anchor_evidence(
             "txHash": tx_hash,
             "payer": payer,
             "payee": payee,
-            "sealed": base64.b64encode(blob).decode(),
-            "backend": "s3",
+            # Exactly one of these. `sealed` -> the facilitator hosts the blob
+            # and derives the pointer, bounded by the request limit. `pointer`
+            # -> you already uploaded it somewhere and the request stays a few
+            # hundred bytes, which is the only way past that bound.
+            **(
+                {"pointer": pointer}
+                if pointer
+                else {"sealed": base64.b64encode(blob).decode()}
+            ),
+            "backend": _backend_for(pointer),
             "contentHash": digest_hash,
             "keyAlg": "ECIES-X25519" if len(payer_key) == 32 else "ECIES-secp256k1",
             "mode": "direct",
@@ -1133,7 +1160,10 @@ def anchor_evidence(
         # failure long after the work of sealing was done.
         # Measured by KarmaKadabra, 2026-08-19: 47 KB of plaintext fits, 48 KB
         # does not.
-        if len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
+        # Only the inline path is bounded. With a pointer the blob never
+        # travels, so the limit does not apply -- that is the whole reason to
+        # use your own sink.
+        if pointer is None and len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
             return {"v": 1, "skipped": "too_large"}
 
         if client is None:

@@ -899,3 +899,42 @@ def test_discovery_is_never_a_gate():
             return self
 
     assert available_backends("https://f.test", client=Gone()) == []
+
+
+def test_a_pointer_skips_the_size_limits_entirely():
+    """With your own sink the blob never travels, so neither bound applies.
+
+    That is the whole reason the pointer path exists: the inline path is capped
+    by the facilitator's request limit, and no amount of tuning moves it.
+    """
+    from uvd_x402_sdk.dx402 import ANCHOR_MAX_REQUEST_BYTES, anchor_evidence
+
+    sent = {}
+
+    class Spy:
+        def post(self, url, json=None, **k):  # noqa: A002, D102
+            sent.update(json or {})
+
+            class R:
+                status_code = 201
+
+                @staticmethod
+                def json():
+                    return {"receipt": "0xsig", "pointer": json.get("pointer")}
+
+            return R()
+
+    out = anchor_evidence(
+        b"y" * (ANCHOR_MAX_REQUEST_BYTES + 50_000),
+        payment_id_value="0x" + "11" * 32,
+        network="base",
+        tx_hash="0x" + "33" * 32,
+        payer="0x103040545AC5031A11E8C03dd11324C7333a13C7",
+        payee="0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8",
+        payer_key=bytes.fromhex("b3ada6e86dadfa7b1f6e4798a66b6076d2b8c156887b7472fe5694e911cf4e59"),
+        pointer="s3+https://f.test/dx402/blob/0x" + "11" * 32,
+        client=Spy(),
+    )
+    assert out.get("skipped") != "too_large", "a pointer is not bounded by the blob"
+    assert "sealed" not in sent, "the blob must not travel when a pointer is given"
+    assert sent.get("pointer", "").startswith("s3+")
