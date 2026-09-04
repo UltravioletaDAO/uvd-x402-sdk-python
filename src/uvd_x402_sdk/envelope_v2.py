@@ -2,9 +2,14 @@
 x402 **v2** request envelopes (`/verify` and `/settle`).
 
 If the 402 you received advertises CAIP-2 networks (``eip155:8453``), you are
-speaking v2 and must send the v2 envelope. :class:`~uvd_x402_sdk.X402Client`'s
-``verify_payment`` / ``settle_payment`` emit the **v1** envelope
-``{x402Version, paymentPayload, paymentRequirements}`` and cannot express v2.
+speaking v2 and this module builds the body for it.
+
+:class:`~uvd_x402_sdk.X402Client` reaches these builders on its own since
+0.74.0: ``verify_payment`` / ``settle_payment`` pick the envelope through
+:mod:`uvd_x402_sdk.envelope`, which also converts the v1-shaped
+:class:`~uvd_x402_sdk.models.PaymentRequirements` into the ``{resource,
+accepted}`` pair below. Call these directly when you are assembling a body
+yourself; go through the client otherwise.
 
 Example:
     >>> from uvd_x402_sdk.envelope_v2 import (
@@ -116,7 +121,14 @@ def _build_envelope(
         "x402Version": 2,
         # The facilitator reads the payload from here. `resource` and `accepted`
         # are repeated at the top level because the v2 envelope declares both;
-        # omitting either fails deserialization.
+        # omitting either there fails deserialization.
+        #
+        # The INNER copy is the one that costs people a day. Facilitator builds
+        # before 2026-09-04 required it and answered `data did not match any
+        # variant of untagged enum VerifyRequestEnvelope` without it; newer
+        # builds fill it in from the outer pair. Measured 2026-09-04 against
+        # 2.10.0: both shapes are 200 and reduce to the same payment, so keeping
+        # it is what makes one body work against both generations.
         "paymentPayload": {
             "x402Version": 2,
             "resource": resource_wire,

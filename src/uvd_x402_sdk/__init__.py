@@ -263,6 +263,16 @@ from uvd_x402_sdk.envelope_v2 import (
     build_verify_request_v2,
 )
 
+# Envelope SELECTION — which of the two the client sends, and the v1 -> v2
+# conversion it needs to send the second one.
+from uvd_x402_sdk.envelope import (
+    build_settle_request_for_version,
+    build_verify_request_for_version,
+    resolve_envelope_version,
+    to_accepted_requirements_v2,
+    to_resource_info_v2,
+)
+
 # Wallet Adapters
 from uvd_x402_sdk.wallet import (
     WalletAdapter,
@@ -571,6 +581,12 @@ __all__ = [
     "ResourceInfoV2",
     "build_verify_request_v2",
     "build_settle_request_v2",
+    # Envelope selection (v1 vs v2)
+    "resolve_envelope_version",
+    "build_verify_request_for_version",
+    "build_settle_request_for_version",
+    "to_resource_info_v2",
+    "to_accepted_requirements_v2",
     # Wallet Adapters
     "WalletAdapter",
     "EnvKeyAdapter",

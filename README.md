@@ -22,7 +22,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
 - **Bazaar Discovery**: Register and discover paid resources across the x402 network
-- **x402 v2 Envelopes**: `build_verify_request_v2` / `build_settle_request_v2` for facilitators advertising CAIP-2 networks
+- **x402 v2 Envelopes**: the client picks v1 or v2 from the wire (`x402_version="auto"`); `build_verify_request_v2` / `build_settle_request_v2` remain for hand-built bodies
 - **Live Traffic Stream**: Subscribe to `GET /events` (SSE) for settlements as they happen — lossy live hint, not a ledger
 - **Facilitator Info**: Query version, supported networks, blacklist, and health
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
@@ -1665,8 +1665,17 @@ mobile and plugin-SDK suites).
 ## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
 
 If the 402 you received advertises CAIP-2 networks (`eip155:8453`), you are
-speaking v2 and must send the **v2 envelope**. `X402Client.verify_payment` and
-`settle_payment` emit the v1 one and cannot express v2:
+speaking v2 and must send the **v2 envelope**.
+
+**Since v0.74.0 the client does this for you.** `X402Client.verify_payment` and
+`settle_payment` pick the envelope from the wire: a CAIP-2 network gets v2, a
+plain name stays on v1, and `X402Config(x402_version=1|2)` pins it either way.
+Nothing to call, nothing to pass — see
+[Choosing the envelope](#choosing-the-envelope-x402_version) below.
+
+Reach for the builders directly when you are assembling a body outside the
+client — echoing a vendor's `accept` verbatim, or driving the facilitator
+without a `PaymentPayload` in hand:
 
 ```python
 from uvd_x402_sdk import (
@@ -1708,6 +1717,44 @@ accept **verbatim** — you will usually have a dict, not a model.
 > `data did not match any variant of untagged enum VerifyRequestEnvelope`, an
 > error that names no field. If you see it, check the **envelope shape** first,
 > not the fields inside it.
+
+### Choosing the envelope (`x402_version`)
+
+`X402Config.x402_version` decides which envelope `verify_payment()` and
+`settle_payment()` send. It defaults to `"auto"`:
+
+```python
+# auto (default): CAIP-2 on the wire -> v2, plain name -> v1
+client = X402Client(recipient_address="0x...")
+client.verify_payment(payload, Decimal("0.01"))   # payload.network == "base"
+                                                  #   -> v1 envelope
+client.verify_payment(payload_caip2, Decimal("0.01"))  # "eip155:8453"
+                                                  #   -> v2 envelope
+
+# pin, when you know better than the wire
+client = X402Client(config=X402Config(recipient_evm="0x...", x402_version=1))
+```
+
+**Auto reads the network, not the version marker**, and that is measured against
+production rather than assumed. The facilitator's envelope enum is *untagged* —
+it matches on shape and ignores `x402Version` — so a header that merely declares
+version 2 while carrying plain network names is served correctly today and is a
+**400** in the v2 envelope. Upgrading it on the strength of the marker would
+break a call that works.
+
+Both envelopes answer 200 for a CAIP-2 pair against facilitator 2.10.0 and
+reduce to the same payment, but only v2-with-CAIP-2 is accepted by builds older
+than 2026-09-04, where v1-with-CAIP-2 is a hard 400 (`unknown variant
+`eip155:8453``). Choosing v2 there is what makes one client work against both.
+
+XRPL has no CAIP-2 form — its v1 string *is* its identifier — so it stays on v1
+under `auto`. An explicit `x402_version=2` on it raises rather than sending a v1
+network name inside a v2 body.
+
+The same choice is exposed as functions for callers driving the facilitator
+themselves: `resolve_envelope_version()`, `build_verify_request_for_version()`,
+`build_settle_request_for_version()`, and the conversion
+`to_resource_info_v2()` / `to_accepted_requirements_v2()`.
 
 ## Metrics and history (`get_stats` / `get_transactions`)
 
@@ -1966,6 +2013,14 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.74.0 (2026-09-04)
+- **Fixed**: `verify_payment()` and `settle_payment()` wrote `"x402Version": 1` as a **literal**, so the SDK could advertise x402 v2 in a 402 and was then structurally unable to speak it — a payer that believed our own 402 got a 400 back. The v2 builders (`build_verify_request_v2` / `build_settle_request_v2`) had existed since v0.62.0 with **no caller**; `X402Config.x402_version` was declared, documented as "1, 2 or auto", and read by nothing. Same defect the TypeScript SDK fixed in 2.78.0, after it broke a real ChatGPT payment
+- **Added**: `uvd_x402_sdk.envelope` — `resolve_envelope_version()`, `build_verify_request_for_version()`, `build_settle_request_for_version()`, and the v1 → v2 conversion (`to_resource_info_v2()`, `to_accepted_requirements_v2()`). Consumers write no new code: keep passing the same `PaymentPayload`, the client picks the envelope
+- **`X402Config.x402_version` now does what it says.** `"auto"` (the default) upgrades to v2 when the network on the wire is CAIP-2 (`eip155:8453`) and stays on v1 for plain names — including a header that merely *declares* version 2, which the facilitator's untagged envelope enum serves correctly today and which is a **400** in v2. `1` or `2` pins, and a pin wins over the wire
+- **Not purely additive, and this is the one behaviour change**: a CAIP-2 wire now travels in the v2 envelope. Both envelopes answer 200 against facilitator 2.10.0 and reduce to the same payment, but only v2-with-CAIP-2 is accepted by facilitator builds older than 2026-09-04, where v1-with-CAIP-2 is a hard 400. Set `x402_version=1` to restore the previous body byte-for-byte. The v1 path itself is untouched
+- Verified end-to-end against the live `/verify` with the SDK building the body, and pinned against the TypeScript SDK: the two now emit byte-identical `/verify` and `/settle` bodies for the same wire
+- A network with no CAIP-2 form (XRPL — its v1 string *is* its identifier) stays on v1 under `auto`, and raises under an explicit `x402_version=2` rather than silently sending a v1 network name inside a v2 body
 
 ### v0.44.0 (2026-08-11)
 - **Added**: per-network facilitator routing — `X402Config(facilitator_by_network={"base": CDP_URL, "avalanche": UVD_URL})` (also `X402Client(...)` and `configure_x402(...)`, and the `X402_FACILITATOR_BY_NETWORK` env var as a JSON object). `verify`, `settle`, the post-timeout settle re-check and `/accepts` each go to the facilitator that owns their network

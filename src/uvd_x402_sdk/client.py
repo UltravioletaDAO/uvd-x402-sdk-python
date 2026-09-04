@@ -19,6 +19,11 @@ from typing import Optional, Tuple, List, Dict, Any, Union
 import httpx
 
 from uvd_x402_sdk.config import X402Config
+from uvd_x402_sdk.envelope import (
+    build_settle_request_for_version,
+    build_verify_request_for_version,
+    resolve_envelope_version,
+)
 from uvd_x402_sdk.exceptions import (
     X402Error,
     InvalidPayloadError,
@@ -820,13 +825,17 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
-        verify_request = {
-            "x402Version": 1,
-            "paymentPayload": payload.model_dump(by_alias=True),
-            "paymentRequirements": requirements.model_dump(by_alias=True, exclude_none=True),
-        }
+        envelope_version = resolve_envelope_version(
+            payload, requirements, self.config.x402_version
+        )
+        verify_request = build_verify_request_for_version(
+            payload, requirements, envelope_version
+        )
 
-        logger.info(f"Verifying payment on {payload.network} for ${expected_amount_usd}")
+        logger.info(
+            f"Verifying payment on {payload.network} for ${expected_amount_usd} "
+            f"(x402 v{envelope_version} envelope)"
+        )
         logger.debug(f"Verify request: {json.dumps(verify_request, indent=2)}")
 
         try:
@@ -1016,18 +1025,20 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
-        settle_request = {
-            "x402Version": 1,
-            "paymentPayload": payload.model_dump(by_alias=True),
-            "paymentRequirements": requirements.model_dump(by_alias=True, exclude_none=True),
-        }
+        envelope_version = resolve_envelope_version(
+            payload, requirements, self.config.x402_version
+        )
+        settle_request = build_settle_request_for_version(
+            payload, requirements, envelope_version
+        )
 
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
-            f"(timeout={settle_timeout}s, facilitator={facilitator_url})"
+            f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
+            f"facilitator={facilitator_url})"
         )
         logger.debug(f"Settle request: {json.dumps(settle_request, indent=2)}")
 
