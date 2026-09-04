@@ -2035,6 +2035,14 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.75.0 (2026-09-04)
+- **Fixed**: `"auto"` — the default — crashed on the one payload shape it exists to route. A **v2 payload has no top-level `network` at all** (v2 moved the chain id into `accepted`), and `resolve_envelope_version()` read only `payload.network` and handed it straight to `is_caip2_format` (`":" in network`). Measured in runtime against the published 0.74.0: `AttributeError: 'dict' object has no attribute 'network'` on a v2 envelope, `TypeError: argument of type 'NoneType' is not iterable` when the network is `None`
+- **The consequence was already in production**: MeshRelay's turnstile and multibrain pin `x402_version` to 1 or 2 explicitly rather than use the default, so this SDK's own default was the one option no consumer could use. Those pins can come out once this version is published
+- **The rule is now written down** (`_network_of_payload`): the network is read wherever the payload keeps it — top level if present, otherwise `accepted.network` — and the **top level wins** when it is there, so a v1 payload keeps reading its own. A payload carrying neither contributes no CAIP-2 evidence and stays on v1 instead of raising
+- `build_verify_request_for_version()` / `build_settle_request_for_version()` take the same shapes: resolving to 2 and then raising one line later on the same object was half a fix. A payload with no signed `payload` block now refuses by name instead of producing the facilitator's "matched no variant", which names no field
+- The v2 payload travels **unreshaped** through the v1 envelope too — this module chooses the envelope, it does not translate one payload shape into the other (`X402Client.extract_payload` is what flattens a v2 header)
+- Purely a fix: every wire that resolved before resolves to the same version, and the v1 body from a `PaymentPayload` is byte-for-byte unchanged. Same defect the TypeScript SDK fixed in 2.79.0, with the same rule, so the same wire produces the same body in both SDKs
+
 ### v0.74.0 (2026-09-04)
 - **Fixed**: `verify_payment()` and `settle_payment()` wrote `"x402Version": 1` as a **literal**, so the SDK could advertise x402 v2 in a 402 and was then structurally unable to speak it — a payer that believed our own 402 got a 400 back. The v2 builders (`build_verify_request_v2` / `build_settle_request_v2`) had existed since v0.62.0 with **no caller**; `X402Config.x402_version` was declared, documented as "1, 2 or auto", and read by nothing. Same defect the TypeScript SDK fixed in 2.78.0, after it broke a real ChatGPT payment
 - **Added**: `uvd_x402_sdk.envelope` — `resolve_envelope_version()`, `build_verify_request_for_version()`, `build_settle_request_for_version()`, and the v1 → v2 conversion (`to_resource_info_v2()`, `to_accepted_requirements_v2()`). Consumers write no new code: keep passing the same `PaymentPayload`, the client picks the envelope
