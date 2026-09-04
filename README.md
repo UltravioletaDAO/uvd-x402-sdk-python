@@ -1211,17 +1211,44 @@ Never retried:
 - **`success=false` inside a 200** — a business error, not a transient one
 - **A 5xx whose body already carries a transaction hash** — the facilitator broadcast the
   tx (e.g. a non-fatal post-settle hook failed); retrying would settle TWICE
+- **A 5xx whose body states `"retryable": false`** — the facilitator saying so outright
+
+### When the facilitator refuses a retry, it says where to look
+
+```python
+try:
+    client.settle_payment(payload, Decimal("0.10"), retry=True)
+except FacilitatorError as exc:
+    if not exc.retryable:
+        # 502 {"error":"settlement_unconfirmed","transaction":"0x…","paymentId":"0x…"}
+        # The tx MAY be mined. Check the chain — never re-send.
+        log.error("settle unconfirmed: tx=%s payment=%s code=%s",
+                  exc.transaction, exc.payment_id, exc.error_code)
+```
+
+`FacilitatorError` carries `transaction`, `payment_id` and `error_code` (all `None` when
+the facilitator sent none), and repeats them in `to_dict()["details"]` as `transaction` /
+`paymentId` / `errorCode` — so they reach the buyer through `transient_503_response()`
+without a paywall having to know about them. The hash is passed through **verbatim**:
+Algorand prints base32 and Solana base58, and pasting it into an explorer is the whole
+remedy on offer.
+
+`exc.retryable` is the verdict: **the status is the ceiling and the body can only lower
+it**, never raise it. A body claiming `retryable: true` on a `400` will not make the SDK
+re-send a credential the facilitator genuinely rejected.
 
 ### Non-raising settle
 
 ```python
 result = client.try_settle_payment(payload, Decimal("0.10"), retry=True)
-# {"success": True, "tx_hash": "0x...", "error": None}
+# {"success": True, "tx_hash": "0x...", "payment_id": None, "error_code": None, "error": None}
 ```
 
 Same arguments as `settle_payment()`, but payment-flow errors come back as data instead of
 exceptions. **`success=False` with `tx_hash` set is the double-settle warning shape**: the
 facilitator returned an error status AFTER broadcasting — verify on-chain, do not re-send.
+`payment_id` and `error_code` come back alongside it; both keys are always present (`None`
+on the happy path) so reading them never depends on whether the settle worked.
 
 ---
 
@@ -2034,6 +2061,14 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.76.0 (2026-09-04)
+- **Fixed**: the SDK refused to retry an unconfirmed settlement and then threw away the one thing that made the refusal actionable. The facilitator answers `502 {"error":"settlement_unconfirmed","transaction":"0x…","paymentId":"0x…","retryable":false}` — the tx MAY be mined, so retrying is paying twice — and the anti-double-settle guard already stopped the loop. But `_extract_tx_hash_from_body` was private: the hash fed the verdict, went into a warning log, and was **discarded**. The caller got "not retryable" and **nothing to check**, which rebuilds the same dead end one layer up: whoever paid cannot find out whether their money moved
+- **Added**: `FacilitatorError.transaction`, `.payment_id` and `.error_code`, repeated in `to_dict()["details"]` as `transaction` / `paymentId` / `errorCode` — so they reach the buyer through `transient_503_response()` without a paywall having to know about them. `try_settle_payment()` returns them as data (`payment_id`, `error_code`; both keys always present, `None` on the happy path). The hash travels **verbatim** — Algorand prints base32, Solana base58, and reformatting it makes it unpastable into an explorer
+- **Fixed, the second decision site**: `FacilitatorError.__init__` computed `retryable` purely from the status (`None | 429 | >=500`) without reading the body — the same hole TypeScript found in `Erc8004LookupError`. **The status is now the CEILING and the body can only LOWER it**, never raise it: a body claiming `retryable: true` on a `400` will not make the SDK re-send a credential the facilitator genuinely rejected. Three signals lower it, in order of authority: an explicit `retryable: false` (a contract the facilitator states, until now ignored outright); any 5xx carrying a hash **whatever the error is called** (the general form — it covers codes that do not exist yet); nothing else
+- Because the verdict now lives in the constructor, **every path that raises one** — settle, verify, escrow, events, ERC-8004 — reaches it by construction instead of each re-deriving it. One parser (`parse_facilitator_error_body`) serves both decision sites: two subtly different readings of the same body is how one code path stops honouring the `retryable: false` that the other honours
+- **Unchanged**: the transient `502` — the one with `Retry-After` and no hash — still retries with the same 3 attempts and the same clamped wait. The settle loop still never re-POSTs a `429`. A `4xx` still carries no `retryable` key in its `to_dict()`. `anti_double_settle=False` still disarms the hash INFERENCE — but not the explicit contract, which is not the caller's to contradict
+- Symmetric with the TypeScript SDK 2.80.0 (`FacilitatorFailureFields`), same three fields and the same ceiling rule
 
 ### v0.75.0 (2026-09-04)
 - **Fixed**: `"auto"` — the default — crashed on the one payload shape it exists to route. A **v2 payload has no top-level `network` at all** (v2 moved the chain id into `accepted`), and `resolve_envelope_version()` read only `payload.network` and handed it straight to `is_caip2_format` (`":" in network`). Measured in runtime against the published 0.74.0: `AttributeError: 'dict' object has no attribute 'network'` on a v2 envelope, `TypeError: argument of type 'NoneType' is not iterable` when the network is `None`
