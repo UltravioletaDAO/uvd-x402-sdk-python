@@ -16,6 +16,8 @@ src/uvd_x402_sdk/
 ├── config.py                # Configuration management
 ├── models.py                # Pydantic data models (PaymentPayload, SettlementAccountPayload, etc.)
 ├── exceptions.py            # Custom exceptions
+├── envelope.py              # Envelope SELECTION — resolve_envelope_version() + v1 -> v2 conversion
+├── envelope_v2.py           # The v2 /verify + /settle bodies (build_verify_request_v2, ...)
 ├── response.py              # 402 response helpers
 ├── discovery.py             # BazaarClient - resource registration and discovery
 ├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
@@ -166,6 +168,13 @@ payment_requirements = {
 - `create_authorization()` accepts the same `eip712_domain` override — enters the SIGNED digest and the non-USDC `token.eip712` block. Partial domain raises `ValueError` before signing (fail-loud)
 - `settle_payment(..., retry=True)` (default OFF) — up to 3 attempts, backoff 1s/2s, ported from Execution Market's `mcp_server/integrations/_http_retry.py`: retries transient transport errors + 5xx, NEVER 4xx, NEVER `success=false` in a 2xx, NEVER a 5xx whose body carries a tx hash (**anti-double-settle guard**)
 - `try_settle_payment()` — non-raising settle returning `{"success", "tx_hash", "error"}`; `success=False` + `tx_hash` set = the facilitator broadcast despite the error status (verify on-chain, never re-send)
+
+### Envelope Selection — v1 vs v2 (envelope.py, v0.74.0)
+- `verify_payment()` / `_settle_once()` used to write `"x402Version": 1` as a **literal**: the SDK could advertise v2 in a 402 and was then unable to speak it. The v2 builders existed since v0.62.0 with **no caller** and `X402Config.x402_version` was read by nothing. Same defect TypeScript fixed in 2.78.0 after it broke a real ChatGPT payment
+- `resolve_envelope_version(payload, requirements, requested="auto")` — **auto keys off CAIP-2 on the wire, NEVER off `payload.x402Version`.** The facilitator's envelope enum is untagged (matches on shape, ignores the marker), so a header that only *declares* v2 with plain names is a 200 in v1 and a **400** in v2. A pin (`1` / `2`) always wins over the wire
+- `build_verify_request_for_version()` / `build_settle_request_for_version()` — v1 return is byte-for-byte the pre-0.74.0 body. `to_resource_info_v2()` / `to_accepted_requirements_v2()` do the v1 → v2 conversion (`maxAmountRequired` → `amount`, network → CAIP-2, `resource` string → 3-key object, `extra` carried through — it holds the EIP-712 domain for EURC and the bridged USDCs)
+- **Networks with no CAIP-2 form (XRPL) stay on v1 under auto and raise under an explicit pin to 2** — a silent downgrade would put a v1 network name inside a v2 body, which is the 400 this exists to prevent
+- **Byte-identical to the TypeScript SDK** for the same wire, with one deliberate difference: TS's v1 envelope inherits `x402Version` from the payer's header, so it can declare `2` on a v1-shaped body. Python keeps the literal `1` — the top-level field names the ENVELOPE. Both are 200 today (untagged enum), but the facilitator already picks its 400 `hint` from the declared version
 
 ### /accepts Negotiation (client.py)
 - `X402Client.negotiate_accepts()` - POST /accepts to facilitator
