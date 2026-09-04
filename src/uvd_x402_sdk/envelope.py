@@ -10,8 +10,9 @@ a payer that believed our own 402 got a 400 back.
 
 # The rule ``resolve_envelope_version`` applies, and why
 
-Auto keys off **CAIP-2 on the wire**, never off ``payload.x402Version``. That is
-measured, not stylistic: the facilitator's envelope enum is *untagged*, so it
+Auto keys off **CAIP-2 on the wire**, never off ``payload.x402Version`` — read
+wherever the payload keeps its network, top level (v1) or inside ``accepted``
+(v2). That is measured, not stylistic: the facilitator's envelope enum is *untagged*, so it
 matches on SHAPE and ignores the version marker. A header that merely declares
 version 2 while carrying plain network names is served correctly today, and
 upgrading it on the strength of the marker would change a call that works.
@@ -44,7 +45,8 @@ to read CAIP-2, so today both columns answer 200 and the rule needs a different
 justification — see :func:`resolve_envelope_version`.
 """
 
-from typing import Any, Dict, Union
+from collections.abc import Mapping
+from typing import Any, Dict, Optional, Union
 
 from uvd_x402_sdk.envelope_v2 import (
     AcceptedRequirementsV2,
@@ -57,6 +59,62 @@ from uvd_x402_sdk.networks.base import is_caip2_format, to_caip2_network
 
 #: What ``resolve_envelope_version`` accepts as an explicit request.
 EnvelopeVersion = Union[int, str]
+
+#: What ``resolve_envelope_version`` accepts as the payload: the flat v1
+#: :class:`~uvd_x402_sdk.models.PaymentPayload`, or the raw **v2 envelope** a
+#: payer following a v2 402 sends —
+#: ``{x402Version, resource, accepted, payload}``, which carries no top-level
+#: ``network`` at all. See :func:`_network_of_payload`.
+PayloadLike = Union[PaymentPayload, Mapping[str, Any]]
+
+
+def _read(source: Any, field: str) -> Any:
+    """Read one field off a model or a plain mapping; ``None`` when absent."""
+    if isinstance(source, Mapping):
+        return source.get(field)
+    return getattr(source, field, None)
+
+
+def _network_of_payload(payload: PayloadLike) -> Optional[str]:
+    """The network a payload is speaking, wherever that payload keeps it.
+
+    **A v1 payload carries ``network`` at the top level; a v2 payload carries
+    none at all** — v2 moved the chain id inside ``accepted``. So reading only
+    ``payload.network`` blew up on exactly the shape
+    :func:`resolve_envelope_version` exists to route. Measured in runtime
+    against the published 0.74.0::
+
+        resolve(PaymentPayload(network="eip155:8453"), ...)  ->  2
+        resolve({... "accepted": {"network": "eip155:8453"}})
+            AttributeError: 'dict' object has no attribute 'network'
+        resolve(<payload whose network is None>, ...)
+            TypeError: argument of type 'NoneType' is not iterable
+
+    The consequence is already in production: MeshRelay's turnstile and
+    multibrain pin ``x402_version`` to 1 or 2 explicitly rather than use the
+    default, so ``"auto"`` — this SDK's own default — was the one option no
+    consumer could use.
+
+    A missing network is a legitimate answer (``None``: "this payload
+    contributes no CAIP-2 evidence"), not an exception raised inside version
+    selection. The top level WINS when it is there, so a v1 payload keeps
+    reading its own network.
+    """
+    top = _read(payload, "network")
+    if isinstance(top, str):
+        return top
+    accepted = _read(payload, "accepted")
+    network = _read(accepted, "network") if accepted is not None else None
+    return network if isinstance(network, str) else None
+
+
+def _is_caip2(network: Optional[str]) -> bool:
+    """:func:`is_caip2_format`, with an absent network answering ``False``.
+
+    ``is_caip2_format`` is ``":" in network`` and raises ``TypeError`` on
+    ``None``. Inside version selection an absent network is data, not an error.
+    """
+    return isinstance(network, str) and is_caip2_format(network)
 
 
 def to_resource_info_v2(requirements: PaymentRequirements) -> ResourceInfoV2:
@@ -116,7 +174,7 @@ def to_accepted_requirements_v2(
 
 
 def resolve_envelope_version(
-    payload: PaymentPayload,
+    payload: PayloadLike,
     requirements: PaymentRequirements,
     requested: EnvelopeVersion = "auto",
 ) -> int:
@@ -143,8 +201,15 @@ def resolve_envelope_version(
     And plain-name pairs — including a header that merely *declares* version 2 —
     stay on v1, where they are a 200 and where v2 would be a 400.
 
+    **Both payload shapes are read**, which is the point of the function: a v1
+    payload keeps its ``network`` at the top level, a v2 one keeps the chain id
+    inside ``accepted``, and a payload carrying neither contributes no evidence
+    and stays on v1 instead of raising — see :func:`_network_of_payload`.
+
     Args:
-        payload: The parsed payment payload from the ``X-PAYMENT`` header.
+        payload: The payment payload from the ``X-PAYMENT`` header — the flat
+            v1 :class:`~uvd_x402_sdk.models.PaymentPayload`, or a raw v2
+            envelope dict with no top-level ``network``.
         requirements: The requirements this SDK built for the facilitator.
         requested: ``1``, ``2``, or ``"auto"``. Anything else raises.
 
@@ -161,7 +226,9 @@ def resolve_envelope_version(
             )
         return int(requested)
 
-    if is_caip2_format(payload.network) or is_caip2_format(requirements.network):
+    if _is_caip2(_network_of_payload(payload)) or _is_caip2(
+        _read(requirements, "network")
+    ):
         return 2
     return 1
 

@@ -1751,6 +1751,27 @@ XRPL has no CAIP-2 form — its v1 string *is* its identifier — so it stays on
 under `auto`. An explicit `x402_version=2` on it raises rather than sending a v1
 network name inside a v2 body.
 
+`resolve_envelope_version()` (and therefore the `"auto"` default) reads a **v2
+payload** as well as a flat v1 one. A v2 payload has no top-level `network` at
+all — v2 moved the chain id into `accepted` — so `auto` reads it from there, and
+a payload carrying neither resolves to v1 instead of raising. Before **0.75.0**
+it read only the top level and blew up on exactly that shape
+(`AttributeError: 'dict' object has no attribute 'network'`, or
+`TypeError: argument of type 'NoneType' is not iterable`), which is why
+integrators were pinning `x402_version` instead of using the default.
+
+```python
+from uvd_x402_sdk.envelope import resolve_envelope_version
+
+v2_payload = {                        # what a buyer following a v2 402 sends
+    "x402Version": 2,
+    "resource": {"url": ..., "description": ..., "mimeType": ...},
+    "accepted": {"scheme": "exact", "network": "eip155:8453", ...},
+    "payload": {"signature": "0x...", "authorization": {...}},
+}
+resolve_envelope_version(v2_payload, requirements)   # -> 2
+```
+
 The same choice is exposed as functions for callers driving the facilitator
 themselves: `resolve_envelope_version()`, `build_verify_request_for_version()`,
 `build_settle_request_for_version()`, and the conversion
