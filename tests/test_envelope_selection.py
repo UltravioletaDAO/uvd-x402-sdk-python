@@ -28,6 +28,7 @@ import pytest
 
 from uvd_x402_sdk import X402Client, X402Config
 from uvd_x402_sdk.envelope import (
+    build_settle_request_for_version,
     build_verify_request_for_version,
     resolve_envelope_version,
     to_accepted_requirements_v2,
@@ -362,3 +363,148 @@ class TestSettleFallbackReplaysTheSameEnvelope:
         assert len(calls) == 2
         assert calls[0] == calls[1]
         assert calls[0]["x402Version"] == 2
+
+
+# ── `auto` has to survive the v2 payload it exists to route ──────────────────
+
+
+def _v2_payload(accepted_network: str = "eip155:8453", marker: int = 2) -> dict:
+    """A genuine x402 **v2** payload: ``{x402Version, resource, accepted,
+    payload}`` and NO top-level ``network`` — v2 moved the chain id into
+    ``accepted``. This is what a buyer following a v2 402 produces."""
+    return {
+        "x402Version": marker,
+        "resource": {
+            "url": "https://api.example.com/protected",
+            "description": "One API call",
+            "mimeType": "application/json",
+        },
+        "accepted": {
+            "scheme": "exact",
+            "network": accepted_network,
+            "asset": USDC_BASE,
+            "amount": "10000",
+            "payTo": RECIPIENT,
+            "maxTimeoutSeconds": 60,
+        },
+        "payload": _payload("base").payload,
+    }
+
+
+class TestAutoSurvivesAV2Payload:
+    """The default `"auto"` crashed on the one shape it exists to route.
+
+    Measured in runtime against the published 0.74.0, before any of this:
+
+        resolve(PaymentPayload(network="eip155:8453"), ...)  -> 2       # fine
+        resolve({..., "accepted": {"network": "eip155:8453"}})
+            AttributeError: 'dict' object has no attribute 'network'
+        resolve(<payload whose network is None>, ...)
+            TypeError: argument of type 'NoneType' is not iterable
+
+    Reported from a runtime measurement by the MeshRelay worker (the `None`
+    row), and the consequence is already in production: their turnstile and
+    multibrain pin `x402_version` to 1 or 2 explicitly rather than use our
+    default. Our own default was the one option nobody could use. The
+    TypeScript SDK fixed the identical defect in 2.79.0.
+    """
+
+    def test_resolves_instead_of_raising(self):
+        # RED before the fix: AttributeError: 'dict' object has no attribute 'network'
+        assert resolve_envelope_version(_v2_payload(), _requirements("eip155:8453")) == 2
+
+    def test_reads_the_chain_id_out_of_accepted_where_v2_keeps_it(self):
+        """The requirements say `base` here, so a 2 can only have come from
+        `accepted.network`. This is what separates "reads the right place" from
+        "swallowed the missing field"."""
+        assert resolve_envelope_version(_v2_payload(), _requirements("base")) == 2
+
+    def test_a_payload_whose_network_is_None_does_not_raise(self):
+        """The row MeshRelay measured, verbatim: `TypeError: argument of type
+        'NoneType' is not iterable`, from `":" in None` inside
+        `is_caip2_format`. `model_construct` skips validation, which is how a
+        `None` reaches the function that Pydantic's model annotation forbids."""
+        bare = PaymentPayload.model_construct(
+            x402Version=2, scheme="exact", network=None, payload=_payload("base").payload
+        )
+        assert resolve_envelope_version(bare, _requirements("base")) == 1
+
+    def test_does_not_raise_when_the_requirements_have_no_network_either(self):
+        """Both sides missing. The models say `network` is required on both, but
+        a caller can hand over anything, and a crash inside version selection is
+        a worse answer than "no CAIP-2 evidence, stay on v1"."""
+        no_network = _requirements("base").model_copy(update={"network": None})
+        assert resolve_envelope_version({"x402Version": 2}, no_network) == 1
+
+    def test_still_refuses_to_upgrade_on_the_marker_alone(self):
+        """A v2-SHAPED payload whose `accepted` carries a PLAIN name: the marker
+        says 2, but v2 cannot carry a plain name (measured 400), so this stays
+        on v1. Tolerating the missing network must not relax the measured rule."""
+        assert resolve_envelope_version(_v2_payload("base"), _requirements("base")) == 1
+
+    def test_a_v1_payload_still_reads_its_own_top_level_network(self):
+        """NO-REGRESSION GUARD — green in both states. The fix must not start
+        preferring `accepted` over a top-level `network` that IS there."""
+        assert resolve_envelope_version(_payload("base"), _requirements("base")) == 1
+        assert resolve_envelope_version(_payload("eip155:8453"), _requirements("base")) == 2
+
+
+class TestTheBuildersTakeTheSameShapesAsTheResolver:
+    """Resolving to 2 and then raising one line later on the same object would
+    be half a fix, so the builders read the payload the same way.
+
+    Measured on the same 0.74.0, right after the resolution was fixed:
+
+        build_verify_request_for_version(<v2 payload>, ..., 2)
+            AttributeError: 'dict' object has no attribute 'payload'
+        build_verify_request_for_version(<v2 payload>, ..., 1)
+            AttributeError: 'dict' object has no attribute 'model_dump'
+    """
+
+    def test_builds_the_v2_body_end_to_end_from_a_v2_payload(self):
+        payload = _v2_payload()
+        requirements = _requirements("eip155:8453")
+        version = resolve_envelope_version(payload, requirements)
+
+        for body in (
+            build_verify_request_for_version(payload, requirements, version),
+            build_settle_request_for_version(payload, requirements, version),
+        ):
+            assert body["x402Version"] == 2
+            assert "paymentRequirements" not in body, "that key IS the v1 envelope"
+            assert set(body) == {"x402Version", "paymentPayload", "resource", "accepted"}
+            # The payer's signed material travels verbatim; reshaping invalidates it.
+            assert body["paymentPayload"]["payload"] == payload["payload"]
+
+    def test_the_v1_envelope_carries_a_v2_payload_unreshaped(self):
+        """A v2-shaped payload on a plain-name wire stays on v1, and the payload
+        goes into `paymentPayload` as the caller handed it over. This module
+        chooses the envelope; it does not translate one payload shape into the
+        other (`X402Client.extract_payload` is what flattens a v2 header)."""
+        payload = _v2_payload("base")
+        body = build_verify_request_for_version(payload, _requirements("base"), 1)
+
+        assert body["x402Version"] == 1, "the marker names the ENVELOPE"
+        assert body["paymentPayload"] == payload
+        assert "paymentRequirements" in body
+
+    def test_a_payload_with_no_signed_material_refuses_by_name(self):
+        """The facilitator answers "matched no variant" without naming a field.
+        Refusing here names it."""
+        with pytest.raises(ValueError, match="no `payload` block"):
+            build_verify_request_for_version(
+                {"x402Version": 2, "accepted": {"network": "eip155:8453"}},
+                _requirements("eip155:8453"),
+                2,
+            )
+
+    def test_a_PaymentPayload_still_dumps_exactly_as_before(self):
+        """NO-REGRESSION GUARD — green in both states, on both envelopes."""
+        payload = _payload("base")
+        v1 = build_verify_request_for_version(payload, _requirements("base"), 1)
+        assert v1["paymentPayload"] == payload.model_dump(by_alias=True)
+
+        v2 = build_verify_request_for_version(
+            _payload("eip155:8453"), _requirements("eip155:8453"), 2
+        )
+        assert v2["paymentPayload"]["payload"] == payload.payload
