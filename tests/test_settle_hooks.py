@@ -358,9 +358,19 @@ class TestTrySettlePayment:
     """Result-dict mode for callers that treat settle failures as data."""
 
     def test_success_shape(self, client, monkeypatch):
+        # v0.76.0 added ``payment_id`` and ``error_code``. They are present and
+        # None on the happy path ON PURPOSE: a caller reading
+        # ``result["payment_id"]`` must not hit a KeyError depending on whether
+        # the settle worked.
         _wire(client, monkeypatch, [_FakeResponse(200, _ok_settle_body("0xf00d"))])
         result = client.try_settle_payment(_evm_payload(), Decimal("0.01"))
-        assert result == {"success": True, "tx_hash": "0xf00d", "error": None}
+        assert result == {
+            "success": True,
+            "tx_hash": "0xf00d",
+            "payment_id": None,
+            "error_code": None,
+            "error": None,
+        }
 
     def test_failure_does_not_raise(self, client, monkeypatch):
         _wire(client, monkeypatch, [_FakeResponse(422, {"error": "bad payload"})])

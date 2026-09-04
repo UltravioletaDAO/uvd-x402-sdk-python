@@ -5,6 +5,7 @@ These exceptions provide clear, actionable error messages for different
 failure scenarios in the payment flow.
 """
 
+import json
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
 
@@ -268,6 +269,78 @@ def write_retry_is_safe(reason: Optional[str]) -> bool:
     return reason in WRITE_NOT_ATTEMPTED_REASONS
 
 
+#: The spellings the facilitator uses for a transaction hash, across endpoints
+#: and error paths. The SUCCESS path of ``settle()`` already read three of
+#: these; the ERROR path read one — the same defect with the consequences
+#: inverted, since it is on the error path that a missed hash costs money.
+_TX_HASH_KEYS = ("txHash", "tx_hash", "transaction_hash")
+
+
+def body_tx_hash(body: Any) -> Optional[str]:
+    """Return the transaction hash carried in a facilitator response body, if any.
+
+    The facilitator reports the hash under several shapes depending on the
+    endpoint and error path: ``{"transaction": "0x…"}``,
+    ``{"transaction": {"hash": "0x…"}}``, ``{"txHash": …}``, ``{"tx_hash": …}``,
+    ``{"transaction_hash": …}``.
+
+    Returned **verbatim**. Algorand prints base32 and Solana base58;
+    normalising the value makes it unpastable into an explorer, and pasting it
+    is the entire remedy this SDK offers a caller it just refused to retry.
+    """
+    if not isinstance(body, dict):
+        return None
+    tx = body.get("transaction")
+    if isinstance(tx, dict) and tx.get("hash"):
+        return str(tx["hash"])
+    if isinstance(tx, str) and tx:
+        return tx
+    for key in _TX_HASH_KEYS:
+        if body.get(key):
+            return str(body[key])
+    return None
+
+
+def parse_facilitator_error_body(response_body: Optional[str]) -> Dict[str, Any]:
+    """Read a facilitator error body once, for every caller that needs it.
+
+    ONE parser on purpose. Two subtly different readings of the same body is
+    how one code path stops honouring the ``retryable: false`` that the other
+    honours — and the two paths here decide whether money moves twice.
+
+    Never raises and never requires a field: an unreadable or unexpected body
+    yields all-``None``, because a parser that refuses an unknown shape turns a
+    new facilitator diagnosis into an outage.
+
+    Returns ``transaction``, ``payment_id``, ``error_code`` and ``retryable``
+    (``None`` when the facilitator did not state one).
+    """
+    empty: Dict[str, Any] = {
+        "transaction": None,
+        "payment_id": None,
+        "error_code": None,
+        "retryable": None,
+    }
+    if not response_body:
+        return empty
+    try:
+        parsed = json.loads(response_body)
+    except (ValueError, TypeError):
+        return empty
+    if not isinstance(parsed, dict):
+        return empty
+
+    payment_id = parsed.get("paymentId") or parsed.get("payment_id")
+    error_code = parsed.get("error")
+    retryable = parsed.get("retryable")
+    return {
+        "transaction": body_tx_hash(parsed),
+        "payment_id": str(payment_id) if isinstance(payment_id, str) and payment_id else None,
+        "error_code": str(error_code) if isinstance(error_code, str) and error_code else None,
+        "retryable": retryable if isinstance(retryable, bool) else None,
+    }
+
+
 class FacilitatorError(X402Error):
     """
     Raised when the facilitator returns an error.
@@ -288,8 +361,49 @@ class FacilitatorError(X402Error):
     ``retryable`` mirrors the transient/final verdict so this class stops being
     the only one in the hierarchy without the attribute that
     ``LookupInconclusiveError`` and ``RegistrationPendingError`` already carry.
-    A 5xx is transient; a 4xx other than 429 is final.
+    A 5xx is transient; a 4xx other than 429 is final — **except** that the
+    status is only the CEILING of the verdict and the body can lower it. See
+    :meth:`_retryable_verdict`.
+
+    And when the facilitator refuses a retry it says where to look instead:
+
+    * ``transaction`` — the hash it broadcast before failing, verbatim.
+    * ``payment_id`` — the facilitator's own identifier for the payment.
+    * ``error_code`` — its machine-readable ``error``, e.g.
+      ``settlement_unconfirmed``.
+
+    All three are ``None`` when the facilitator sent none. Refusing to retry
+    without handing these over rebuilds the same dead end one layer up: the
+    caller is told "do not re-send" and given nothing to check, so they cannot
+    find out whether their money moved.
     """
+
+    @staticmethod
+    def _retryable_verdict(
+        status_code: Optional[int], fields: Dict[str, Any]
+    ) -> bool:
+        """The status is the CEILING; the body can only LOWER it, never raise it.
+
+        A body claiming ``retryable: true`` on a 400 must not make this SDK
+        re-send a credential the facilitator genuinely rejected. Three signals
+        lower a transient verdict to final, in order of authority:
+
+        1. an explicit ``retryable: false`` — a contract the facilitator is
+           stating, not an inference;
+        2. any 5xx carrying a transaction hash, **whatever the error is
+           called**. A hash in a FAILURE body means the facilitator got as far
+           as BROADCASTING, so re-sending risks a double-settle. This is the
+           general form of the rule and covers codes that do not exist yet;
+        3. nothing else. An unreadable body leaves the status verdict standing.
+        """
+        by_status = status_code is None or status_code == 429 or status_code >= 500
+        if not by_status:
+            return False
+        if fields.get("retryable") is False:
+            return False
+        if fields.get("transaction") is not None:
+            return False
+        return True
 
     def __init__(
         self,
@@ -300,9 +414,8 @@ class FacilitatorError(X402Error):
         reason: Optional[str] = None,
         retry_after: Optional[float] = None,
     ) -> None:
-        retryable = (
-            status_code is None or status_code == 429 or status_code >= 500
-        )
+        fields = parse_facilitator_error_body(response_body)
+        retryable = self._retryable_verdict(status_code, fields)
         details: Dict[str, Any] = {
             "statusCode": status_code,
             "response": response_body,
@@ -313,8 +426,18 @@ class FacilitatorError(X402Error):
             details["reason"] = reason
         if retry_after is not None:
             details["retryAfter"] = retry_after
-        if retryable:
-            details["retryable"] = True
+        if status_code is None or status_code == 429 or status_code >= 500:
+            # The set that used to always read True. It now reads the real
+            # verdict — which is the correction — and a 4xx keeps carrying no
+            # key at all, exactly as before.
+            details["retryable"] = retryable
+        for key, detail_key in (
+            ("transaction", "transaction"),
+            ("payment_id", "paymentId"),
+            ("error_code", "errorCode"),
+        ):
+            if fields[key] is not None:
+                details[detail_key] = fields[key]
         super().__init__(
             message=message,
             code="FACILITATOR_ERROR",
@@ -325,6 +448,9 @@ class FacilitatorError(X402Error):
         self.reason = reason
         self.retry_after = retry_after
         self.retryable = retryable
+        self.transaction = fields["transaction"]
+        self.payment_id = fields["payment_id"]
+        self.error_code = fields["error_code"]
 
 
 class LookupInconclusiveError(X402Error):

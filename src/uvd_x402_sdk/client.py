@@ -35,6 +35,8 @@ from uvd_x402_sdk.exceptions import (
     PaymentExceedsMaxError,
     NoAcceptablePaymentError,
     MAX_RETRY_AFTER_SECONDS,
+    body_tx_hash,
+    parse_facilitator_error_body,
     parse_retry_after,
     write_retry_is_safe,
 )
@@ -77,35 +79,16 @@ SETTLE_RETRY_ATTEMPTS = 3
 _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 
 
-def _extract_tx_hash_from_body(body: Any) -> Optional[str]:
-    """Return the transaction hash carried in a facilitator response body, if any.
-
-    The facilitator reports the hash under several shapes depending on the
-    endpoint and error path: {"transaction": "0x…"}, {"transaction": {"hash":
-    "0x…"}}, {"txHash": …}, {"tx_hash": …}, {"transaction_hash": …}.
-    """
-    if not isinstance(body, dict):
-        return None
-    tx = body.get("transaction")
-    if isinstance(tx, dict) and tx.get("hash"):
-        return str(tx["hash"])
-    if isinstance(tx, str) and tx:
-        return tx
-    for key in ("txHash", "tx_hash", "transaction_hash"):
-        if body.get(key):
-            return str(body[key])
-    return None
+#: The one reader of a facilitator error body, shared with the verdict
+#: :class:`FacilitatorError` reaches in its own constructor. Two subtly
+#: different readings of the same body is how one code path stops honouring the
+#: ``retryable: false`` that the other honours.
+_extract_tx_hash_from_body = body_tx_hash
 
 
 def _facilitator_error_tx_hash(exc: FacilitatorError) -> Optional[str]:
-    """Extract a tx hash from a FacilitatorError's raw response body, if present."""
-    if not exc.response_body:
-        return None
-    try:
-        body = json.loads(exc.response_body)
-    except (ValueError, TypeError):
-        return None
-    return _extract_tx_hash_from_body(body)
+    """The tx hash a FacilitatorError carries, if the facilitator sent one."""
+    return exc.transaction
 
 
 def _facilitator_reason(body: Optional[str]) -> Optional[str]:
@@ -166,8 +149,10 @@ def facilitator_reason(exc: Exception) -> Optional[str]:
 def _is_retryable_settle_error(exc: Exception) -> bool:
     """Return True if a failed settle attempt is safe to retry.
 
-    See the policy block above. The anti-double-settle guard lives here: a
-    5xx whose body already contains a transaction hash is NOT retryable.
+    See the policy block above. The anti-double-settle guard lives in
+    :meth:`FacilitatorError._retryable_verdict` now, so every path that raises
+    one — settle, verify, escrow, ERC-8004 — reaches the same verdict by
+    construction instead of each re-deriving it.
     """
     if isinstance(exc, X402TimeoutError):
         # The facilitator is idempotent per EIP-3009 nonce, and the SDK's
@@ -177,13 +162,16 @@ def _is_retryable_settle_error(exc: Exception) -> bool:
         if exc.status_code is None:
             # Wrapped httpx.RequestError — transient transport issue.
             return True
+        # A 429 is transient for a paywall deciding 402-vs-503, but this loop
+        # has never re-POSTed one and re-POSTing is what costs money. Unchanged.
         if exc.status_code < 500:
             return False
-        if _facilitator_error_tx_hash(exc) is not None:
+        if not exc.retryable:
             logger.warning(
-                "Facilitator returned %d but body contains a tx hash — "
-                "not retrying to avoid double-settle.",
-                exc.status_code,
+                "Facilitator returned %d and the body says not to re-send "
+                "(tx=%s, paymentId=%s, error=%s) — not retrying to avoid "
+                "double-settle. Check the chain, do not pay again.",
+                exc.status_code, exc.transaction, exc.payment_id, exc.error_code,
             )
             return False
         return True
@@ -214,6 +202,10 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
       default): the facilitator can fail AFTER broadcasting, and treating
       that as retryable risks a double-settle. That guard lived only in the
       private settle path until now.
+    * A 5xx whose body states ``"retryable": false`` -> final, and
+      ``anti_double_settle=False`` does NOT lift that. The opt-out exists to
+      let a caller own the risk of an INFERENCE the SDK drew from a hash; it
+      is not a licence to contradict a facilitator that said so outright.
     * Any other ``X402Error`` -> respects ``details["retryable"]`` when the
       raiser set it; otherwise final.
     * Non-x402 exceptions -> final (this function judges the payment path,
@@ -227,9 +219,14 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
         if exc.status_code == 429:
             return True
         if exc.status_code >= 500:
-            if anti_double_settle and _facilitator_error_tx_hash(exc) is not None:
-                return False
-            return True
+            if not anti_double_settle:
+                # Same verdict with the hash signal disarmed: an explicit
+                # ``retryable: false`` still stands.
+                return FacilitatorError._retryable_verdict(
+                    exc.status_code,
+                    {"retryable": parse_facilitator_error_body(exc.response_body)["retryable"]},
+                )
+            return exc.retryable
         return False
     if isinstance(exc, X402Error):
         details = getattr(exc, "details", None) or {}
@@ -984,7 +981,16 @@ class X402Client:
                 May be set even when ``success`` is False — a 5xx whose body
                 carries a hash means the facilitator DID broadcast the tx
                 (do NOT re-settle; verify on-chain instead).
+              - ``payment_id`` (Optional[str]): the facilitator's identifier
+                for the payment, when it sent one.
+              - ``error_code`` (Optional[str]): its machine-readable ``error``,
+                e.g. ``settlement_unconfirmed``.
               - ``error`` (Optional[str]): error message when failed
+
+            ``tx_hash``, ``payment_id`` and ``error_code`` are what turns a
+            refusal to retry into something the caller can act on: without
+            them the answer is "do not re-send" with nowhere to look, and
+            whoever paid cannot find out whether their money moved.
         """
         try:
             response = self.settle_payment(
@@ -994,14 +1000,26 @@ class X402Client:
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
+            payment_id: Optional[str] = None
+            error_code: Optional[str] = None
             if isinstance(exc, FacilitatorError):
-                tx_hash = _facilitator_error_tx_hash(exc)
+                tx_hash = exc.transaction
+                payment_id = exc.payment_id
+                error_code = exc.error_code
             elif isinstance(exc, PaymentSettlementError):
                 tx_hash = exc.tx_hash
-            return {"success": False, "tx_hash": tx_hash, "error": exc.message}
+            return {
+                "success": False,
+                "tx_hash": tx_hash,
+                "payment_id": payment_id,
+                "error_code": error_code,
+                "error": exc.message,
+            }
         return {
             "success": True,
             "tx_hash": response.get_transaction_hash(),
+            "payment_id": None,
+            "error_code": None,
             "error": None,
         }
 
