@@ -28,6 +28,7 @@ import pytest
 
 from uvd_x402_sdk import X402Client, X402Config
 from uvd_x402_sdk.envelope import (
+    build_settle_request_for_version,
     build_verify_request_for_version,
     resolve_envelope_version,
     to_accepted_requirements_v2,
@@ -446,3 +447,64 @@ class TestAutoSurvivesAV2Payload:
         preferring `accepted` over a top-level `network` that IS there."""
         assert resolve_envelope_version(_payload("base"), _requirements("base")) == 1
         assert resolve_envelope_version(_payload("eip155:8453"), _requirements("base")) == 2
+
+
+class TestTheBuildersTakeTheSameShapesAsTheResolver:
+    """Resolving to 2 and then raising one line later on the same object would
+    be half a fix, so the builders read the payload the same way.
+
+    Measured on the same 0.74.0, right after the resolution was fixed:
+
+        build_verify_request_for_version(<v2 payload>, ..., 2)
+            AttributeError: 'dict' object has no attribute 'payload'
+        build_verify_request_for_version(<v2 payload>, ..., 1)
+            AttributeError: 'dict' object has no attribute 'model_dump'
+    """
+
+    def test_builds_the_v2_body_end_to_end_from_a_v2_payload(self):
+        payload = _v2_payload()
+        requirements = _requirements("eip155:8453")
+        version = resolve_envelope_version(payload, requirements)
+
+        for body in (
+            build_verify_request_for_version(payload, requirements, version),
+            build_settle_request_for_version(payload, requirements, version),
+        ):
+            assert body["x402Version"] == 2
+            assert "paymentRequirements" not in body, "that key IS the v1 envelope"
+            assert set(body) == {"x402Version", "paymentPayload", "resource", "accepted"}
+            # The payer's signed material travels verbatim; reshaping invalidates it.
+            assert body["paymentPayload"]["payload"] == payload["payload"]
+
+    def test_the_v1_envelope_carries_a_v2_payload_unreshaped(self):
+        """A v2-shaped payload on a plain-name wire stays on v1, and the payload
+        goes into `paymentPayload` as the caller handed it over. This module
+        chooses the envelope; it does not translate one payload shape into the
+        other (`X402Client.extract_payload` is what flattens a v2 header)."""
+        payload = _v2_payload("base")
+        body = build_verify_request_for_version(payload, _requirements("base"), 1)
+
+        assert body["x402Version"] == 1, "the marker names the ENVELOPE"
+        assert body["paymentPayload"] == payload
+        assert "paymentRequirements" in body
+
+    def test_a_payload_with_no_signed_material_refuses_by_name(self):
+        """The facilitator answers "matched no variant" without naming a field.
+        Refusing here names it."""
+        with pytest.raises(ValueError, match="no `payload` block"):
+            build_verify_request_for_version(
+                {"x402Version": 2, "accepted": {"network": "eip155:8453"}},
+                _requirements("eip155:8453"),
+                2,
+            )
+
+    def test_a_PaymentPayload_still_dumps_exactly_as_before(self):
+        """NO-REGRESSION GUARD — green in both states, on both envelopes."""
+        payload = _payload("base")
+        v1 = build_verify_request_for_version(payload, _requirements("base"), 1)
+        assert v1["paymentPayload"] == payload.model_dump(by_alias=True)
+
+        v2 = build_verify_request_for_version(
+            _payload("eip155:8453"), _requirements("eip155:8453"), 2
+        )
+        assert v2["paymentPayload"]["payload"] == payload.payload

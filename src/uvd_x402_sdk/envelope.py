@@ -117,6 +117,35 @@ def _is_caip2(network: Optional[str]) -> bool:
     return isinstance(network, str) and is_caip2_format(network)
 
 
+def _payload_wire(payload: PayloadLike) -> Dict[str, Any]:
+    """The payload as it goes on the wire, model or raw dict alike.
+
+    A dict is copied through **unreshaped**: it is the payer's own envelope, and
+    the signature inside it commits to the bytes as sent.
+    """
+    if isinstance(payload, Mapping):
+        return dict(payload)
+    return payload.model_dump(by_alias=True)
+
+
+def _inner_payload(payload: PayloadLike) -> Dict[str, Any]:
+    """The chain-specific signed material, which both versions keep under
+    ``payload`` — ``{"signature": ..., "authorization": {...}}`` on EVM.
+
+    Raises:
+        ValueError: If there is none. A v2 body with no signed material is a
+            400 at the facilitator that names no field; refusing here names it.
+    """
+    inner = _read(payload, "payload")
+    if not isinstance(inner, dict):
+        raise ValueError(
+            "The payment payload carries no `payload` block (the signature and "
+            "authorization the facilitator settles). Both x402 v1 and v2 keep "
+            f"it under that key; got {type(inner).__name__}."
+        )
+    return inner
+
+
 def to_resource_info_v2(requirements: PaymentRequirements) -> ResourceInfoV2:
     """Derive the v2 ``resource`` object from v1-shaped requirements.
 
@@ -234,7 +263,7 @@ def resolve_envelope_version(
 
 
 def _build_v1(
-    payload: PaymentPayload, requirements: PaymentRequirements
+    payload: PayloadLike, requirements: PaymentRequirements
 ) -> Dict[str, Any]:
     """The v1 envelope, byte-for-byte what the client emitted before this module.
 
@@ -242,10 +271,14 @@ def _build_v1(
     purpose: it names the ENVELOPE, not the payer's header, and the facilitator
     reads the envelope by shape. Echoing a ``2`` from the header here would
     declare a v2 body while sending a v1 one.
+
+    ``paymentPayload`` is whatever the caller handed over, dumped as-is — this
+    module chooses the envelope, it does not translate one payload shape into
+    the other.
     """
     return {
         "x402Version": 1,
-        "paymentPayload": payload.model_dump(by_alias=True),
+        "paymentPayload": _payload_wire(payload),
         "paymentRequirements": requirements.model_dump(
             by_alias=True, exclude_none=True
         ),
@@ -253,7 +286,7 @@ def _build_v1(
 
 
 def build_verify_request_for_version(
-    payload: PaymentPayload,
+    payload: PayloadLike,
     requirements: PaymentRequirements,
     version: int,
 ) -> Dict[str, Any]:
@@ -262,13 +295,17 @@ def build_verify_request_for_version(
     The v1 return is byte-for-byte what the client sent before envelope
     selection existed, so pinning ``1`` is exactly today's behaviour.
 
+    Takes the same payload shapes :func:`resolve_envelope_version` reads — a
+    resolution that succeeds and a build that raises one line later on the same
+    object would be half a fix.
+
     Example:
         >>> version = resolve_envelope_version(payload, requirements)
         >>> body = build_verify_request_for_version(payload, requirements, version)
     """
     if version == 2:
         return build_verify_request_v2(
-            payload=payload.payload,
+            payload=_inner_payload(payload),
             resource=to_resource_info_v2(requirements),
             accepted=to_accepted_requirements_v2(requirements),
         )
@@ -276,7 +313,7 @@ def build_verify_request_for_version(
 
 
 def build_settle_request_for_version(
-    payload: PaymentPayload,
+    payload: PayloadLike,
     requirements: PaymentRequirements,
     version: int,
 ) -> Dict[str, Any]:
@@ -287,7 +324,7 @@ def build_settle_request_for_version(
     """
     if version == 2:
         return build_settle_request_v2(
-            payload=payload.payload,
+            payload=_inner_payload(payload),
             resource=to_resource_info_v2(requirements),
             accepted=to_accepted_requirements_v2(requirements),
         )
