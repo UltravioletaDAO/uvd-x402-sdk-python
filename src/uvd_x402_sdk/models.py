@@ -164,6 +164,58 @@ class XRPLPayloadContent(BaseModel):
         populate_by_name = True
 
 
+class CasperAuthorization(BaseModel):
+    """
+    CEP-18 transfer_with_authorization data for Casper Network.
+
+    Mirrors ERC-3009 TransferWithAuthorization: a signed EIP-712 typed-data
+    message (casper-ecosystem/casper-eip-712 specification) authorizing a
+    CEP-18 token transfer. The facilitator uses it to submit a
+    transfer_with_authorization deploy on-chain and pays the gas.
+
+    Addresses are 66 hex chars with a "00" (account-hash) or "01" (hash) prefix.
+    """
+
+    from_address: str = Field(
+        ..., alias="from", description='Payer address ("00"/"01"-prefixed, 66 hex chars)'
+    )
+    to: str = Field(
+        ..., description='Recipient address ("00"/"01"-prefixed, 66 hex chars)'
+    )
+    value: str = Field(
+        ..., description="Amount in token base units (motes, 9 decimals for wCSPR)"
+    )
+    validAfter: str = Field(..., description="Unix timestamp after which auth is valid")
+    validBefore: str = Field(..., description="Unix timestamp before which auth is valid")
+    nonce: str = Field(..., description="Random 32-byte nonce as hex (prevents replay)")
+
+    class Config:
+        populate_by_name = True
+
+
+class CasperPayloadContent(BaseModel):
+    """
+    Casper Network payment payload using CEP-18 transfer_with_authorization.
+
+    Contains an EIP-712 signed authorization plus the payer's public key.
+    The facilitator (https://x402-facilitator.cspr.cloud) verifies the
+    signature and submits the deploy to the CEP-18 contract, paying gas.
+
+    Casper uses the x402 "exact" scheme with v2 CAIP-2 network identifiers:
+    "casper:casper" (mainnet) / "casper:casper-test" (testnet).
+    The settlement asset is wCSPR (9 decimals: 1 CSPR = 1e9 motes).
+    """
+
+    signature: str = Field(
+        ..., description="65-byte EIP-712 signature as a hex string"
+    )
+    publicKey: str = Field(
+        ...,
+        description="Payer public key hex (01-prefixed ed25519 or 02-prefixed secp256k1)",
+    )
+    authorization: CasperAuthorization
+
+
 class SuiPayloadContent(BaseModel):
     """
     Sui payment payload using sponsored transactions.
@@ -218,6 +270,7 @@ PayloadContent = Union[
     StellarPayloadContent,
     SuiPayloadContent,
     XRPLPayloadContent,
+    CasperPayloadContent,
 ]
 
 
@@ -302,6 +355,10 @@ class PaymentPayload(BaseModel):
     def get_xrpl_payload(self) -> XRPLPayloadContent:
         """Parse payload as XRPL format (t54 signed Payment tx blob)."""
         return XRPLPayloadContent(**self.payload)
+
+    def get_casper_payload(self) -> CasperPayloadContent:
+        """Parse payload as Casper format (CEP-18 transfer_with_authorization)."""
+        return CasperPayloadContent(**self.payload)
 
 
 class PaymentRequirements(BaseModel):

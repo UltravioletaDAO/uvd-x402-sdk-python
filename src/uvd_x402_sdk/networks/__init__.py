@@ -4,7 +4,7 @@ Network configurations for x402 payments.
 This module provides configuration for all supported blockchain networks,
 including USDC contract addresses, RPC URLs, and network-specific parameters.
 
-The SDK supports 25 blockchain networks across 7 network families:
+The SDK supports 27 blockchain networks across 8 network families:
 - 15 EVM networks: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
                    Celo, HyperEVM, Unichain, Monad, Scroll, SKALE Base,
                    SKALE Base Sepolia, Robinhood, Robinhood Testnet
@@ -14,6 +14,7 @@ The SDK supports 25 blockchain networks across 7 network families:
 - 2 Algorand networks: Algorand mainnet, Algorand testnet
 - 2 Sui networks: Sui mainnet, Sui testnet
 - 2 XRPL networks: XRP Ledger mainnet, XRP Ledger testnet (native XRP)
+- 2 Casper networks: Casper mainnet, Casper testnet (wCSPR, CEP-18)
 
 (13 EVM mainnets + 2 EVM testnets)
 
@@ -54,7 +55,7 @@ from uvd_x402_sdk.networks.base import (
 )
 
 # Import all default network configurations
-from uvd_x402_sdk.networks import evm, solana, near, stellar, algorand, sui, xrpl
+from uvd_x402_sdk.networks import evm, solana, near, stellar, algorand, sui, xrpl, casper
 
 __all__ = [
     # Core

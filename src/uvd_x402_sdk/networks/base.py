@@ -60,6 +60,7 @@ class NetworkType(Enum):
     - ALGORAND: ASA (Algorand Standard Assets) transfer via signed transaction
     - SUI: Sui sponsored transactions (Move-based programmable transactions)
     - XRPL: XRP Ledger pre-signed Payment transaction blobs (native XRP)
+    - CASPER: CEP-18 transfer_with_authorization deploys (EIP-712 typed data)
 
     Note: SOLANA is deprecated, use SVM instead for Solana-compatible chains.
     """
@@ -72,6 +73,7 @@ class NetworkType(Enum):
     ALGORAND = "algorand"  # Algorand ASA transfers
     SUI = "sui"  # Sui Move VM chains (sponsored transactions)
     XRPL = "xrpl"  # XRP Ledger (native XRP, pre-signed Payment tx blobs)
+    CASPER = "casper"  # Casper Network (CEP-18 transfer_with_authorization)
 
     @classmethod
     def is_svm(cls, network_type: "NetworkType") -> bool:
@@ -393,6 +395,7 @@ _CAIP2_NAMESPACE_MAP = {
     "stellar": NetworkType.STELLAR,
     "algorand": NetworkType.ALGORAND,
     "sui": NetworkType.SUI,
+    "casper": NetworkType.CASPER,
 }
 
 # Network name to CAIP-2 format
@@ -426,6 +429,9 @@ _NETWORK_TO_CAIP2 = {
     # Sui
     "sui": "sui:mainnet",
     "sui-testnet": "sui:testnet",
+    # Casper
+    "casper": "casper:casper",
+    "casper-testnet": "casper:casper-test",
 }
 
 # CAIP-2 to network name mapping (reverse of above)
@@ -489,6 +495,11 @@ def parse_caip2_network(caip2_id: str) -> Optional[str]:
             return "sui"
         if reference == "testnet":
             return "sui-testnet"
+    if namespace == "casper":
+        if reference == "casper":
+            return "casper"
+        if reference == "casper-test":
+            return "casper-testnet"
 
     return None
 
