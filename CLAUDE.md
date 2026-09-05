@@ -204,9 +204,30 @@ payment_requirements = {
 
 ## Known Limitations
 
-1. **X402Client.process_payment()** - Doesn't accept `token_type` parameter yet (since v0.36.0 the `asset` + `eip712_domain` overrides cover the non-USDC settle case; amounts still convert with the network's USDC decimals)
-2. **Response builder** - Hardcodes `token="USDC"` in 402 response
-3. **SVM/Stellar/NEAR** - Only USDC supported
+> Verificadas contra el codigo el 2026-09-05. Dos de las tres que estaban aqui
+> ya no eran ciertas y mandaban a arreglar lo que funciona; quedan escritas
+> abajo con el comando que las cierra.
+
+1. **Response builder** - Hardcodes `token="USDC"` in the 402 response
+   (`response.py:131`, y el mensaje por defecto en `response.py:117`). Vigente:
+   `grep -n 'token="USDC"' src/uvd_x402_sdk/response.py`. Un 402 que anuncia
+   EURC sigue diciendo USDC en el campo `token`.
+2. **Stellar y NEAR** - Solo USDC. Vigente: ninguno de los dos define un dict
+   `tokens` (`grep -n 'tokens=' src/uvd_x402_sdk/networks/{stellar,near}.py`
+   no devuelve nada), asi que no hay a donde colgar un segundo token.
+
+### Cerradas (no volver a "arreglarlas")
+
+- ~~`process_payment()` convierte montos con los decimales de USDC de la red~~ -
+  **falso desde antes de 0.76.0**. Acepta `token_decimals` y lo propaga por
+  `verify` / `settle` / `process_payment`
+  (`grep -c 'token_decimals' src/uvd_x402_sdk/client.py` -> 26 lineas, de la 727
+  a la 2180), con tests que cubren 18, 7, el borde `0` falsy y el negativo
+  (`tests/test_multi_token_requirements.py`). Lo que sigue sin existir es el
+  parametro llamado `token_type`, que es otra cosa.
+- ~~SVM solo soporta USDC~~ - **falso**. Solana ya trae AUSD por Token2022
+  (`grep -n '"ausd"' src/uvd_x402_sdk/networks/solana.py` -> 86), con su
+  `token_2022_program_id` en `extra_config` (linea 97).
 
 ## Development Commands
 
