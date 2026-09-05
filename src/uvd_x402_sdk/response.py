@@ -36,6 +36,7 @@ def create_402_response(
     *,
     omit_unused_solana_facilitator: bool = False,
     require_recipient: bool = False,
+    token: str = "USDC",
 ) -> Dict[str, Any]:
     """
     Create a standard 402 Payment Required response body.
@@ -65,6 +66,13 @@ def create_402_response(
             have been working around it by pre-constraining
             `supported_networks` (describe.net `build_config` does exactly
             that).
+        token: Symbol of the stablecoin being charged. Names the currency in
+            BOTH places a buyer reads it -- the `token` field and the generated
+            `message` -- which used to say "USDC" no matter what the server
+            actually charged. Default "USDC" keeps the historical body
+            byte-for-byte. An explicit `message` still wins; this only feeds
+            the DEFAULT one. Empty is a ValueError: a challenge that names no
+            currency gives the buyer nothing to decide what to sign with.
 
     Returns:
         Dictionary suitable for JSON response body
@@ -112,9 +120,12 @@ def create_402_response(
                 # Non-EVM networks: include name
                 supported_chains.append(network_name)
 
+    if not token:
+        raise ValueError("token must be a non-empty symbol, e.g. 'USDC' or 'EURC'")
+
     # Default message
     if not message:
-        message = f"Payment of ${amount} USDC required"
+        message = f"Payment of ${amount} {token} required"
         if resource_description:
             message += f" for {resource_description}"
 
@@ -128,7 +139,7 @@ def create_402_response(
             else config.facilitator_solana
         ),
         amount=str(amount),
-        token="USDC",
+        token=token,
         supportedChains=supported_chains,
         message=message,
     )

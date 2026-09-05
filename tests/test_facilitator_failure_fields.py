@@ -306,3 +306,81 @@ class TestPorConstruccion:
         assert headers["Retry-After"] == "5"
         assert body["details"]["errorCode"] == "upstream_rpc_unavailable (ref: 7f3a)"
         assert body["details"]["retryable"] is True
+
+
+class TestElHashSubeAlTopLevel:
+    """La tercera mitad: el 503 que un paywall EMITE cuando el hash ya existe.
+
+    ``transient_503_response`` se llama despues de que ``is_transient_error``
+    dijo transitorio. Con el default eso nunca ocurre sobre un cuerpo con hash
+    — el guard anti-doble-settle lo declara final. Pero con
+    ``anti_double_settle=False`` el llamador ASUME ese riesgo y entra igual, y
+    entonces el documento que sale al comprador decia ``retryable: true`` arriba
+    y escondia en ``details`` la unica prueba de que el facilitador ya
+    DIFUNDIO. Arriba, la senal de peligro no existia: ni ``safeToRetry``, ni el
+    hash.
+
+    Es el mismo defecto que 0.76.0 arreglo en el constructor — dos verdades
+    sobre el mismo objeto y la equivocada es la barata de leer — un nivel mas
+    arriba, en el JSON que cruza la red hasta el que pago.
+    """
+
+    @staticmethod
+    def _con_hash(reason=None):
+        from uvd_x402_sdk.client import transient_503_response
+
+        exc = FacilitatorError(
+            "settle failed",
+            status_code=502,
+            response_body=json.dumps(UNCONFIRMED_BODY),
+            reason=reason,
+            retry_after=5.0,
+        )
+        body, _ = transient_503_response(exc)
+        return body
+
+    def test_el_hash_viaja_en_el_top_level(self):
+        """El comprador lee el top level. Si el hash solo vive en ``details``,
+        reintentar es lo unico que puede hacer con lo que ve."""
+        body = self._con_hash()
+        assert body["transaction"] == UNCONFIRMED_TX
+
+    def test_safe_to_retry_es_falso_por_el_hash_aunque_no_haya_reason(self):
+        """``safeToRetry`` se agregaba SOLO si el facilitador mando ``reason``.
+        Un ``settlement_unconfirmed`` con hash y sin ``reason`` salia sin
+        ninguna marca de peligro arriba."""
+        body = self._con_hash()
+        assert body["safeToRetry"] is False
+
+    def test_el_hash_gana_sobre_un_reason_que_autoriza_reintentar(self):
+        """El peor de los cinco. ``holder_unknown`` esta en
+        ``WRITE_NOT_ATTEMPTED_REASONS``: significa "el write nunca corrio,
+        re-presenta". Con un hash en el mismo cuerpo eso es falso, y el body
+        salia diciendole al comprador ``safeToRetry: true`` con la prueba de la
+        difusion adentro. La evidencia dura gana sobre la etiqueta."""
+        body = self._con_hash(reason="holder_unknown")
+        assert body["safeToRetry"] is False
+
+    def test_el_payment_id_tambien_sube(self):
+        """Decir donde mirar es decirlo entero: el hash se busca en el
+        explorador, el ``paymentId`` se busca en el facilitador."""
+        body = self._con_hash()
+        assert body["paymentId"] == UNCONFIRMED_PAYMENT_ID
+
+    def test_control_el_502_sin_hash_no_cambia_en_nada(self):
+        """La guarda del camino feliz: el 502 transitorio de siempre — sin
+        hash — sigue saliendo exactamente como salia, sin campos nuevos."""
+        from uvd_x402_sdk.client import transient_503_response
+
+        exc = FacilitatorError(
+            "settle failed",
+            status_code=502,
+            response_body=json.dumps(TRANSIENT_BODY),
+            retry_after=5.0,
+        )
+        body, headers = transient_503_response(exc)
+        assert body["retryable"] is True
+        assert headers["Retry-After"] == "5"
+        assert "transaction" not in body
+        assert "paymentId" not in body
+        assert "safeToRetry" not in body
