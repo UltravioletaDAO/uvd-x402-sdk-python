@@ -261,6 +261,13 @@ def transient_503_response(
     ``Retry-After`` is the facilitator's value clamped to
     ``MAX_RETRY_AFTER_SECONDS`` — a misconfigured deployment answering
     ``Retry-After: 3600`` gets to say "later", not to park a buyer for an hour.
+
+    And when the exception carries a transaction hash, ``transaction`` and
+    ``paymentId`` are lifted to the TOP level and ``safeToRetry`` is forced to
+    ``False`` — whatever ``reason`` says. A caller only gets here over such a
+    body by passing ``anti_double_settle=False``, and owning that risk is not
+    the same as being told nothing about it: the buyer reads the top level, and
+    a hash is the proof the facilitator already broadcast.
     """
     retry_after = retry_after_seconds(exc, default_retry_after) or default_retry_after
     retry_after = min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
@@ -272,6 +279,23 @@ def transient_503_response(
     if reason is not None:
         body["reason"] = reason
         body["safeToRetry"] = write_retry_is_safe(reason)
+
+    # A hash in a FAILURE body means the facilitator got as far as
+    # BROADCASTING. The 503 itself still stands -- the caller reached here by
+    # opting out of the anti-double-settle guard, and that is their risk to
+    # own -- but the buyer reads the TOP level, and the only proof of the
+    # broadcast used to sit one level down in ``details``. Worse, a ``reason``
+    # in WRITE_NOT_ATTEMPTED_REASONS made ``safeToRetry`` read True over a body
+    # that carried a hash. Same rule as
+    # :meth:`FacilitatorError._retryable_verdict`, one layer up: the evidence
+    # beats the label, and refusing to promise safety without saying where to
+    # look is the dead end this release closed everywhere else.
+    details = body.get("details") or {}
+    if details.get("transaction") is not None:
+        body["transaction"] = details["transaction"]
+        body["safeToRetry"] = False
+        if details.get("paymentId") is not None:
+            body["paymentId"] = details["paymentId"]
     return body, {
         "Content-Type": "application/json",
         "Retry-After": str(int(retry_after)) if retry_after == int(retry_after) else str(retry_after),
