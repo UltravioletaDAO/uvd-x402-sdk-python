@@ -780,3 +780,120 @@ def build_lifecycle_auth(
         "nonce": "0x" + _nonce_to_bytes32(nonce_hex).hex(),
         "signature": firmada["signature"],
     }
+
+
+def _sig_to_hex(signature: Any) -> str:
+    """Normaliza la firma a `0x` + 130 hex, sin aceptar nada de otro largo.
+
+    Una firma corta o larga no es un `Verdict` del facilitador: es un
+    `bad_signature` mudo que no dice cual de las dos puntas la trunco.
+    """
+    if isinstance(signature, (bytes, bytearray)):
+        raw = bytes(signature)
+    elif isinstance(signature, str):
+        s = signature[2:] if signature[:2].lower() == "0x" else signature
+        try:
+            raw = bytes.fromhex(s)
+        except ValueError as exc:
+            raise ValueError(
+                f"lifecycleAuth.signature no es hex: {signature!r}"
+            ) from exc
+    else:
+        raise ValueError(f"lifecycleAuth.signature invalida: {signature!r}")
+    if len(raw) != 65:
+        raise ValueError(
+            f"lifecycleAuth.signature debe ser de 65 bytes (r||s||v), "
+            f"llegaron {len(raw)}"
+        )
+    return "0x" + raw.hex()
+
+
+def lifecycle_auth_from_signature(
+    typed_data: dict[str, Any],
+    signature: Any,
+    signer: str,
+) -> dict[str, Any]:
+    """Arma el bloque ``payload.lifecycleAuth`` con una firma HECHA AFUERA.
+
+    El otro extremo de :func:`build_lifecycle_auth`: aca la llave no esta en el
+    proceso. El backend arma el typed data con
+    :func:`build_lifecycle_typed_data`, se lo pasa a un navegador (o a un KMS,
+    o a un tercero), y recibe de vuelta SOLO los 65 bytes. Esto los une.
+
+    ``deadline`` y ``nonce`` NO se pasan por separado: salen del mismo
+    ``typed_data`` que se firmo. Aceptarlos aparte seria dejar que el bloque de
+    wire declare una ventana distinta de la que entro al digest — un
+    ``bad_signature`` que ninguna de las dos puntas puede nombrar.
+
+    La firma se VERIFICA contra ``signer`` antes de devolver nada. Transportar
+    una orden ajena sin recuperar el firmante es mandar plata a un
+    ``bad_signature`` remoto: el error llega sin decir si estaba mal la firma,
+    el firmante o el typed data. Aca si se puede decir.
+
+    Args:
+        typed_data: lo que devolvio :func:`build_lifecycle_typed_data`.
+        signature: los 65 bytes (hex con o sin ``0x``, o ``bytes``).
+        signer: la direccion que dice haber firmado.
+
+    Returns:
+        ``{"signer", "deadline", "nonce", "signature"}`` — el MISMO dict que
+        :func:`build_lifecycle_auth` produce para ese nonce y ese deadline.
+
+    Raises:
+        ValueError: typed data que no es una ``LifecycleOrder``, firma de largo
+            equivocado, o una firma que recupera a otra direccion.
+        ImportError: sin ``eth-account`` no hay con que recuperar al firmante,
+            y devolver la orden sin verificar es justo lo que esto evita.
+    """
+    _, _, to_checksum_address = _require_eth_libs()
+
+    try:
+        from eth_account import Account
+        from eth_account.messages import encode_typed_data
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "eth-account es necesario para verificar una orden firmada afuera. "
+            "Instalalo con: pip install uvd-x402-sdk[signer]"
+        ) from exc
+
+    if not isinstance(typed_data, dict) or "message" not in typed_data:
+        raise ValueError(
+            "typed_data debe ser lo que devuelve build_lifecycle_typed_data"
+        )
+    mensaje = typed_data["message"]
+    dominio = typed_data.get("domain") or {}
+    if (
+        dominio.get("name") != LIFECYCLE_DOMAIN_NAME
+        or dominio.get("version") != LIFECYCLE_DOMAIN_VERSION
+    ):
+        raise ValueError(
+            f"el dominio no es el de una orden de ciclo de vida "
+            f"({LIFECYCLE_DOMAIN_NAME!r} v{LIFECYCLE_DOMAIN_VERSION}): "
+            f"llego {dominio!r}"
+        )
+    faltan = [k for k in ("action", "amount", "deadline", "nonce") if k not in mensaje]
+    if faltan:
+        raise ValueError(f"al typed data le faltan campos de la orden: {faltan}")
+
+    firma = _sig_to_hex(signature)
+    declarado = to_checksum_address(signer)
+
+    signable = encode_typed_data(
+        domain_data=typed_data["domain"],
+        message_types=typed_data["types"],
+        message_data=mensaje,
+    )
+    recuperado = Account.recover_message(signable, signature=bytes.fromhex(firma[2:]))
+    if to_checksum_address(recuperado) != declarado:
+        raise ValueError(
+            f"la firma recupera a {recuperado} y el signer declarado es "
+            f"{declarado}: el facilitador lo rechazaria como `bad_signature` "
+            "sin decir cual de los dos estaba mal"
+        )
+
+    return {
+        "signer": declarado,
+        "deadline": int(mensaje["deadline"]),
+        "nonce": "0x" + _nonce_to_bytes32(mensaje["nonce"]).hex(),
+        "signature": firma,
+    }

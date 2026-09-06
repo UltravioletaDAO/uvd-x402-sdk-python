@@ -977,6 +977,7 @@ class AdvancedEscrowClient:
         payment_info: PaymentInfo,
         amount: Optional[int] = None,
         lifecycle_signer: Optional["WalletAdapter"] = None,
+        lifecycle_auth: Optional[dict] = None,
     ) -> TransactionResult:
         """
         Internal: send a gasless settle request to the facilitator.
@@ -989,7 +990,20 @@ class AdvancedEscrowClient:
                 lifecycle order. Omitted -> the request goes out byte-identical
                 to before, which is what keeps every existing caller working
                 while the facilitator sits in `log`.
+            lifecycle_auth: Optional ALREADY-SIGNED order, transported verbatim.
+                Mutually exclusive with `lifecycle_signer`.
         """
+        # Los dos juntos no tienen una lectura correcta: uno firma una orden
+        # nueva (nonce y deadline propios) y el otro trae una ajena. Elegir en
+        # silencio manda al facilitador una orden distinta de la que el llamador
+        # cree haber mandado — y sobre `release` eso es plata que se mueve.
+        if lifecycle_signer is not None and lifecycle_auth is not None:
+            raise ValueError(
+                "lifecycle_signer y lifecycle_auth son excluyentes: el primero "
+                "FIRMA una orden nueva y el segundo transporta una ya firmada. "
+                "Pasa uno solo."
+            )
+
         amt = amount if amount is not None else payment_info.max_amount
 
         # Un solo dict, firmado y enviado. Recomputarlo para firmar seria abrir
@@ -1013,6 +1027,12 @@ class AdvancedEscrowClient:
                 chain_id=self.chain_id,
                 wallet=lifecycle_signer,
             )
+        elif lifecycle_auth is not None:
+            # Tal cual llego. El digest ya esta cerrado sobre ESTE nonce y ESTE
+            # deadline: normalizar un campo aca —recortar un hex, reordenar las
+            # claves, recalcular la ventana— es firmar una cosa y enviar otra.
+            # Quien la armo es quien la valida (`lifecycle_auth_from_signature`).
+            inner["lifecycleAuth"] = lifecycle_auth
 
         payload = {
             "x402Version": 2,
@@ -1087,6 +1107,7 @@ class AdvancedEscrowClient:
         payment_info: PaymentInfo,
         amount: Optional[int] = None,
         lifecycle_signer: Optional["WalletAdapter"] = None,
+        lifecycle_auth: Optional[dict] = None,
     ) -> TransactionResult:
         """
         RELEASE via facilitator (GASLESS) - Send escrowed funds to receiver.
@@ -1105,12 +1126,18 @@ class AdvancedEscrowClient:
                 receiver, because paying yourself out of an escrow is the thing
                 escrow exists to stop. Omitted -> no order is sent, which the
                 facilitator's `off` and `log` modes still accept.
+            lifecycle_auth: An order ALREADY signed by someone else — the wire
+                block ``{signer, deadline, nonce, signature}``. This is the
+                whole point when the payer signs in a browser and this process
+                only transports: it is attached verbatim, never re-signed.
+                Mutually exclusive with `lifecycle_signer`; build it with
+                :func:`~uvd_x402_sdk.escrow_signing.lifecycle_auth_from_signature`.
 
         Returns:
             TransactionResult with the on-chain transaction hash
         """
         return self._settle_via_facilitator(
-            "release", payment_info, amount, lifecycle_signer
+            "release", payment_info, amount, lifecycle_signer, lifecycle_auth
         )
 
     def refund_via_facilitator(
@@ -1118,6 +1145,7 @@ class AdvancedEscrowClient:
         payment_info: PaymentInfo,
         amount: Optional[int] = None,
         lifecycle_signer: Optional["WalletAdapter"] = None,
+        lifecycle_auth: Optional[dict] = None,
     ) -> TransactionResult:
         """
         REFUND via facilitator (GASLESS) - Return escrowed funds to payer.
@@ -1135,12 +1163,17 @@ class AdvancedEscrowClient:
                 the RECEIVER, the operator owner, or the payer once
                 `authorizationExpiry` has passed — a payer refunding before
                 that is the chargeback.
+            lifecycle_auth: An order ALREADY signed by someone else — the wire
+                block ``{signer, deadline, nonce, signature}``, attached
+                verbatim. Mutually exclusive with `lifecycle_signer`; build it
+                with
+                :func:`~uvd_x402_sdk.escrow_signing.lifecycle_auth_from_signature`.
 
         Returns:
             TransactionResult with the on-chain transaction hash
         """
         return self._settle_via_facilitator(
-            "refundInEscrow", payment_info, amount, lifecycle_signer
+            "refundInEscrow", payment_info, amount, lifecycle_signer, lifecycle_auth
         )
 
     def query_escrow_state(self, payment_info: PaymentInfo) -> dict:
