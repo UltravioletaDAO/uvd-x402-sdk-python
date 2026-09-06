@@ -262,7 +262,10 @@ class TestXRPLNetwork:
         client = X402Client(
             recipient_address="0x1234567890123456789012345678901234567890"
         )
-        assert client.validate_network("xrpl-mainnet") == "xrpl-mainnet"
+        # "xrpl-mainnet" still resolves, but normalises to the name the
+        # facilitator advertises. See tests/test_xrpl_pricing.py.
+        assert client.validate_network("xrpl-mainnet") == "xrpl"
+        assert client.validate_network("xrpl") == "xrpl"
         assert client.validate_network("xrpl-testnet") == "xrpl-testnet"
 
     def test_xrpl_fee_payers(self):

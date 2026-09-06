@@ -124,7 +124,7 @@ class X402Config:
         # Sui (2)
         "sui", "sui-testnet",
         # XRPL (2) - native XRP
-        "xrpl-mainnet", "xrpl-testnet",
+        "xrpl", "xrpl-testnet",
     ])
 
     # Per-network recipient overrides

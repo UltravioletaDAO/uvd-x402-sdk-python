@@ -760,6 +760,14 @@ class X402Client:
                 supported_networks=get_supported_network_names(),
             )
 
+        # A price in USD only becomes base units when the settlement asset is
+        # worth a dollar per whole unit. Without an explicit `asset` the network
+        # default settles, and on XRPL that default is native XRP: $1.00 would
+        # be charged as 1 XRP. `token_decimals` does not rescue this — it fixes
+        # SCALE, and the defect is UNIT. Refuse before signing anything.
+        if not network_config.usd_pegged and asset is None:
+            raise ValueError(network_config.usd_conversion_error())
+
         # Convert USD to token amount. With an explicit decimals the conversion
         # stays in Decimal: float(Decimal("0.07")) is 0.070000000000000007, and
         # at 18 decimals that rounds into a different amount than the payer

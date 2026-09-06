@@ -186,7 +186,7 @@ def premium_endpoint(payment_result):
 | Algorand Testnet | Algorand | - | `algorand:testnet` | Active |
 | Sui | Sui | - | `sui:mainnet` | Active |
 | Sui Testnet | Sui | - | `sui:testnet` | Active |
-| XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl-mainnet` | Active |
+| XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl` | Active |
 | XRP Ledger Testnet | XRPL | - | _(no CAIP-2)_ `xrpl-testnet` | Active |
 
 ### Supported Tokens
@@ -605,16 +605,31 @@ validate_sui_payload(payload.payload)  # Raises ValueError if invalid
 
 XRPL uses the t54 scheme. The user signs a Payment transaction sending native XRP to the merchant; the facilitator submits it to the ledger and pays the network fee. Payment details (`payTo`, `amount`, `asset`) travel in `PaymentRequirements`/`extra`, so the payload carries only the signed transaction blob.
 
+**XRPL settles in XRP, and XRP is not a dollar.** A price written in USD cannot be
+scaled by the network's 6 decimals — that charges 1 XRP for `Decimal("1.00")`. Since
+0.77.0 the SDK refuses that conversion and asks you to name a dollar-pegged token the
+facilitator settles on XRPL (it lists them in `GET /supported`; USDC is there), or to
+price the call in drops yourself.
+
 ```python
 from uvd_x402_sdk import X402Client, X402Config
 
 config = X402Config(
     recipient_xrpl="r...YourXRPLAddress",
-    supported_networks=["xrpl-mainnet"],
+    supported_networks=["xrpl"],
 )
 
 client = X402Client(config=config)
-result = client.process_payment(x_payment_header, Decimal("1.00"))
+
+# USDC on XRPL — a dollar really is a dollar here.
+XRPL_USDC = "5553444300000000000000000000000000000000.rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE"
+result = client.process_payment(
+    x_payment_header, Decimal("1.00"),
+    asset=XRPL_USDC, token_decimals=6,
+)
+
+# Charging in native XRP means pricing in XRP, not in dollars:
+#   result = client.process_payment(header, Decimal("2.5"), asset="XRP", token_decimals=6)
 
 # XRPL payload carries only the signed Payment transaction blob (hex)
 payload = client.extract_payload(x_payment_header)
@@ -641,7 +656,7 @@ assert drops_to_xrp(1_000_000) == 1.0
 assert is_valid_xrpl_address("rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp")
 
 # Get the facilitator fee payer (submits the tx + pays the network fee)
-fee_payer = get_xrpl_fee_payer("xrpl-mainnet")
+fee_payer = get_xrpl_fee_payer("xrpl")
 print(f"XRPL fee payer: {fee_payer}")  # rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp
 ```
 
@@ -2061,6 +2076,15 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.77.0 (2026-09-05)
+- **Fixed**: **XRPL charged in XRP what the integrator wrote in dollars.** `process_payment(header, Decimal("1.00"))` on XRPL produced `maxAmountRequired = 1000000` drops — **1 XRP**, not one dollar. The scaling was right (XRP really has 6 decimals); the **unit** was wrong. `NetworkConfig.get_token_amount()` multiplies a USD price by `10**decimals`, which only turns dollars into base units when one whole unit IS a dollar — true for every USDC/EURC/AUSD/PYUSD/USDT/USDG network in the registry, false for a chain that settles in its own floating native asset. Any endpoint priced in USD over XRPL has been charging the XRP price of its number, in whichever direction the market moved
+- **Added**: `NetworkConfig.usd_pegged` (default `True`, so the 23 other networks are byte-for-byte unchanged). XRPL mainnet and testnet carry `False`, and both `get_token_amount()` and the client's requirements builder now **refuse** rather than convert. The error names the asset, shows what the old code would have charged, and points at `GET /supported` for a pegged token — a refusal that does not say where to look just moves the dead end
+- **`token_decimals` does not open this door.** It fixes SCALE and the defect is UNIT: six decimals of XRP are still XRP. The way through is naming an `asset` — the facilitator settles a dollar-pegged USDC on XRPL (issuer `rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE`, Circle) — with its `token_decimals`, or pricing the call in drops yourself
+- **Fixed**: **XRPL mainnet is `xrpl`, not `xrpl-mainnet`.** The facilitator advertises `xrpl` in `GET /supported` and prints `xrpl` everywhere (`x402-rs/src/network.rs:189`); it takes `xrpl-mainnet` only as an informal `FromStr` alias, which its own source calls "right for a lookup and wrong for a wire format" (`network.rs:719`). The SDK put the alias on the wire, so `X402Client(..., verify_facilitator_support=True)` refused to start with *"does not settle: xrpl-mainnet"* against a network the facilitator settles fine. Measured before and after against the live facilitator; the testnet name already matched and does not move
+- **`xrpl-mainnet` keeps resolving** as an alias (`get_network`, `normalize_network`, `X402Config.supported_networks`), through the same `_NETWORK_ALIASES` table that already carried `skale`. It is no longer a separate registry entry, so network counts and listings are unchanged, and it is no longer what the SDK emits — `validate_network("xrpl-mainnet")` now returns `"xrpl"`
+- Both defects were surfaced by the audit of PR #2 (Casper), as pre-existing defects of `main` that the PR would have inherited — see `docs/reports/2026-09-05-auditoria-pr2-casper.md` (H2, and the closing recommendation)
+- 889 tests pass (881 before, 8 added, none lost); cross-language conformance against the TypeScript SDK still 266 checks PASSED; `ruff` and `mypy` counts unchanged (63 / 120)
 
 ### v0.76.0 (2026-09-04)
 - **Fixed**: the SDK refused to retry an unconfirmed settlement and then threw away the one thing that made the refusal actionable. The facilitator answers `502 {"error":"settlement_unconfirmed","transaction":"0x…","paymentId":"0x…","retryable":false}` — the tx MAY be mined, so retrying is paying twice — and the anti-double-settle guard already stopped the loop. But `_extract_tx_hash_from_body` was private: the hash fed the verdict, went into a warning log, and was **discarded**. The caller got "not retryable" and **nothing to check**, which rebuilds the same dead end one layer up: whoever paid cannot find out whether their money moved
