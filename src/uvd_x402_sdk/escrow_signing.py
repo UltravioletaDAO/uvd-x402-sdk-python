@@ -485,3 +485,298 @@ def build_escrow_pre_auth(
         },
         separators=(",", ":"),
     )
+
+
+# =============================================================================
+# ORDEN DE CICLO DE VIDA DEL ESCROW — release / refundInEscrow
+# =============================================================================
+#
+# `release` y `refundInEscrow` mueven plata que YA esta depositada, asi que no
+# llevan firma ERC-3009: no queda transferencia que autorizar. Lo que queda
+# abierto es la otra mitad — QUIEN tiene derecho a pedir el movimiento — y hasta
+# ahora la respuesta era "el que llame". El 2026-08-30 alguien lo sondeo: cinco
+# llamadas de un tercero con `paymentInfo` fabricado, dos minadas, gas gastado.
+#
+# El facilitador (x402-rs, `src/payment_operator/lifecycle_auth.rs`, PR #21) ya
+# verifica una orden EIP-712 firmada por la parte a la que la accion pertenece.
+# Esto es el otro extremo del cable: lo que la FIRMA.
+#
+#   | accion           | firmantes aceptados                                     |
+#   |------------------|---------------------------------------------------------|
+#   | release          | el payer; el dueno del operador (`FEE_RECIPIENT()`)     |
+#   | refundInEscrow   | el receiver; el dueno del operador; el payer, pero solo  |
+#   |                  | pasado `authorizationExpiry`                             |
+#
+# El receiver NUNCA puede hacer release (auto-pagarse es justo lo que el escrow
+# existe para impedir) y el payer NUNCA puede refundear antes del vencimiento
+# (eso es el chargeback).
+#
+# La orden se firma sobre el MISMO `paymentInfo` que se envia, asi que ningun
+# lado recomputa `getHash` y no hay nada que derive.
+#
+# Modos del facilitador (`ESCROW_LIFECYCLE_AUTH`): `off` (default, ni la mira),
+# `log` (verifica si viene, registra el veredicto, no rechaza) y `enforce`. Por
+# eso `lifecycle_signer` es OPCIONAL en todo el camino: sin el, el pedido sale
+# exactamente como salia antes.
+
+# Dominio EIP-712. `chainId` es el de la red del pago; NO hay
+# `verifyingContract` porque `paymentInfo.operator` ya viaja dentro del struct
+# firmado. Copiado de lifecycle_auth.rs:69-70 (DOMAIN_NAME / DOMAIN_VERSION).
+LIFECYCLE_DOMAIN_NAME = "x402 escrow lifecycle"
+LIFECYCLE_DOMAIN_VERSION = "1"
+
+# Techo de `deadline` del facilitador: 900 s (lifecycle_auth.rs:64,
+# DEFAULT_MAX_DEADLINE_SECS). Una orden filtrada no es un permiso permanente.
+LIFECYCLE_MAX_DEADLINE_SECS = 900
+
+# El default que firmamos deja 300 s de colchon contra el techo. Firmar los 900
+# exactos es una orden que un reloj del facilitador atrasado cinco segundos ya
+# lee como `deadline_too_far`: el margen no es cosmetico, es lo que separa una
+# orden valida de un rechazo que el llamador no puede explicar.
+LIFECYCLE_DEFAULT_DEADLINE_SECS = 600
+
+# Los dos valores de wire, que son tambien los que entran a la firma
+# (lifecycle_auth.rs:130-133, `LifecycleAction::as_str`).
+LIFECYCLE_ACTIONS = ("release", "refundInEscrow")
+
+# El type string de `PaymentInfo` es el de AuthCaptureEscrow VERBATIM — el mismo
+# que este SDK ya tipa para ERC-3009 (`_PAYMENT_INFO_ABI` arriba). El orden de
+# los campos es parte del type hash: reordenarlo invalida toda orden emitida.
+# Espejo exacto de lifecycle_auth.rs:73-99.
+LIFECYCLE_ORDER_TYPES: dict[str, list[dict[str, str]]] = {
+    "LifecycleOrder": [
+        {"name": "action", "type": "string"},
+        {"name": "amount", "type": "uint256"},
+        {"name": "deadline", "type": "uint256"},
+        {"name": "nonce", "type": "bytes32"},
+        {"name": "paymentInfo", "type": "PaymentInfo"},
+    ],
+    "PaymentInfo": [
+        {"name": "operator", "type": "address"},
+        {"name": "payer", "type": "address"},
+        {"name": "receiver", "type": "address"},
+        {"name": "token", "type": "address"},
+        {"name": "maxAmount", "type": "uint120"},
+        {"name": "preApprovalExpiry", "type": "uint48"},
+        {"name": "authorizationExpiry", "type": "uint48"},
+        {"name": "refundExpiry", "type": "uint48"},
+        {"name": "minFeeBps", "type": "uint16"},
+        {"name": "maxFeeBps", "type": "uint16"},
+        {"name": "feeReceiver", "type": "address"},
+        {"name": "salt", "type": "uint256"},
+    ],
+}
+
+# Las 11 claves que el paymentInfo de wire DEBE traer. `payer` no esta: viaja
+# como hermano (`payload.payer`), no adentro del paymentInfo — asi lo arma el
+# facilitador (`ContractPaymentInfo::from_lifecycle_payload`, types.rs:275-290).
+_LIFECYCLE_PI_KEYS = (
+    "operator",
+    "receiver",
+    "token",
+    "maxAmount",
+    "preApprovalExpiry",
+    "authorizationExpiry",
+    "refundExpiry",
+    "minFeeBps",
+    "maxFeeBps",
+    "feeReceiver",
+    "salt",
+)
+
+
+def _salt_to_int(salt: Any) -> int:
+    """``salt`` es bytes32 en el wire y uint256 en la firma.
+
+    El facilitador lo convierte con ``U256::from_be_bytes`` (types.rs:288): el
+    hex del wire entra al struct firmado como ENTERO. Mandarlo como string a
+    eth-account produciria otro digest y un ``bad_signature`` mudo.
+    """
+    if isinstance(salt, bool):  # bool es int en Python; nunca es un salt
+        raise ValueError(f"paymentInfo.salt invalido: {salt!r}")
+    if isinstance(salt, int):
+        return salt
+    if isinstance(salt, (bytes, bytearray)):
+        return int.from_bytes(bytes(salt), "big")
+    if isinstance(salt, str):
+        return int(salt, 16)
+    raise ValueError(f"paymentInfo.salt invalido: {salt!r}")
+
+
+def _nonce_to_bytes32(nonce: Any) -> bytes:
+    if isinstance(nonce, (bytes, bytearray)):
+        raw = bytes(nonce)
+    elif isinstance(nonce, str):
+        raw = bytes.fromhex(nonce[2:] if nonce[:2].lower() == "0x" else nonce)
+    else:
+        raise ValueError(f"lifecycleAuth.nonce invalido: {nonce!r}")
+    if len(raw) != 32:
+        raise ValueError(
+            f"lifecycleAuth.nonce debe ser de 32 bytes, llegaron {len(raw)}"
+        )
+    return raw
+
+
+def build_lifecycle_typed_data(
+    action: str,
+    payment_info: dict[str, Any],
+    payer: str,
+    amount: int,
+    chain_id: int,
+    deadline: int,
+    nonce: Any,
+) -> dict[str, Any]:
+    """El EIP-712 exacto que una orden de ciclo de vida firma.
+
+    Separado de :func:`build_lifecycle_auth` porque es la costura util: es lo
+    que hay que espejar en el gemelo TypeScript, y lo que un test puede
+    manosear campo por campo para comprobar que la firma deja de verificar.
+
+    Args:
+        action: ``"release"`` o ``"refundInEscrow"``.
+        payment_info: el paymentInfo TAL CUAL se serializa en el wire
+            (camelCase, ``salt`` en hex). Se firma este mismo dict, que es lo
+            que evita que las dos puntas deriven.
+        payer: el payer del escrow — viaja como ``payload.payer``, no adentro
+            de ``payment_info``.
+        amount: el monto en unidades atomicas, el MISMO que ``payload.amount``.
+        chain_id: chain id EVM de la red del pago.
+        deadline: unix segundos tras los cuales la orden esta muerta.
+        nonce: 32 bytes (hex o bytes).
+
+    Raises:
+        ValueError: accion desconocida, monto negativo, o un paymentInfo al que
+            le falta un campo. Nada se completa por default: un campo inventado
+            es una firma sobre un struct distinto del que se envia, o sea un
+            rechazo que el llamador no puede diagnosticar.
+    """
+    _, _, to_checksum_address = _require_eth_libs()
+
+    if action not in LIFECYCLE_ACTIONS:
+        raise ValueError(
+            f"accion de ciclo de vida desconocida {action!r}; "
+            f"el facilitador solo firma {LIFECYCLE_ACTIONS}"
+        )
+    if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+        raise ValueError(f"amount debe ser un entero >= 0, llego {amount!r}")
+
+    faltan = [k for k in _LIFECYCLE_PI_KEYS if k not in payment_info]
+    if faltan:
+        raise ValueError(
+            f"al paymentInfo le faltan campos que entran a la firma: {faltan}. "
+            "Se firma el paymentInfo que se envia; completar un campo por "
+            "default firmaria un struct distinto del que llega al facilitador."
+        )
+
+    return {
+        "domain": {
+            "name": LIFECYCLE_DOMAIN_NAME,
+            "version": LIFECYCLE_DOMAIN_VERSION,
+            "chainId": int(chain_id),
+        },
+        "types": LIFECYCLE_ORDER_TYPES,
+        "message": {
+            "action": action,
+            "amount": int(amount),
+            "deadline": int(deadline),
+            "nonce": _nonce_to_bytes32(nonce),
+            "paymentInfo": {
+                "operator": to_checksum_address(payment_info["operator"]),
+                "payer": to_checksum_address(payer),
+                "receiver": to_checksum_address(payment_info["receiver"]),
+                "token": to_checksum_address(payment_info["token"]),
+                "maxAmount": int(payment_info["maxAmount"]),
+                "preApprovalExpiry": int(payment_info["preApprovalExpiry"]),
+                "authorizationExpiry": int(payment_info["authorizationExpiry"]),
+                "refundExpiry": int(payment_info["refundExpiry"]),
+                "minFeeBps": int(payment_info["minFeeBps"]),
+                "maxFeeBps": int(payment_info["maxFeeBps"]),
+                "feeReceiver": to_checksum_address(payment_info["feeReceiver"]),
+                "salt": _salt_to_int(payment_info["salt"]),
+            },
+        },
+    }
+
+
+def build_lifecycle_auth(
+    action: str,
+    payment_info: dict[str, Any],
+    payer: str,
+    amount: int,
+    chain_id: int,
+    wallet: WalletAdapter,
+    deadline: int | None = None,
+    nonce: str | None = None,
+    now: int | None = None,
+) -> dict[str, Any]:
+    """Firma la orden y devuelve el bloque ``payload.lifecycleAuth`` completo.
+
+    Es el primer eslabon del enforce: el facilitador ya verifica estas ordenes
+    en modo ``log`` y midio CERO firmas en 17 dias de trafico (2.953
+    release/refund, 22 pagadores, 9 redes) — el campo no existia y nadie lo
+    mandaba. Con ``enforce`` hoy se rechazaria el 100%.
+
+    El SDK NO lee llaves del entorno por su cuenta: el firmante se INYECTA.
+    Cualquier :class:`~uvd_x402_sdk.wallet.WalletAdapter` sirve
+    (``EnvKeyAdapter``, un KMS, una wallet de navegador).
+
+    Args:
+        action: ``"release"`` o ``"refundInEscrow"``.
+        payment_info: paymentInfo de wire (camelCase), el mismo que se envia.
+        payer: el payer del escrow (``payload.payer``).
+        amount: monto atomico, el MISMO que ``payload.amount``.
+        chain_id: chain id EVM.
+        wallet: el firmante. Debe ser el payer, el receiver o el dueno del
+            operador segun la accion — la tabla de arriba.
+        deadline: unix segundos. Default: ``now + 600``.
+        nonce: 32 bytes en hex. Default: uno aleatorio. Distinto POR ORDEN — el
+            facilitador lo consume al aceptar (los settles parciales de streams
+            emiten uno por delta).
+        now: unix segundos, para tests. Default: el reloj.
+
+    Returns:
+        ``{"signer", "deadline", "nonce", "signature"}``, listo para colgar de
+        ``payload.lifecycleAuth``.
+
+    Raises:
+        ValueError: si el deadline ya vencio o pasa el techo de 900 s del
+            facilitador. Se falla ACA y no alla: una orden fuera de ventana es
+            un ``expired`` / ``deadline_too_far`` que en ``enforce`` es plata
+            atascada, y el llamador no tiene el log para verlo.
+    """
+    ahora = int(time.time()) if now is None else int(now)
+    plazo = (
+        ahora + LIFECYCLE_DEFAULT_DEADLINE_SECS if deadline is None else int(deadline)
+    )
+    nonce_hex = "0x" + secrets.token_hex(32) if nonce is None else nonce
+
+    if plazo < ahora:
+        raise ValueError(
+            f"el deadline {plazo} ya paso (ahora {ahora}): el facilitador la "
+            "descarta como `expired`"
+        )
+    if plazo - ahora > LIFECYCLE_MAX_DEADLINE_SECS:
+        raise ValueError(
+            f"el deadline {plazo} esta {plazo - ahora} s adelante y el techo del "
+            f"facilitador es {LIFECYCLE_MAX_DEADLINE_SECS} s "
+            "(`deadline_too_far`): una orden filtrada no puede ser un permiso "
+            "permanente"
+        )
+
+    typed = build_lifecycle_typed_data(
+        action=action,
+        payment_info=payment_info,
+        payer=payer,
+        amount=amount,
+        chain_id=chain_id,
+        deadline=plazo,
+        nonce=nonce_hex,
+    )
+    firmada = wallet.sign_typed_data(typed)
+
+    return {
+        "signer": wallet.get_address(),
+        "deadline": plazo,
+        "nonce": "0x" + _nonce_to_bytes32(nonce_hex).hex(),
+        "signature": firmada["signature"],
+    }

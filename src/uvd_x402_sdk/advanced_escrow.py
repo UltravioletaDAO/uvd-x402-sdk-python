@@ -972,7 +972,11 @@ class AdvancedEscrowClient:
         }
 
     def _settle_via_facilitator(
-        self, action: str, payment_info: PaymentInfo, amount: Optional[int] = None
+        self,
+        action: str,
+        payment_info: PaymentInfo,
+        amount: Optional[int] = None,
+        lifecycle_signer: Optional["WalletAdapter"] = None,
     ) -> TransactionResult:
         """
         Internal: send a gasless settle request to the facilitator.
@@ -981,18 +985,40 @@ class AdvancedEscrowClient:
             action: The settle action ("release" or "refundInEscrow")
             payment_info: PaymentInfo from the authorize step
             amount: Amount in atomic units (defaults to max_amount)
+            lifecycle_signer: Optional WalletAdapter that signs the EIP-712
+                lifecycle order. Omitted -> the request goes out byte-identical
+                to before, which is what keeps every existing caller working
+                while the facilitator sits in `log`.
         """
         amt = amount if amount is not None else payment_info.max_amount
+
+        # Un solo dict, firmado y enviado. Recomputarlo para firmar seria abrir
+        # la puerta a que las dos copias deriven en un campo y la firma no
+        # verifique contra lo que efectivamente viaja.
+        pi_wire = self._payment_info_to_camel_dict(payment_info)
+
+        inner: dict = {
+            "paymentInfo": pi_wire,
+            "payer": self.payer,
+            "amount": str(amt),
+        }
+        if lifecycle_signer is not None:
+            from .escrow_signing import build_lifecycle_auth
+
+            inner["lifecycleAuth"] = build_lifecycle_auth(
+                action=action,
+                payment_info=pi_wire,
+                payer=self.payer,
+                amount=amt,
+                chain_id=self.chain_id,
+                wallet=lifecycle_signer,
+            )
 
         payload = {
             "x402Version": 2,
             "scheme": "escrow",
             "action": action,
-            "payload": {
-                "paymentInfo": self._payment_info_to_camel_dict(payment_info),
-                "payer": self.payer,
-                "amount": str(amt),
-            },
+            "payload": inner,
             "paymentRequirements": {
                 "scheme": "escrow",
                 "network": f"eip155:{self.chain_id}",
@@ -1057,7 +1083,10 @@ class AdvancedEscrowClient:
             )
 
     def release_via_facilitator(
-        self, payment_info: PaymentInfo, amount: Optional[int] = None
+        self,
+        payment_info: PaymentInfo,
+        amount: Optional[int] = None,
+        lifecycle_signer: Optional["WalletAdapter"] = None,
     ) -> TransactionResult:
         """
         RELEASE via facilitator (GASLESS) - Send escrowed funds to receiver.
@@ -1070,14 +1099,25 @@ class AdvancedEscrowClient:
         Args:
             payment_info: PaymentInfo from the authorize step
             amount: Amount to release in atomic units (defaults to max_amount)
+            lifecycle_signer: Optional WalletAdapter signing the EIP-712
+                lifecycle order. For `release` the facilitator accepts the
+                PAYER or the operator owner (`FEE_RECIPIENT()`) — never the
+                receiver, because paying yourself out of an escrow is the thing
+                escrow exists to stop. Omitted -> no order is sent, which the
+                facilitator's `off` and `log` modes still accept.
 
         Returns:
             TransactionResult with the on-chain transaction hash
         """
-        return self._settle_via_facilitator("release", payment_info, amount)
+        return self._settle_via_facilitator(
+            "release", payment_info, amount, lifecycle_signer
+        )
 
     def refund_via_facilitator(
-        self, payment_info: PaymentInfo, amount: Optional[int] = None
+        self,
+        payment_info: PaymentInfo,
+        amount: Optional[int] = None,
+        lifecycle_signer: Optional["WalletAdapter"] = None,
     ) -> TransactionResult:
         """
         REFUND via facilitator (GASLESS) - Return escrowed funds to payer.
@@ -1090,11 +1130,18 @@ class AdvancedEscrowClient:
         Args:
             payment_info: PaymentInfo from the authorize step
             amount: Amount to refund in atomic units (defaults to max_amount)
+            lifecycle_signer: Optional WalletAdapter signing the EIP-712
+                lifecycle order. For `refundInEscrow` the facilitator accepts
+                the RECEIVER, the operator owner, or the payer once
+                `authorizationExpiry` has passed — a payer refunding before
+                that is the chargeback.
 
         Returns:
             TransactionResult with the on-chain transaction hash
         """
-        return self._settle_via_facilitator("refundInEscrow", payment_info, amount)
+        return self._settle_via_facilitator(
+            "refundInEscrow", payment_info, amount, lifecycle_signer
+        )
 
     def query_escrow_state(self, payment_info: PaymentInfo) -> dict:
         """

@@ -346,7 +346,15 @@ from uvd_x402_sdk.erc7702 import (
     wrap_signature,
 )
 from uvd_x402_sdk.escrow_signing import (
+    LIFECYCLE_ACTIONS,
+    LIFECYCLE_DEFAULT_DEADLINE_SECS,
+    LIFECYCLE_DOMAIN_NAME,
+    LIFECYCLE_DOMAIN_VERSION,
+    LIFECYCLE_MAX_DEADLINE_SECS,
+    LIFECYCLE_ORDER_TYPES,
     build_escrow_pre_auth,
+    build_lifecycle_auth,
+    build_lifecycle_typed_data,
     compute_escrow_nonce,
 )
 
@@ -613,6 +621,15 @@ __all__ = [
     # Escrow pre-auth builder (ADR-002 sign-on-assignment)
     "build_escrow_pre_auth",
     "compute_escrow_nonce",
+    # Signed escrow lifecycle orders (release / refundInEscrow)
+    "build_lifecycle_auth",
+    "build_lifecycle_typed_data",
+    "LIFECYCLE_ACTIONS",
+    "LIFECYCLE_DEFAULT_DEADLINE_SECS",
+    "LIFECYCLE_DOMAIN_NAME",
+    "LIFECYCLE_DOMAIN_VERSION",
+    "LIFECYCLE_MAX_DEADLINE_SECS",
+    "LIFECYCLE_ORDER_TYPES",
     # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
     "ADVANCED_ESCROW_AVAILABLE",
     "AdvancedEscrowClient",
