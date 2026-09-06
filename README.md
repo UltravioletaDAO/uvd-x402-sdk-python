@@ -28,6 +28,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
 - **ERC-8128 Signed HTTP Requests**: RFC 9421 request signing with any WalletAdapter — authenticate against wallet-signed APIs like Execution Market
 - **Escrow Pre-Auth Builder**: `build_escrow_pre_auth()` / `compute_escrow_nonce()` — sign the ADR-002 sign-on-assignment escrow lock (`X-Payment-Auth` header) with any WalletAdapter, no web3 required
+- **Signed escrow lifecycle orders**: `build_lifecycle_auth()` — sign the EIP-712 order that entitles a `release` / `refundInEscrow`, and pass a `lifecycle_signer` to `release_via_facilitator()` / `refund_via_facilitator()`
 
 ## Quick Start (5 Lines)
 
@@ -1704,6 +1705,84 @@ mobile and plugin-SDK suites).
 
 ---
 
+## Signed escrow lifecycle orders (`build_lifecycle_auth`)
+
+`release` and `refundInEscrow` move money that is **already** escrowed, so
+neither carries an ERC-3009 signature — there is no transfer left to authorize.
+That left the other half of the question open: *who is entitled to ask for the
+move*. Until now, whoever called. On 2026-08-30 a third party probed exactly
+that: five calls with a fabricated `paymentInfo`, two of them mined.
+
+The facilitator (`x402-rs`, PR #21) now verifies an **EIP-712 order** signed by
+the party the action belongs to. This is the other end of that cable — the part
+that signs it.
+
+| action | accepted signers |
+|---|---|
+| `release` | the payer; the operator owner (`FEE_RECIPIENT()`, read on-chain) |
+| `refundInEscrow` | the receiver; the operator owner; the payer, but only once `authorizationExpiry` has passed |
+
+The receiver may never `release` (paying yourself out of an escrow is what
+escrow exists to stop) and the payer may never `refundInEscrow` before expiry
+(that is the chargeback).
+
+```python
+from uvd_x402_sdk import AdvancedEscrowClient, EnvKeyAdapter
+
+client = AdvancedEscrowClient(...)
+
+# The signer is INJECTED — the SDK never reads a key from the environment on
+# its own. Any WalletAdapter works (EnvKeyAdapter, a KMS, a browser wallet).
+tx = client.release_via_facilitator(
+    payment_info,
+    lifecycle_signer=EnvKeyAdapter(private_key),   # must be the payer or the operator owner
+)
+```
+
+Or build the block yourself and attach it to any request:
+
+```python
+from uvd_x402_sdk import build_lifecycle_auth
+
+auth = build_lifecycle_auth(
+    action="release",              # or "refundInEscrow"
+    payment_info=payment_info,     # the wire dict, camelCase, salt as hex
+    payer=payer_address,           # payload.payer, NOT inside payment_info
+    amount=1_000_000,              # the SAME amount as payload.amount
+    chain_id=8453,
+    wallet=adapter,
+)
+# -> {"signer", "deadline", "nonce", "signature"}, goes at payload.lifecycleAuth
+```
+
+**Rollout is by facilitator mode** (`ESCROW_LIFECYCLE_AUTH`): `off` (the order
+is not looked at), `log` (verify when present, log the verdict, never reject)
+and `enforce`. `lifecycle_signer` is optional at every layer, so a caller that
+passes nothing sends the byte-identical request it sent before.
+
+Things worth knowing, each of which is a rejection the facilitator names and the
+caller cannot see:
+
+- **`paymentInfo.salt` is `bytes32` on the wire and `uint256` in the signature.**
+  The facilitator converts it (`U256::from_be_bytes`); signing it as a string
+  produces a different digest and a silent `bad_signature`. The SDK converts it
+  for you.
+- **`amount` is signed.** Signing `max_amount` and submitting a partial release
+  is an order that does not verify — and a partial is the normal case for a
+  stream.
+- **`deadline` has a 900 s ceiling** (`deadline_too_far`). The default signs
+  `now + 600`, which is what keeps a facilitator clock a few seconds behind
+  yours from deciding the verdict.
+- **`nonce` is consumed on acceptance** (`replayed`). It defaults to a fresh
+  random 32 bytes; a stream emitting one order per delta needs one each.
+- **The order is signed over the paymentInfo that is submitted**, so neither
+  side recomputes `getHash` and there is nothing to drift — and an intermediary
+  cannot change the receiver after the fact.
+
+`build_lifecycle_typed_data()` exposes the EIP-712 document itself, which is
+the seam the TypeScript twin mirrors.
+---
+
 ## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
 
 If the 402 you received advertises CAIP-2 networks (`eip155:8453`), you are
@@ -2076,6 +2155,19 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.78.0 (2026-09-05)
+- **Added: you can now sign `release` and `refundInEscrow`.** `build_lifecycle_auth()` produces the EIP-712 order the facilitator verifies, and `release_via_facilitator()` / `refund_via_facilitator()` take a `lifecycle_signer` that attaches it. Until now nothing in either SDK could produce one: measured in the facilitator's own logs, **2,953 release/refund calls over 17 days from 22 payers and 38 receivers across 9 networks, zero of them signed** — the field did not exist and no caller sent it
+- **Why it matters**: both actions move money that is **already** escrowed, so neither carries an ERC-3009 signature — there is no transfer left to authorize. That left *who is entitled to ask for the move* answered by "whoever called". On 2026-08-30 a third party probed exactly that: five calls with a fabricated `paymentInfo`, two of them mined, gas spent
+- **The format is the facilitator's, verbatim** (`x402-rs`, `src/payment_operator/lifecycle_auth.rs`, PR #21): a `LifecycleOrder(string action, uint256 amount, uint256 deadline, bytes32 nonce, PaymentInfo paymentInfo)` under the domain `{"x402 escrow lifecycle", "1", chainId}` — no `verifyingContract`, because `paymentInfo.operator` already travels inside the signed struct. `PaymentInfo` is the `AuthCaptureEscrow` type string this SDK already types for ERC-3009, so a client that has it reuses it instead of learning a second struct
+- **Who may sign what**: `release` — the payer, or the operator owner (`FEE_RECIPIENT()`, read on-chain). `refundInEscrow` — the receiver, the operator owner, or the payer once `authorizationExpiry` has passed. The receiver may never release (paying yourself out of an escrow is what escrow exists to stop) and the payer may never refund before expiry (that is the chargeback)
+- **Backward compatible, by design.** `lifecycle_signer` is optional at every layer and defaults to `None`; without it the request goes out byte-identical to before, which is what the facilitator's `off` and `log` modes still accept. The rollout is the facilitator's `ESCROW_LIFECYCLE_AUTH`: `off` → `log` (verify when present, log the verdict, never reject) → `enforce`
+- **The signer is injected, never read.** The SDK does not go looking for a key in the environment — pass any `WalletAdapter` (`EnvKeyAdapter`, a KMS, a browser wallet)
+- **Three rejections are caught here rather than there**, because in `enforce` each one is stuck money and the caller has no access to the facilitator's log: a `deadline` in the past (`expired`), one past the 900 s ceiling (`deadline_too_far` — the default signs `now + 600`, so a facilitator clock a few seconds behind yours does not decide the verdict), and a `paymentInfo` missing a field, which is refused by name instead of being defaulted into a signature over a struct that is not the one submitted
+- **`paymentInfo.salt` is `bytes32` on the wire and `uint256` in the signature** (the facilitator converts it with `U256::from_be_bytes`). Signing it as a hex string produces a different digest and a `bad_signature` whose only symptom is that no order ever verifies. The SDK converts it
+- **The amount signed is the amount submitted.** Signing `max_amount` while submitting a partial release is an order that does not verify — and a partial is the normal case for a stream, which emits one order, and one nonce, per delta
+- **Verified against the live facilitator** in `log` mode (`GET /settle` → `"escrowLifecycleAuth":"log"`), on base-sepolia, with no funds and no transaction: a payer-signed release logged `verdict="ok"` (2026-09-06T01:27:49.199084Z) — the first one ever — and a stranger-signed one logged `verdict="unauthorized_role"`, "is neither a party to this escrow nor the operator owner" (01:29:45.099379Z)
+- Cross-language conformance unaffected: 266 checks across 5 phases, passing against the TypeScript SDK. The TypeScript twin does not yet emit `lifecycleAuth`; the exact wire block is written down for it in `docs/handoffs/2026-09-05-lifecycle-auth-firma.md`
 
 ### v0.77.0 (2026-09-05)
 - **Fixed**: **XRPL charged in XRP what the integrator wrote in dollars.** `process_payment(header, Decimal("1.00"))` on XRPL produced `maxAmountRequired = 1000000` drops — **1 XRP**, not one dollar. The scaling was right (XRP really has 6 decimals); the **unit** was wrong. `NetworkConfig.get_token_amount()` multiplies a USD price by `10**decimals`, which only turns dollars into base units when one whole unit IS a dollar — true for every USDC/EURC/AUSD/PYUSD/USDT/USDG network in the registry, false for a chain that settles in its own floating native asset. Any endpoint priced in USD over XRPL has been charging the XRP price of its number, in whichever direction the market moved
