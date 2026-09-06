@@ -103,16 +103,29 @@ PR [#11](https://github.com/UltravioletaDAO/uvd-x402-sdk-python/pull/11) contra 
 
 SDK TypeScript **2.76.0** (`package.json`), leído hoy. No lo toqué, como pediste.
 
-- **Defecto del cobro: SÍ.** `src/backend/index.ts:402-403` —
-  `Math.floor(parseFloat(amount) * Math.pow(10, chain.usdc.decimals))`, y en XRPL
-  `chain.usdc = { address: 'XRP', decimals: 6, name: 'XRP' }` (`src/chains/index.ts:952-957`).
-  Misma forma exacta que Python. *Atenuante:* el parámetro se documenta como
-  `"Amount in human-readable format (e.g., \"1.00\")"` (`src/backend/index.ts:215`),
-  no como `amountUsd`, así que el contrato es **ambiguo** en vez de explícitamente falso —
-  pero el campo del que saca los decimales se llama `usdc`, que empuja a leerlo en dólares.
+- **Defecto del cobro: SÍ, y sin atenuante.** La misma multiplicación en **dos** sitios:
+  `src/backend/index.ts:402-404` (`buildPaymentRequirements`) y
+  `src/utils/x402.ts:272-274` (`generatePaymentOptions`) —
+  `Math.floor(parseFloat(amount) * Math.pow(10, chain.usdc.decimals))`. En XRPL,
+  `chain.usdc = { address: 'XRP', decimals: 6, name: 'XRP' }` (`src/chains/index.ts:952-957`),
+  y el propio registro lo admite dos líneas antes: *"XRPL settles in native XRP — there is
+  no USDC/token contract. The `usdc` field describes the native asset for interface
+  compatibility"* (`:950-951`).
+
+  **El contrato de TS dice dólares explícitamente**, así que no es más leve que Python:
+  `src/types/index.ts:221` documenta el campo como `/** Amount in USD (e.g., "10.00") */`
+  y `src/utils/x402.ts:259` dice `@param amount - Amount in USDC`. Peor: la contradicción
+  vive **dentro del mismo repo**, porque su provider XRPL consume ese mismo campo como XRP
+  entero — `xrpl.xrpToDrops(paymentInfo.amount)`, comentado *"whole XRP"*
+  (`src/providers/xrpl/index.ts:249-254`), pineado por su test
+  (`src/providers/xrpl/index.test.ts:125,131`: `'1.50'` → `'1500000'` drops). El tipo dice
+  USD, su único consumidor XRPL lee XRP.
 
 - **Defecto del nombre: SÍ, y ahí es peor que en Python.** `src/chains/index.ts:937,940`
-  registra la mainnet como `xrpl-mainnet`. Y medido en runtime contra el `dist` de 2.76.0:
+  registra la mainnet como `xrpl-mainnet`, y `src/types/index.ts:499-501` mapea el CAIP-2
+  **a sí mismo** con el mismo comentario falso que tenía Python —
+  *"XRPL (XRP Ledger has no CAIP-2 form - the v1 string IS the network id)"*.
+  Medido en runtime contra el `dist` de 2.76.0:
 
   ```
   chainToCAIP2("xrpl-mainnet") -> xrpl-mainnet
@@ -131,6 +144,18 @@ SDK TypeScript **2.76.0** (`package.json`), leído hoy. No lo toqué, como pedis
   "redes con USDC" ofrece XRP etiquetado como USDC.
 
 Los dos son despacho aparte, en `uvd-x402-sdk-typescript`. **Cuidado con el orden**: la corrección del nombre en TS toca el 402 v2, que es superficie de más consumidores que el fix de Python.
+
+**Y ojo con leer de más los 266 checks de la tabla de arriba: `scripts/xlang/cross-language-conformance.mjs` no menciona XRPL ni una vez** (`grep -ci xrpl` → 0). Esos checks cubren firmas ERC-8128 y no habrían detectado nada de esto en ninguno de los dos SDK. Sirven como control de no-regresión de este PR — que es para lo que los cité — **no** como prueba de que XRPL esté bien en ninguno de los dos lados. La paridad XRPL entre los SDK hoy no la protege ninguna red.
+
+Una asimetría más, para cuando despaches TS: **TS tiene un provider XRPL que firma** (`src/providers/xrpl/index.ts`, 380 líneas, desde 2.40.0) y Python no — Python solo verifica y liquida. Así que en TS el defecto de unidad toca también el camino de la firma del pagador, no solo el del cobro del comerciante.
+
+Los sitios de TS a tocar, para que el despacho no tenga que redescubrirlos (todos verificados,
+ninguno modificado):
+
+| Defecto | Ubicaciones |
+|---|---|
+| Cobro | `src/backend/index.ts:402-404` · `src/utils/x402.ts:272-274` · `src/providers/xrpl/index.ts:249-254` · docs del campo `src/types/index.ts:221` y `src/utils/x402.ts:259` |
+| Nombre + CAIP-2 | `src/chains/index.ts:937,940` · `src/types/index.ts:499-501` (poner `xrpl:0` / `xrpl:1`) · `src/facilitator.ts:136,141` · tests que pinean lo viejo: `src/backend/index.test.ts:427-431,445-449` |
 
 ### Qué consumidor del stack cobra por XRPL hoy
 
