@@ -28,7 +28,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **WalletAdapter**: Abstract protocol for wallet signing (EnvKeyAdapter, OWSWalletAdapter)
 - **ERC-8128 Signed HTTP Requests**: RFC 9421 request signing with any WalletAdapter — authenticate against wallet-signed APIs like Execution Market
 - **Escrow Pre-Auth Builder**: `build_escrow_pre_auth()` / `compute_escrow_nonce()` — sign the ADR-002 sign-on-assignment escrow lock (`X-Payment-Auth` header) with any WalletAdapter, no web3 required
-- **Signed escrow lifecycle orders**: `build_lifecycle_auth()` — sign the EIP-712 order that entitles a `release` / `refundInEscrow`, and pass a `lifecycle_signer` to `release_via_facilitator()` / `refund_via_facilitator()`
+- **Signed escrow lifecycle orders**: `build_lifecycle_auth()` — sign the EIP-712 order that entitles a `release` / `refundInEscrow`, and pass a `lifecycle_signer` to `release_via_facilitator()` / `refund_via_facilitator()`, or a `lifecycle_auth` when someone else already signed it
 
 ## Quick Start (5 Lines)
 
@@ -1780,7 +1780,64 @@ caller cannot see:
   cannot change the receiver after the fact.
 
 `build_lifecycle_typed_data()` exposes the EIP-712 document itself, which is
-the seam the TypeScript twin mirrors.
+the seam the TypeScript twin mirrors — and the seam a browser signs through.
+
+### When someone else signs (`lifecycle_auth`)
+
+The party entitled to the move is often not the process asking for it. The
+payer signs `release` in their browser; a backend transports it. That backend
+does not have — and must not have — the payer's key, so `lifecycle_signer` is
+the wrong seam: it signs with a key in the process.
+
+`lifecycle_auth` is the other one. It takes an order **already signed** and
+attaches it verbatim:
+
+```python
+from uvd_x402_sdk import (
+    build_lifecycle_typed_data,
+    lifecycle_auth_from_signature,
+)
+
+# 1. The backend builds the document. Nothing secret here — ship it to the
+#    browser as JSON and let the wallet sign it (eth_signTypedData_v4).
+typed = build_lifecycle_typed_data(
+    action="release",
+    payment_info=payment_info,   # the wire dict, camelCase, salt as hex
+    payer=payer_address,
+    amount=1_000_000,
+    chain_id=8453,
+    deadline=int(time.time()) + 600,   # 900 s ceiling; leave yourself slack
+    nonce="0x" + secrets.token_hex(32),
+)
+
+# 2. The browser returns 65 bytes and nothing else.
+auth = lifecycle_auth_from_signature(
+    typed_data=typed,
+    signature=signature_from_browser,
+    signer=payer_address,
+)
+
+# 3. Transported as-is. Not re-signed, and the nonce and deadline are the
+#    ones that entered the digest.
+tx = client.release_via_facilitator(payment_info, lifecycle_auth=auth)
+```
+
+- **`deadline` and `nonce` are not passed separately.** They are read out of
+  the `typed_data` that was signed. Declaring them alongside would let the
+  wire announce one window while the signature covers another — a
+  `bad_signature` neither side can name.
+- **The signature is verified against `signer` before it is returned.** The
+  real failure of the browser path is that the page signs with whichever
+  account is connected while the backend believes it was another one. The
+  facilitator answers `bad_signature` to that and does not say which of the
+  two was wrong; `lifecycle_auth_from_signature` does. (It needs
+  `eth-account` for the recovery — `pip install uvd-x402-sdk[signer]`.)
+- **`lifecycle_signer` and `lifecycle_auth` are mutually exclusive.** One
+  signs a new order with its own nonce and deadline, the other carries a
+  foreign one; picking silently would submit an order the caller did not
+  intend, and on `release` that is money moving. Passing both raises.
+- Both paths produce the **same wire block**, pinned by a test: the browser
+  route is not a second dialect.
 ---
 
 ## x402 v2 requests (`build_verify_request_v2` / `build_settle_request_v2`)
@@ -2155,6 +2212,15 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.79.0 (2026-09-06)
+- **Added: `release_via_facilitator()` / `refund_via_facilitator()` accept `lifecycle_auth=`** — a lifecycle order **already signed by someone else**, attached to `payload.lifecycleAuth` verbatim. 0.78.0 shipped only `lifecycle_signer=`, which signs with a key held **in the calling process**; that is the wrong shape for the flow the owner picked, where the **payer** signs and Execution Market transports. EM's own handoff measured the gap: *"Mientras no acepte un `lifecycle_auth=`, no puede transportar la orden de un tercero"* — their side is already merged behind `EM_LIFECYCLE_PAYER_SIGNS` (off), waiting on this
+- **Added: `lifecycle_auth_from_signature(typed_data, signature, signer)`** — the browser path's other half. `build_lifecycle_typed_data()` (public since 0.78.0) produces the EIP-712 document, a wallet returns 65 bytes, and this pairs them into the wire block. `deadline` and `nonce` are read **out of the signed typed data**, never passed alongside: both enter the digest, so declaring them separately would let the wire announce one window while the signature covers another
+- **The signature is verified against `signer` before anything is returned.** The real failure of a browser flow is the page signing with whichever account is connected while the backend believes it was another; the facilitator answers `bad_signature` and does not say which of the two was wrong. Recovering locally is the only place that can. A wrong-length signature and a typed document from another domain are refused by name too
+- **`lifecycle_signer` and `lifecycle_auth` are mutually exclusive, and passing both raises** before the POST. One signs a new order with its own nonce and deadline, the other carries a foreign one — choosing silently would submit an order the caller did not intend, and on `release` that is money moving
+- **Nothing is normalized on the way out.** The order travels byte-for-byte: trimming a hex, reordering keys or recomputing the window would send something other than what entered the digest. Pinned by a test that compares the captured request against the block handed in
+- **Both paths produce the same wire block.** `lifecycle_auth_from_signature` on a signature over the same typed data equals `build_lifecycle_auth` for the same nonce and deadline — asserted, so the browser route cannot drift into a second dialect that the pinned vectors do not cover
+- Backward compatible: `lifecycle_auth` defaults to `None` and, with neither argument, the request is byte-identical to 0.78.0 and to everything before it. 925 tests pass (916 before, 9 added, none lost)
 
 ### v0.78.0 (2026-09-05)
 - **Added: you can now sign `release` and `refundInEscrow`.** `build_lifecycle_auth()` produces the EIP-712 order the facilitator verifies, and `release_via_facilitator()` / `refund_via_facilitator()` take a `lifecycle_signer` that attaches it. Until now nothing in either SDK could produce one: measured in the facilitator's own logs, **2,953 release/refund calls over 17 days from 22 payers and 38 receivers across 9 networks, zero of them signed** — the field did not exist and no caller sent it

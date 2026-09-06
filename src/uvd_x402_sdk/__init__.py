@@ -356,6 +356,7 @@ from uvd_x402_sdk.escrow_signing import (
     build_lifecycle_auth,
     build_lifecycle_typed_data,
     compute_escrow_nonce,
+    lifecycle_auth_from_signature,
 )
 
 # Advanced Escrow (PaymentOperator - on-chain escrow)
@@ -624,6 +625,7 @@ __all__ = [
     # Signed escrow lifecycle orders (release / refundInEscrow)
     "build_lifecycle_auth",
     "build_lifecycle_typed_data",
+    "lifecycle_auth_from_signature",
     "LIFECYCLE_ACTIONS",
     "LIFECYCLE_DEFAULT_DEADLINE_SECS",
     "LIFECYCLE_DOMAIN_NAME",

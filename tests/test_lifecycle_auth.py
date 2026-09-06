@@ -34,6 +34,7 @@ from uvd_x402_sdk.escrow_signing import (  # noqa: E402
     LIFECYCLE_MAX_DEADLINE_SECS,
     build_lifecycle_auth,
     build_lifecycle_typed_data,
+    lifecycle_auth_from_signature,
 )
 from uvd_x402_sdk.wallet import EnvKeyAdapter  # noqa: E402
 
@@ -692,3 +693,221 @@ def test_vector_fijado_para_el_gemelo_typescript():
             "77553f16c73adacf754e34b2cc988137fd77b843649d990c9a1a5001b28a13a71c"
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Orden firmada AFUERA - el payer firma en un navegador y este proceso
+# solo transporta (0.79.0)
+# ---------------------------------------------------------------------------
+#
+# El dueno decidio que la orden la firma el PAYER, y que quien pide el
+# movimiento (Execution Market) la transporta. Ese proceso no tiene -ni debe
+# tener- la llave del payer: recibe 65 bytes de un navegador. Hasta 0.78.0 el
+# unico camino era `lifecycle_signer=`, que exige la llave en el proceso; una
+# orden ajena no tenia por donde entrar.
+
+
+def _firma_ajena(typed: dict, wallet: EnvKeyAdapter) -> str:
+    """Los 65 bytes tal como los devolveria un navegador: solo la firma."""
+    return wallet.sign_typed_data(typed)["signature"]
+
+
+def test_una_orden_firmada_afuera_arma_el_mismo_bloque_que_si_la_firmaramos():
+    """Paridad interna: los dos caminos producen el MISMO wire.
+
+    Es lo que hace que el camino de navegador no sea un dialecto aparte. Si
+    divergieran en una clave, el facilitador veria dos formatos y solo uno
+    estaria cubierto por los vectores fijados.
+    """
+    pi = _payment_info()
+    nonce = "0x" + "ab" * 32
+    deadline = NOW + 600
+
+    propia = build_lifecycle_auth(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, wallet=_payer(), deadline=deadline,
+        nonce=nonce, now=NOW,
+    )
+
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=deadline, nonce=nonce,
+    )
+    ajena = lifecycle_auth_from_signature(
+        typed_data=typed,
+        signature=_firma_ajena(typed, _payer()),
+        signer=_payer().get_address(),
+    )
+
+    assert ajena == propia
+
+
+def test_el_deadline_y_el_nonce_salen_del_typed_data_firmado():
+    """No se pasan aparte: entran al digest, asi que declararlos por separado
+    dejaria el wire diciendo una ventana y la firma cubriendo otra."""
+    pi = _payment_info()
+    typed = build_lifecycle_typed_data(
+        action="refundInEscrow", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 42,
+        nonce=bytes.fromhex("7f" * 32),
+    )
+    auth = lifecycle_auth_from_signature(
+        typed_data=typed,
+        signature=_firma_ajena(typed, _receiver()),
+        signer=_receiver().get_address(),
+    )
+    assert auth["deadline"] == NOW + 42
+    assert auth["nonce"] == "0x" + "7f" * 32
+    assert auth["signer"] == _receiver().get_address()
+
+
+def test_una_firma_que_recupera_a_otro_no_se_transporta():
+    """`bad_signature` remoto no dice cual de los dos estaba mal. Aca si.
+
+    Es el error real del camino de navegador: la pagina firma con la cuenta
+    que tiene conectada y el backend cree que es otra.
+    """
+    pi = _payment_info()
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+    with pytest.raises(ValueError, match="bad_signature"):
+        lifecycle_auth_from_signature(
+            typed_data=typed,
+            signature=_firma_ajena(typed, _extrano()),
+            signer=_payer().get_address(),
+        )
+
+
+def test_una_firma_de_largo_equivocado_no_se_transporta():
+    pi = _payment_info()
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+    with pytest.raises(ValueError, match="65 bytes"):
+        lifecycle_auth_from_signature(
+            typed_data=typed, signature="0xdeadbeef",
+            signer=_payer().get_address(),
+        )
+
+
+def test_un_typed_data_que_no_es_una_orden_de_ciclo_de_vida_se_rechaza():
+    """Pasar el typed data equivocado -el de ERC-3009, por ejemplo- produciria
+    una firma valida sobre otra cosa. El dominio lo delata."""
+    pi = _payment_info()
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+    firma = _firma_ajena(typed, _payer())
+
+    otro = {**typed, "domain": {**typed["domain"], "name": "USD Coin"}}
+    with pytest.raises(ValueError, match="dominio"):
+        lifecycle_auth_from_signature(
+            typed_data=otro, signature=firma, signer=_payer().get_address()
+        )
+
+
+def test_lifecycle_auth_viaja_byte_a_byte_en_el_release(monkeypatch):
+    """Lo que el transportador recibio es lo que sale por el cable.
+
+    Normalizar un campo aca -recortar un hex, recalcular la ventana- seria
+    enviar algo distinto de lo que entro al digest.
+    """
+    capturado: list = []
+    cliente = _cliente_falso(monkeypatch, capturado)
+
+    pi_wire = cliente._payment_info_to_camel_dict(_payment_info_dataclass())
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi_wire, payer=cliente.payer,
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "5e" * 32,
+    )
+    ajena = lifecycle_auth_from_signature(
+        typed_data=typed,
+        signature=_firma_ajena(typed, _payer()),
+        signer=_payer().get_address(),
+    )
+
+    resultado = cliente.release_via_facilitator(
+        _payment_info_dataclass(), lifecycle_auth=ajena
+    )
+
+    assert resultado.success is True
+    enviado = capturado[0]["payload"]["lifecycleAuth"]
+    assert enviado == ajena
+    assert enviado["nonce"] == "0x" + "5e" * 32
+    assert enviado["deadline"] == NOW + 600
+
+    # Y sigue verificando contra el paymentInfo que efectivamente viajo.
+    revisado = build_lifecycle_typed_data(
+        action="release", payment_info=capturado[0]["payload"]["paymentInfo"],
+        payer=capturado[0]["payload"]["payer"],
+        amount=int(capturado[0]["payload"]["amount"]), chain_id=CHAIN,
+        deadline=enviado["deadline"], nonce=enviado["nonce"],
+    )
+    assert _recover(revisado, enviado["signature"]) == enviado["signer"]
+
+
+def test_lifecycle_auth_viaja_byte_a_byte_en_el_refund(monkeypatch):
+    """El refund lo firma el receiver, y el transportador tampoco es el."""
+    capturado: list = []
+    cliente = _cliente_falso(monkeypatch, capturado)
+
+    pi_wire = cliente._payment_info_to_camel_dict(_payment_info_dataclass())
+    typed = build_lifecycle_typed_data(
+        action="refundInEscrow", payment_info=pi_wire, payer=cliente.payer,
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "6f" * 32,
+    )
+    ajena = lifecycle_auth_from_signature(
+        typed_data=typed,
+        signature=_firma_ajena(typed, _receiver()),
+        signer=_receiver().get_address(),
+    )
+
+    cliente.refund_via_facilitator(_payment_info_dataclass(), lifecycle_auth=ajena)
+
+    assert capturado[0]["action"] == "refundInEscrow"
+    assert capturado[0]["payload"]["lifecycleAuth"] == ajena
+    assert capturado[0]["payload"]["lifecycleAuth"]["signer"] == pi_wire["receiver"]
+
+
+def test_los_dos_parametros_juntos_son_un_error_explicito(monkeypatch):
+    """Uno firma una orden nueva y el otro trae una ajena. Elegir en silencio
+    manda una orden distinta de la que el llamador cree - sobre `release`, eso
+    es plata que se mueve."""
+    capturado: list = []
+    cliente = _cliente_falso(monkeypatch, capturado)
+
+    pi_wire = cliente._payment_info_to_camel_dict(_payment_info_dataclass())
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi_wire, payer=cliente.payer,
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600, nonce="0x" + "7a" * 32,
+    )
+    ajena = lifecycle_auth_from_signature(
+        typed_data=typed,
+        signature=_firma_ajena(typed, _payer()),
+        signer=_payer().get_address(),
+    )
+
+    for metodo in ("release_via_facilitator", "refund_via_facilitator"):
+        with pytest.raises(ValueError, match="excluyentes"):
+            getattr(cliente, metodo)(
+                _payment_info_dataclass(),
+                lifecycle_signer=_payer(),
+                lifecycle_auth=ajena,
+            )
+
+    # Y no se mando nada: el error es ANTES del POST.
+    assert capturado == []
+
+
+def test_sin_ninguno_de_los_dos_el_payload_sigue_saliendo_como_antes(monkeypatch):
+    """El parametro nuevo no cambia el default de nadie."""
+    capturado: list = []
+    cliente = _cliente_falso(monkeypatch, capturado)
+
+    cliente.release_via_facilitator(_payment_info_dataclass())
+
+    assert set(capturado[0]["payload"]) == {"paymentInfo", "payer", "amount"}
