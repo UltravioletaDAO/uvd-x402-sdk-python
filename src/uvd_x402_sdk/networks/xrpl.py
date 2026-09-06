@@ -12,9 +12,19 @@ XRPL Asset Details:
 - 6 decimals: amounts are denominated in "drops" (1 XRP = 1,000,000 drops)
 - NO token contract address - XRP is the native asset of the ledger
 
-XRPL has NO CAIP-2 representation. Use the v1 network strings only:
-- "xrpl-mainnet"
-- "xrpl-testnet"
+Network names, as the facilitator publishes them in GET /supported
+(measured 2026-09-05; x402-rs/src/network.rs:189,251):
+- "xrpl"          mainnet, canonical
+- "xrpl-testnet"  testnet, canonical
+- "xrpl-mainnet"  accepted as an ALIAS for "xrpl" (the facilitator's FromStr
+  takes it too, but never puts it on the wire)
+
+XRPL settles in native XRP, which is NOT pegged to the dollar. That is why
+both configs carry `usd_pegged=False`: a price written in USD cannot be
+scaled by 6 decimals into drops without charging XRP for dollars. To price
+an XRPL call in dollars, name the facilitator's dollar-pegged USDC on XRPL
+(issuer rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE) via the `asset` +
+`token_decimals` overrides.
 """
 
 from uvd_x402_sdk.networks.base import (
@@ -40,7 +50,7 @@ except ImportError:
 
 # XRPL Mainnet
 XRPL_MAINNET = NetworkConfig(
-    name="xrpl-mainnet",
+    name="xrpl",
     display_name="XRP Ledger",
     network_type=NetworkType.XRPL,
     chain_id=0,  # Non-EVM, no chain ID
@@ -51,13 +61,15 @@ XRPL_MAINNET = NetworkConfig(
     usdc_domain_version="",
     rpc_url="https://xrplcluster.com",
     enabled=True,
+    # Native XRP floats against the dollar - see module docstring.
+    usd_pegged=False,
     extra_config={
         # Native asset symbol
         "native_asset": "XRP",
         # Block explorer
         "explorer_url": "https://livenet.xrpl.org/accounts",
         # x402 network name (facilitator expects this format)
-        "x402_network": "xrpl-mainnet",
+        "x402_network": "xrpl",
     },
 )
 
@@ -73,6 +85,7 @@ XRPL_TESTNET = NetworkConfig(
     usdc_domain_version="",
     rpc_url="https://s.altnet.rippletest.net:51234",
     enabled=True,
+    usd_pegged=False,
     extra_config={
         "native_asset": "XRP",
         "explorer_url": "https://testnet.xrpl.org/accounts",
@@ -83,6 +96,8 @@ XRPL_TESTNET = NetworkConfig(
 # Register XRPL networks
 register_network(XRPL_MAINNET)
 register_network(XRPL_TESTNET)
+# "xrpl-mainnet" stays resolvable as an alias (networks/base.py
+# _NETWORK_ALIASES); it is simply no longer what the SDK emits.
 
 
 # =============================================================================
@@ -143,7 +158,7 @@ def is_valid_xrpl_address(address: str) -> bool:
     return all(c in ripple_alphabet for c in address)
 
 
-def get_xrpl_fee_payer(network_name: str = "xrpl-mainnet") -> str:
+def get_xrpl_fee_payer(network_name: str = "xrpl") -> str:
     """
     Get the fee payer (facilitator) address for an XRPL network.
 
@@ -151,13 +166,13 @@ def get_xrpl_fee_payer(network_name: str = "xrpl-mainnet") -> str:
     Payment transaction and pays the network/relay fee.
 
     Args:
-        network_name: Network name ('xrpl-mainnet' or 'xrpl-testnet')
+        network_name: Network name ('xrpl' or 'xrpl-testnet')
 
     Returns:
         Fee payer address for the specified network
 
     Example:
-        >>> get_xrpl_fee_payer("xrpl-mainnet")
+        >>> get_xrpl_fee_payer("xrpl")
         'rfADKkVXBNqK3z72tVSS3LVzAR3psYkonp'
         >>> get_xrpl_fee_payer("xrpl-testnet")
         'rGhTioKAFHe75KgVnQtacRiKFuPv28Wbwk'

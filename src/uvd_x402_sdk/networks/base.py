@@ -104,6 +104,12 @@ class NetworkConfig:
             'usdc'; e.g. 'usdg' for Robinhood Chain which settles in Paxos USDG).
             The usdc_* fields above hold this token's address/domain.
         tokens: Multi-token configurations (EVM chains only, maps token type to config)
+        usd_pegged: Whether the DEFAULT settlement asset is worth one dollar per
+            whole unit. True for every stablecoin network (USDC, EURC, AUSD,
+            PYUSD, USDT, USDG); False for a chain that settles in its own
+            volatile native asset — XRPL settles in XRP. Only a pegged asset
+            lets a price written in USD become base units, so
+            `get_token_amount` refuses when this is False.
         extra_config: Additional network-specific configuration
     """
 
@@ -120,6 +126,7 @@ class NetworkConfig:
     settle_timeout_seconds: float = 90.0  # Per-network settle timeout (Eth L1=900, L2s=90)
     default_token: TokenType = "usdc"
     tokens: Dict[TokenType, TokenConfig] = field(default_factory=dict)
+    usd_pegged: bool = True
     extra_config: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -139,8 +146,34 @@ class NetworkConfig:
 
         Returns:
             Amount in token base units (e.g., 10500000 for 6 decimals)
+
+        Raises:
+            ValueError: If this network's default settlement asset is not
+                pegged to the dollar. Scaling by the decimals only turns
+                dollars into base units when one whole unit IS one dollar;
+                on XRPL it would charge 1 XRP for a price written as $1.00.
         """
+        if not self.usd_pegged:
+            raise ValueError(self.usd_conversion_error())
         return int(usd_amount * (10**self.usdc_decimals))
+
+    def usd_conversion_error(self) -> str:
+        """The message for refusing to price this network in dollars.
+
+        Shared by the two call sites so the payer and the merchant read the
+        same sentence: `get_token_amount` and the client's requirements
+        builder.
+        """
+        symbol = self.extra_config.get("native_asset") or self.default_token.upper()
+        return (
+            f"{self.name} settles in {symbol}, which is not pegged to the dollar, "
+            f"so an amount written in USD cannot be converted with its "
+            f"{self.usdc_decimals} decimals: $1.00 would be charged as 1 {symbol}. "
+            f"Pass an explicit `asset` naming a dollar-pegged token this "
+            f"network's facilitator settles (GET /supported lists them; on XRPL "
+            f"that is USDC) together with its `token_decimals`, or price the "
+            f"call in {symbol} units yourself."
+        )
 
     def format_token_amount(self, base_units: int) -> float:
         """
@@ -157,6 +190,18 @@ class NetworkConfig:
 
 # Global network registry
 _NETWORK_REGISTRY: Dict[str, NetworkConfig] = {}
+
+# Alternate spellings that resolve to a registry entry without becoming one:
+# a caller may WRITE them, the SDK never puts them on the wire, and they are
+# not separate networks (counts and listings stay honest). The facilitator
+# keeps the same distinction - its FromStr takes `xrpl-mainnet` while
+# everything it publishes says `xrpl` (x402-rs/src/network.rs:251,189).
+_NETWORK_ALIASES: dict[str, str] = {
+    "skale": "skale-base",
+    "skale-testnet": "skale-base-sepolia",
+    # Renamed in 0.77.0: the facilitator advertises the mainnet as `xrpl`.
+    "xrpl-mainnet": "xrpl",
+}
 
 
 def register_network(config: NetworkConfig) -> None:
@@ -187,12 +232,16 @@ def get_network(name: str) -> Optional[NetworkConfig]:
     Get network configuration by name.
 
     Args:
-        name: Network identifier (case-insensitive)
+        name: Network identifier (case-insensitive), or a registered alias
 
     Returns:
         NetworkConfig if found, None otherwise
     """
-    return _NETWORK_REGISTRY.get(name.lower())
+    key = name.lower()
+    if key in _NETWORK_REGISTRY:
+        return _NETWORK_REGISTRY[key]
+    aliased = _NETWORK_ALIASES.get(key)
+    return _NETWORK_REGISTRY.get(aliased) if aliased else None
 
 
 def get_network_by_chain_id(chain_id: int) -> Optional[NetworkConfig]:
@@ -517,12 +566,6 @@ def is_caip2_format(network: str) -> bool:
         True if CAIP-2 format (contains colon), False if v1 format
     """
     return ":" in network
-
-
-_NETWORK_ALIASES: dict[str, str] = {
-    "skale": "skale-base",
-    "skale-testnet": "skale-base-sepolia",
-}
 
 
 def normalize_network(network: str) -> str:

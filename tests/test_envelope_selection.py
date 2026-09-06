@@ -264,17 +264,30 @@ class TestExplicitPin:
         """
         client, fake = _client(monkeypatch, _VERIFY_OK, x402_version=2)
         with pytest.raises(ValueError, match="no CAIP-2 form"):
-            client.verify_payment(_payload("xrpl-mainnet"), Decimal("0.01"))
+            # XRPL settles in XRP, so a USD price needs an explicit pegged
+            # asset (0.77.0). Named here so the pin, not the price, is what
+            # this test exercises.
+            client.verify_payment(
+                _payload("xrpl"), Decimal("0.01"),
+                asset=_XRPL_USDC, token_decimals=6,
+            )
         assert fake.bodies == [], "must fail before the POST"
 
     def test_auto_leaves_xrpl_on_v1(self, monkeypatch):
         client, fake = _client(monkeypatch, _VERIFY_OK)
-        client.verify_payment(_payload("xrpl-mainnet"), Decimal("0.01"))
+        client.verify_payment(
+            _payload("xrpl"), Decimal("0.01"),
+            asset=_XRPL_USDC, token_decimals=6,
+        )
         assert fake.bodies[0]["x402Version"] == 1
 
     def test_a_bogus_pin_is_rejected(self):
         with pytest.raises(ValueError, match="must be 1, 2 or 'auto'"):
             resolve_envelope_version(_payload("base"), _requirements("base"), 3)
+
+
+# USDC on XRPL as the facilitator advertises it (x402-rs/src/network.rs:1235).
+_XRPL_USDC = "5553444300000000000000000000000000000000.rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE"
 
 
 # ── the helpers, on their own ────────────────────────────────────────────────
