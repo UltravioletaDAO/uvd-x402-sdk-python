@@ -703,6 +703,9 @@ class AdvancedEscrowClient:
             result = self._wallet.sign_typed_data({
                 "domain": domain,
                 "types": types,
+                # No entra al digest; lo pide el contrato del adaptador para
+                # que un firmante de navegador (viem) pueda firmar esto.
+                "primaryType": "ReceiveWithAuthorization",
                 "message": message,
             })
             return result["signature"]

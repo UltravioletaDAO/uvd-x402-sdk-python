@@ -352,6 +352,7 @@ from uvd_x402_sdk.escrow_signing import (
     LIFECYCLE_DOMAIN_VERSION,
     LIFECYCLE_MAX_DEADLINE_SECS,
     LIFECYCLE_ORDER_TYPES,
+    LIFECYCLE_PRIMARY_TYPE,
     build_escrow_pre_auth,
     build_lifecycle_auth,
     build_lifecycle_typed_data,
@@ -632,6 +633,7 @@ __all__ = [
     "LIFECYCLE_DOMAIN_VERSION",
     "LIFECYCLE_MAX_DEADLINE_SECS",
     "LIFECYCLE_ORDER_TYPES",
+    "LIFECYCLE_PRIMARY_TYPE",
     # Advanced Escrow (PaymentOperator) - available when eth_abi/web3/httpx installed
     "ADVANCED_ESCROW_AVAILABLE",
     "AdvancedEscrowClient",

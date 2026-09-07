@@ -169,9 +169,15 @@ class WalletAdapter(Protocol):
         Sign EIP-712 typed data.
 
         Args:
-            typed_data: Dict with 'domain', 'types', and 'message' keys.
+            typed_data: Dict with 'domain', 'types', 'primaryType' and
+                'message' keys.
                 - domain: EIP-712 domain separator dict
                 - types: dict of type definitions (excluding EIP712Domain)
+                - primaryType: name of the root struct in ``types``. It does
+                  NOT enter the digest (EIP-712 hashes domain + types +
+                  message), and ethers/eth-account derive it, but **viem
+                  refuses to sign without it** — so a browser-backed adapter
+                  needs it and every producer in this SDK sends it.
                 - message: the message data dict
 
         Returns:
@@ -304,7 +310,11 @@ class EnvKeyAdapter:
         Sign EIP-712 typed data.
 
         Args:
-            typed_data: Dict with 'domain', 'types', and 'message' keys.
+            typed_data: Dict with 'domain', 'types', 'primaryType' and
+                'message' keys. ``primaryType`` is read by browser signers
+                (viem) and ignored here: ``eth-account`` derives the root
+                struct from ``types``, so the digest is the same with or
+                without it.
 
         Returns:
             SignedTypedData with signature, v, r, s.

@@ -411,6 +411,10 @@ def build_escrow_pre_auth(
             "verifyingContract": to_checksum_address(net["usdc"]),
         },
         "types": RECEIVE_WITH_AUTHORIZATION_TYPES,
+        # Mismo motivo que en la orden de ciclo de vida: no entra al digest,
+        # pero un `WalletAdapter` de navegador que envuelva viem lo necesita
+        # para firmar. El gemelo lo emite (`escrow-preauth.ts:454`).
+        "primaryType": "ReceiveWithAuthorization",
         "message": {
             "from": to_checksum_address(payer),
             "to": to_checksum_address(net["token_collector"]),
@@ -539,6 +543,13 @@ LIFECYCLE_DEFAULT_DEADLINE_SECS = 600
 # (lifecycle_auth.rs:130-133, `LifecycleAction::as_str`).
 LIFECYCLE_ACTIONS = ("release", "refundInEscrow")
 
+# El nombre del struct raiz del documento EIP-712. `types` tiene dos entradas y
+# solo una es la raiz; ethers y eth-account la DEDUCEN, pero viem no: sin este
+# campo `signTypedData` tira antes de mostrarle nada al usuario, y la ruta del
+# navegador queda cerrada. El gemelo TypeScript lo emite desde su primer dia
+# (`lifecycle-auth.ts:422`); aca falto hasta 0.80.0.
+LIFECYCLE_PRIMARY_TYPE = "LifecycleOrder"
+
 # El type string de `PaymentInfo` es el de AuthCaptureEscrow VERBATIM — el mismo
 # que este SDK ya tipa para ERC-3009 (`_PAYMENT_INFO_ABI` arriba). El orden de
 # los campos es parte del type hash: reordenarlo invalida toda orden emitida.
@@ -601,6 +612,35 @@ def _salt_to_int(salt: Any) -> int:
     if isinstance(salt, str):
         return int(salt, 16)
     raise ValueError(f"paymentInfo.salt invalido: {salt!r}")
+
+
+def _uint_a_str(valor: Any, campo: str) -> str:
+    """Un uint del mensaje, como STRING decimal.
+
+    No es cosmetica y no toca el digest: ``eth-account`` decodifica un uint
+    escrito como entero o como string decimal al mismo valor (medido). Lo que
+    cambia es lo que sobrevive un ``json.dumps`` -> ``JSON.parse``, y este
+    documento viaja como JSON a un navegador.
+
+    Un ``salt`` es de 32 bytes: como numero JSON, ``JSON.parse`` lo entrega
+    redondeado a un ``double`` y el navegador firma OTRO struct. Medido con el
+    salt ``0xab*32``: Python firmo ``0x15a8587e…`` y viem, leyendo el mismo
+    documento por JSON, ``0x4c88c56a…``. Ningun error, ninguna advertencia —
+    solo una orden que el facilitador rechaza como ``bad_signature`` y que
+    ninguna de las dos puntas puede explicar. El gemelo TypeScript emite
+    strings por esta misma razon (``toUintString``).
+    """
+    if isinstance(valor, bool):  # bool es int en Python; nunca es un uint de estos
+        raise ValueError(f"{campo} invalido: {valor!r}")
+    if isinstance(valor, int):
+        entero = valor
+    elif isinstance(valor, str):
+        entero = int(valor, 16) if valor[:2].lower() == "0x" else int(valor)
+    else:
+        raise ValueError(f"{campo} invalido: {valor!r}")
+    if entero < 0:
+        raise ValueError(f"{campo} debe ser >= 0, llego {valor!r}")
+    return str(entero)
 
 
 def _nonce_to_bytes32(nonce: Any) -> bytes:
@@ -675,24 +715,53 @@ def build_lifecycle_typed_data(
             "chainId": int(chain_id),
         },
         "types": LIFECYCLE_ORDER_TYPES,
+        # NO entra al digest: EIP-712 hashea dominio + tipos + mensaje, y el
+        # firmante de este SDK (`EnvKeyAdapter`) lee domain/types/message por
+        # nombre e ignora el resto. Esta aca porque el documento es un tipo de
+        # WIRE: viaja como JSON a un navegador, y viem lo exige.
+        "primaryType": LIFECYCLE_PRIMARY_TYPE,
+        # Cada uint va como STRING decimal, igual que el gemelo. El digest es
+        # el mismo (eth-account decodifica las dos formas); lo que cambia es
+        # que el documento sobrevive el viaje por JSON al navegador. Ver
+        # `_uint_a_str`: con `salt` como numero, JSON.parse lo redondea y el
+        # navegador firma otro struct, en silencio.
         "message": {
             "action": action,
-            "amount": int(amount),
-            "deadline": int(deadline),
-            "nonce": _nonce_to_bytes32(nonce),
+            "amount": _uint_a_str(amount, "amount"),
+            "deadline": _uint_a_str(deadline, "deadline"),
+            # HEX, no `bytes`: el documento es un tipo de WIRE y `json.dumps`
+            # no serializa bytes — con bytes aca, mandarselo a un navegador
+            # tira `TypeError` antes de que viem lo vea. El gemelo emite hex
+            # (`nonceToBytes32`), y `eth-account` decodifica las dos formas
+            # para un `bytes32`: el digest es el mismo, medido.
+            "nonce": "0x" + _nonce_to_bytes32(nonce).hex(),
             "paymentInfo": {
                 "operator": to_checksum_address(payment_info["operator"]),
                 "payer": to_checksum_address(payer),
                 "receiver": to_checksum_address(payment_info["receiver"]),
                 "token": to_checksum_address(payment_info["token"]),
-                "maxAmount": int(payment_info["maxAmount"]),
-                "preApprovalExpiry": int(payment_info["preApprovalExpiry"]),
-                "authorizationExpiry": int(payment_info["authorizationExpiry"]),
-                "refundExpiry": int(payment_info["refundExpiry"]),
-                "minFeeBps": int(payment_info["minFeeBps"]),
-                "maxFeeBps": int(payment_info["maxFeeBps"]),
+                "maxAmount": _uint_a_str(
+                    payment_info["maxAmount"], "paymentInfo.maxAmount"
+                ),
+                "preApprovalExpiry": _uint_a_str(
+                    payment_info["preApprovalExpiry"], "paymentInfo.preApprovalExpiry"
+                ),
+                "authorizationExpiry": _uint_a_str(
+                    payment_info["authorizationExpiry"],
+                    "paymentInfo.authorizationExpiry",
+                ),
+                "refundExpiry": _uint_a_str(
+                    payment_info["refundExpiry"], "paymentInfo.refundExpiry"
+                ),
+                "minFeeBps": _uint_a_str(
+                    payment_info["minFeeBps"], "paymentInfo.minFeeBps"
+                ),
+                "maxFeeBps": _uint_a_str(
+                    payment_info["maxFeeBps"], "paymentInfo.maxFeeBps"
+                ),
                 "feeReceiver": to_checksum_address(payment_info["feeReceiver"]),
-                "salt": _salt_to_int(payment_info["salt"]),
+                # uint256 en la firma, bytes32 en el wire — ver `_salt_to_int`.
+                "salt": str(_salt_to_int(payment_info["salt"])),
             },
         },
     }
@@ -861,6 +930,19 @@ def lifecycle_auth_from_signature(
             "typed_data debe ser lo que devuelve build_lifecycle_typed_data"
         )
     mensaje = typed_data["message"]
+    # `primaryType` ausente se TOLERA: todo documento que salio de 0.78.0 y
+    # 0.79.0 no lo trae, y un backend que lo guardo antes de mandarlo a firmar
+    # tiene uno de esos en la mano. Presente y equivocado no se tolera: es una
+    # firma sobre otro struct del que el bloque de wire dice llevar. (El gemelo
+    # TypeScript exige el campo porque nunca emitio un documento sin el —
+    # `lifecycle-auth.ts:554`.)
+    declarada = typed_data.get("primaryType")
+    if declarada is not None and declarada != LIFECYCLE_PRIMARY_TYPE:
+        raise ValueError(
+            f"typed_data.primaryType debe ser {LIFECYCLE_PRIMARY_TYPE!r}, "
+            f"llego {declarada!r}: pasa el documento que devolvio "
+            "build_lifecycle_typed_data, sin tocarlo"
+        )
     dominio = typed_data.get("domain") or {}
     if (
         dominio.get("name") != LIFECYCLE_DOMAIN_NAME
