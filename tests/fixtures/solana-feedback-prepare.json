@@ -1,0 +1,62 @@
+{
+  "_comment": "Captured from the LIVE facilitator. Pinned as a wire sample, not as something submittable: the blockhash inside it expired minutes after capture. Re-capture with scripts in the handoff if the contract moves.",
+  "facilitator": "https://facilitator.ultravioletadao.xyz",
+  "facilitator_version": "2.16.0",
+  "captured_at": "2026-09-07T23:31:04Z",
+  "request": {
+    "x402Version": 1,
+    "network": "solana",
+    "feedback": {
+      "agentId": "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+      "rater": "9oSLm8Rk1kQ9y8dFcqbAcTNqYqcrTUR6cQ4mL8mYNXpB",
+      "value": 87,
+      "valueDecimals": 0,
+      "score": 95,
+      "tag1": "quality",
+      "tag2": "api"
+    }
+  },
+  "response": {
+    "success": true,
+    "transaction": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAHC9GQhGO4748ZwqbVpAvlJeBFWnaf8L+66nZmPTB2/d7AgsLdjl1NYU7SEKCnn69T+FpTshSP+3kkhiCW5HaIV+DdSVVwe4+e4AZcLRZNixUZ4/1DRXmiYcTufpYqGvji+vzZPcotDYYZtAfWPkB+AdsoTsxrYbGe5+3veHHHvDXhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPp9Gt8a4uOwXkdCOVgtqiSeyQ/PiV3UgU8rp+COU0o2R7zGOHssMjaApGtF23Z9VBVTDjFjuzIHysQRQYtKvTc/6b1NyOuApgpidrzemFuoZeiVHEbpY+Aby4xhSHGIOMlrQs7kPa2FN9jrpTTxG/hg5qtJzzGByfvsQLUw9aEqFXQ4fy4+AyBz6QGiyEmzOXwSPBuD9tR08Qn665zMVRuzJ3BgDwbcODu1xhHPdka+7RjV9zfwPSLBs6CiwhmKPYpDCvdzUS/MZsa+J3hfFjkg9yOlygsdmEqzjPYOPlrAEHCQEDBQoEBgIICTaRiHsD16ViKVcAAAAAAAAAAAAAAAAAAAAAAV8ABwAAAHF1YWxpdHkDAAAAYXBpAAAAAAAAAAA=",
+    "rater": "9oSLm8Rk1kQ9y8dFcqbAcTNqYqcrTUR6cQ4mL8mYNXpB",
+    "feePayer": "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
+    "blockhash": "FagGrXEngEpfSi1deKAfMDDGWHmVjUB7Lyyh3RYzC3jy",
+    "lastValidBlockHeight": 423235148,
+    "network": "solana"
+  },
+  "decoded": {
+    "num_required_signatures": 2,
+    "num_accounts": 11,
+    "account_keys": [
+      "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
+      "9oSLm8Rk1kQ9y8dFcqbAcTNqYqcrTUR6cQ4mL8mYNXpB",
+      "FtoxZXFJjn6bYeNs5MGjay3hgaFaLsEhNQtP7ZNVMVPF",
+      "J21sQzd4K5pvFUQnBd6exmiGx7WkKijnmxMHCviJgFnp",
+      "11111111111111111111111111111111",
+      "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+      "7mFFwuy7ryTnrRMKK246be2LwD8rgZ9DvWiZioQtuCtA",
+      "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+      "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb",
+      "BropKd6eEHTiTSsbecKKHr9d1zwW94BC9JXmGYg22BJx",
+      "DbjsWo7iUs7QZyJxLgNyVxvAAjQZCXroJHoGok8h8Umg"
+    ],
+    "fee_payer_index": 0,
+    "rater_index": 1,
+    "message_len": 455,
+    "message_sha256": "1c1cb516cf5a9af732884fbc4cc1e74fb972b6966777b46b2df36ea51ebd6f42",
+    "signature_slots_empty": [
+      true,
+      true
+    ]
+  },
+  "signing_vector": {
+    "_comment": "The same message with a rater this repo can sign for. The seed is sha256 of the sentence in `seed_phrase`; it holds nothing and is never used off a test.",
+    "seed_phrase": "uvd-x402-sdk solana feedback rater vector v1",
+    "rater": "4kpznoUAkTZvUpRpw8PYEk1pgvXwLwyVKAAmUpy6rmY8",
+    "unsigned_transaction": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAHC9GQhGO4748ZwqbVpAvlJeBFWnaf8L+66nZmPTB2/d7AN81OJFfzw8Z1rcPktZw+LHHmOsgx/fYbAc7uDDhjknXdSVVwe4+e4AZcLRZNixUZ4/1DRXmiYcTufpYqGvji+vzZPcotDYYZtAfWPkB+AdsoTsxrYbGe5+3veHHHvDXhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPp9Gt8a4uOwXkdCOVgtqiSeyQ/PiV3UgU8rp+COU0o2R7zGOHssMjaApGtF23Z9VBVTDjFjuzIHysQRQYtKvTc/6b1NyOuApgpidrzemFuoZeiVHEbpY+Aby4xhSHGIOMlrQs7kPa2FN9jrpTTxG/hg5qtJzzGByfvsQLUw9aEqFXQ4fy4+AyBz6QGiyEmzOXwSPBuD9tR08Qn665zMVRuzJ3BgDwbcODu1xhHPdka+7RjV9zfwPSLBs6CiwhmKPYpDCvdzUS/MZsa+J3hfFjkg9yOlygsdmEqzjPYOPlrAEHCQEDBQoEBgIICTaRiHsD16ViKVcAAAAAAAAAAAAAAAAAAAAAAV8ABwAAAHF1YWxpdHkDAAAAYXBpAAAAAAAAAAA=",
+    "signed_transaction": "AgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADqUvGVPhLdv1aXT9QfCCjsn3ukHC2ToZexm2tvh2AqT6m+xYZHSsaSLr48vvX5lUu9YanHsTkBNhTM6gnSnGIOAgAHC9GQhGO4748ZwqbVpAvlJeBFWnaf8L+66nZmPTB2/d7AN81OJFfzw8Z1rcPktZw+LHHmOsgx/fYbAc7uDDhjknXdSVVwe4+e4AZcLRZNixUZ4/1DRXmiYcTufpYqGvji+vzZPcotDYYZtAfWPkB+AdsoTsxrYbGe5+3veHHHvDXhAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPp9Gt8a4uOwXkdCOVgtqiSeyQ/PiV3UgU8rp+COU0o2R7zGOHssMjaApGtF23Z9VBVTDjFjuzIHysQRQYtKvTc/6b1NyOuApgpidrzemFuoZeiVHEbpY+Aby4xhSHGIOMlrQs7kPa2FN9jrpTTxG/hg5qtJzzGByfvsQLUw9aEqFXQ4fy4+AyBz6QGiyEmzOXwSPBuD9tR08Qn665zMVRuzJ3BgDwbcODu1xhHPdka+7RjV9zfwPSLBs6CiwhmKPYpDCvdzUS/MZsa+J3hfFjkg9yOlygsdmEqzjPYOPlrAEHCQEDBQoEBgIICTaRiHsD16ViKVcAAAAAAAAAAAAAAAAAAAAAAV8ABwAAAHF1YWxpdHkDAAAAYXBpAAAAAAAAAAA=",
+    "rater_signature_hex": "ea52f1953e12ddbf56974fd41f0828ec9f7ba41c2d93a197b19b6b6f87602a4fa9bec586474ac6922ebe3cbef5f9954bbd61a9c7b139013614ccea09d29c620e",
+    "message_sha256": "9f30760efb9af3238c1822bd37f5ba8c3f2be67e84b7e17a2b9c53a76cbfce45"
+  }
+}

@@ -202,9 +202,12 @@ from uvd_x402_sdk.erc8004 import (
     FeedbackRequest,
     FeedbackResponse,
     PrepareRelayFeedbackResponse,
+    PrepareSolanaFeedbackResponse,
     RelayAuthorizationParams,
     RELAYED_FEEDBACK_NETWORKS,
     supports_relayed_feedback,
+    SOLANA_FEEDBACK_NETWORKS,
+    supports_solana_feedback,
     ReputationResponse,
     SettleResponseWithProof,
     MetadataEntryParam,
@@ -358,6 +361,17 @@ from uvd_x402_sdk.escrow_signing import (
     build_lifecycle_typed_data,
     compute_escrow_nonce,
     lifecycle_auth_from_signature,
+)
+
+# Solana rater-authored ERC-8004 feedback: the signing step between
+# /feedback/solana/prepare and /feedback/solana/submit. Stdlib only until
+# an Ed25519Signer is instantiated, which needs the 'solana' extra.
+from uvd_x402_sdk.solana_signing import (
+    Ed25519Signer,
+    SolanaFeedbackTransaction,
+    SolanaSigner,
+    decode_solana_transaction,
+    sign_solana_feedback_transaction,
 )
 
 # Advanced Escrow (PaymentOperator - on-chain escrow)
@@ -551,9 +565,17 @@ __all__ = [
     "FeedbackRequest",
     "FeedbackResponse",
     "PrepareRelayFeedbackResponse",
+    "PrepareSolanaFeedbackResponse",
     "RelayAuthorizationParams",
     "RELAYED_FEEDBACK_NETWORKS",
     "supports_relayed_feedback",
+    "SOLANA_FEEDBACK_NETWORKS",
+    "supports_solana_feedback",
+    "Ed25519Signer",
+    "SolanaFeedbackTransaction",
+    "SolanaSigner",
+    "decode_solana_transaction",
+    "sign_solana_feedback_transaction",
     "ReputationResponse",
     "SettleResponseWithProof",
     "build_erc8004_payment_requirements",

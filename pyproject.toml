@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.80.0"
+version = "0.81.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 25 blockchains (including Robinhood Chain, XRPL, Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT, USDG)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -84,6 +84,12 @@ escrow = [
     "web3>=6.0.0",
     "eth-account>=0.11.0",
 ]
+# Signing a Solana feedback transaction as the rater: ed25519 only, no RPC
+# client and no web3. The decode/encode half of solana_signing works on a base
+# install; this extra is what Ed25519Signer needs.
+solana = [
+    "cryptography>=42.0.0",
+]
 flask = [
     "flask>=2.0.0",
 ]
@@ -101,7 +107,7 @@ algorand = [
     "py-algorand-sdk>=2.0.0",
 ]
 all = [
-    "uvd-x402-sdk[signer,wallet,web3,escrow,flask,fastapi,django,aws,algorand]",
+    "uvd-x402-sdk[signer,wallet,web3,escrow,solana,flask,fastapi,django,aws,algorand]",
 ]
 dev = [
     "pytest>=7.0.0",
