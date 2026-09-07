@@ -338,6 +338,11 @@ class TestGoldenVectors:
         assert len(signer.typed_data_calls) == 1
         typed = signer.typed_data_calls[0]
         assert typed["domain"] == expected["domain"]
+        # El fixture nombra su struct raiz desde siempre; hasta 0.80.0 este SDK
+        # no lo emitia y el test solo podia comprobarlo de refilon, por el
+        # nombre del unico tipo. Ahora se compara el campo, que es el que un
+        # firmante de navegador (viem) necesita para poder firmar esto.
+        assert typed["primaryType"] == expected["primaryType"]
         assert list(typed["types"]) == [expected["primaryType"]]
         message = typed["message"]
         assert message["from"] == expected["message"]["from"]

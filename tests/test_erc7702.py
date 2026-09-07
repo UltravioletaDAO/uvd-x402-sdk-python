@@ -64,6 +64,10 @@ def test_firma_delegada_va_por_el_wallet_y_devuelve_la_envuelta():
     out = erc7702.sign_eip3009_for_delegated(
         wallet=_W(), inner_digest=b"\x03" * 32, chain_id=8453, account="0xAcc")
     assert vistos["domain"]["verifyingContract"] == "0xAcc"
+    # Y el documento nombra su struct raiz: un firmante remoto que sea un
+    # navegador (viem) no firma sin `primaryType`. No entra al digest.
+    assert vistos["primaryType"] == "ReplaySafeHash"
+    assert vistos["primaryType"] in vistos["types"]
     assert out == erc7702.wrap_signature("0x" + "22" * 65)
 
 

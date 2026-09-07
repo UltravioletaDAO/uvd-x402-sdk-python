@@ -18,6 +18,7 @@ emitida— este test se pone rojo antes que la produccion.
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -32,6 +33,7 @@ from eth_utils import keccak  # noqa: E402
 
 from uvd_x402_sdk.escrow_signing import (  # noqa: E402
     LIFECYCLE_MAX_DEADLINE_SECS,
+    LIFECYCLE_PRIMARY_TYPE,
     build_lifecycle_auth,
     build_lifecycle_typed_data,
     lifecycle_auth_from_signature,
@@ -462,12 +464,17 @@ def test_una_accion_desconocida_no_se_firma():
         )
 
 
-def test_el_salt_entra_como_entero_no_como_hex():
+def test_el_salt_entra_por_su_valor_entero_no_por_su_hex():
     """`salt` es bytes32 en el wire y uint256 en la firma.
 
     El facilitador lo convierte con `U256::from_be_bytes` (types.rs:288).
-    Firmarlo como string produce otro digest y un `bad_signature` mudo — el
+    Firmar el hex tal cual produce otro digest y un `bad_signature` mudo — el
     unico sintoma seria que ninguna orden verifica jamas.
+
+    Lo que se fija es el VALOR, no el tipo de Python: desde 0.80.0 los uint del
+    mensaje van como string decimal para que el documento sobreviva el viaje
+    por JSON al navegador (ver `_uint_a_str`). El digest es el mismo — lo
+    comprueba `test_primaryType_no_movio_la_firma_del_vector_fijado`.
     """
     pi = _payment_info()
     typed = build_lifecycle_typed_data(
@@ -475,8 +482,8 @@ def test_el_salt_entra_como_entero_no_como_hex():
         amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600,
         nonce="0x" + "01" * 32,
     )
-    assert typed["message"]["paymentInfo"]["salt"] == 0x3039
-    assert isinstance(typed["message"]["paymentInfo"]["salt"], int)
+    assert int(typed["message"]["paymentInfo"]["salt"]) == 0x3039
+    assert typed["message"]["paymentInfo"]["salt"] == "12345"
 
 
 # ---------------------------------------------------------------------------
@@ -672,8 +679,9 @@ def test_vector_fijado_para_el_gemelo_typescript():
         "version": "1",
         "chainId": 8453,
     }
-    # El salt entra como el ENTERO 12345, no como el string hex.
-    assert typed["message"]["paymentInfo"]["salt"] == 12345
+    # El salt entra por su valor 12345, no por su hex. Va como string decimal
+    # (0.80.0) para sobrevivir el JSON; el digest de abajo no se movio.
+    assert typed["message"]["paymentInfo"]["salt"] == "12345"
 
     assert _digest(typed).hex() == (
         "3dbd8a90a80785131a198a685f9f7400b1bf9a48d998e3aa1853abae56921918"
@@ -911,3 +919,189 @@ def test_sin_ninguno_de_los_dos_el_payload_sigue_saliendo_como_antes(monkeypatch
     cliente.release_via_facilitator(_payment_info_dataclass())
 
     assert set(capturado[0]["payload"]) == {"paymentInfo", "payer", "amount"}
+
+
+# ---------------------------------------------------------------------------
+# `primaryType`: el campo sin el cual viem no firma (0.80.0)
+# ---------------------------------------------------------------------------
+#
+# Lo destapo el worker de execution-market al hacer que el publisher firmara la
+# orden EN EL NAVEGADOR. `types` tiene dos entradas -`LifecycleOrder` y
+# `PaymentInfo`- y solo una es la raiz. ethers y eth-account la DEDUCEN; viem
+# no: exige que el documento la nombre, y sin eso `signTypedData` tira antes de
+# mostrarle nada al usuario. El gemelo TypeScript lo emitia desde su primer dia
+# (`lifecycle-auth.ts:422`), este SDK no, y el gate de conformidad cruzada
+# estuvo verde con la divergencia adentro porque no miraba el campo.
+#
+# El campo NO entra al digest -EIP-712 hashea dominio, tipos y mensaje-, asi
+# que la firma no se mueve. Eso no se supone: se mide, abajo.
+
+
+def test_el_typed_data_nombra_su_struct_raiz():
+    """Sin esto, la ruta del navegador esta cerrada del lado Python."""
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=_payment_info(),
+        payer=_payer().get_address(), amount=AMOUNT, chain_id=CHAIN,
+        deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+
+    assert typed["primaryType"] == "LifecycleOrder"
+    assert typed["primaryType"] == LIFECYCLE_PRIMARY_TYPE
+    # Y nombra un tipo que existe: un `primaryType` que no esta en `types` es
+    # un documento que viem rechaza igual que si faltara.
+    assert typed["primaryType"] in typed["types"]
+
+
+def test_el_documento_es_exactamente_lo_que_viem_recibe():
+    """Las cuatro claves de `signTypedData`, y ninguna de mas.
+
+    viem pide `domain`, `types`, `primaryType` y `message`. Ademas `types` NO
+    puede traer `EIP712Domain`: viem y ethers lo derivan del dominio, y traerlo
+    escrito hace que ethers tire `ambiguous primary types`.
+    """
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=_payment_info(),
+        payer=_payer().get_address(), amount=AMOUNT, chain_id=CHAIN,
+        deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+
+    assert set(typed) == {"domain", "types", "primaryType", "message"}
+    assert "EIP712Domain" not in typed["types"]
+    assert set(typed["types"]) == {"LifecycleOrder", "PaymentInfo"}
+
+
+def test_primaryType_no_movio_la_firma_del_vector_fijado():
+    """El riesgo real de este cambio, medido y no supuesto.
+
+    Esto toca el cuerpo de una orden FIRMADA. Si agregar el campo moviera los
+    65 bytes, toda orden emitida antes de 0.80.0 dejaria de verificar. La firma
+    de abajo es la misma que fija
+    `test_vector_fijado_para_el_gemelo_typescript` desde 0.78.0, byte por byte,
+    y es tambien la del `.rs` del facilitador.
+    """
+    wallet = EnvKeyAdapter("0x" + "11" * 32)
+    pi = {
+        "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "maxAmount": "1000000",
+        "preApprovalExpiry": 1757003600,
+        "authorizationExpiry": 1757007200,
+        "refundExpiry": 1759592000,
+        "minFeeBps": 0,
+        "maxFeeBps": 1300,
+        "feeReceiver": "0xaE07cEB6b395BC685a776a0b4c489E8d9cE9A6ad",
+        "salt": "0x0000000000000000000000000000000000000000000000000000000000003039",
+    }
+    auth = build_lifecycle_auth(
+        action="release", payment_info=pi, payer=wallet.get_address(),
+        amount=1_000_000, chain_id=8453, wallet=wallet,
+        deadline=1757000600, nonce="0x" + "01" * 32, now=1757000000,
+    )
+
+    assert auth["signature"] == (
+        "0x78fe143886ee329e235cd7735e948f50ecd2ef32b20a4c88c46767cdd63b33ca"
+        "77553f16c73adacf754e34b2cc988137fd77b843649d990c9a1a5001b28a13a71c"
+    )
+
+    # Y el porque: borrar el campo del documento da EL MISMO digest. Lo que
+    # entra al hash es dominio + tipos + mensaje; `primaryType` es metadato
+    # para el firmante.
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=wallet.get_address(),
+        amount=1_000_000, chain_id=8453, deadline=1757000600,
+        nonce="0x" + "01" * 32,
+    )
+    sin_el_campo = {k: v for k, v in typed.items() if k != "primaryType"}
+    assert _digest(typed) == _digest(sin_el_campo)
+
+
+def test_una_orden_que_dice_ser_otro_struct_no_se_transporta():
+    """El documento se identifica antes de leerle nada.
+
+    Un typed data de PAGO tiene otro dominio y ya lo agarra el chequeo de
+    dominio; pero un documento que declara otra raiz sobre ESTE dominio es una
+    firma sobre un struct distinto del que el bloque de wire dice llevar.
+    """
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=_payment_info(),
+        payer=_payer().get_address(), amount=AMOUNT, chain_id=CHAIN,
+        deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+    firma = _firma_ajena(typed, _payer())
+
+    otro = {**typed, "primaryType": "PaymentInfo"}
+    with pytest.raises(ValueError, match="primaryType"):
+        lifecycle_auth_from_signature(
+            typed_data=otro, signature=firma, signer=_payer().get_address()
+        )
+
+
+def test_un_documento_de_0_79_0_sin_el_campo_sigue_entrando():
+    """Compatibilidad hacia atras, y es deliberada.
+
+    El gemelo TypeScript EXIGE el campo, porque nunca emitio un documento sin
+    el. Este SDK si: todo lo que salio de 0.78.0 y 0.79.0 no lo trae. Un
+    backend que guardo el documento antes de mandarlo a firmar tiene uno de
+    esos en la mano, y rechazarlo seria romper una orden buena por un campo
+    que no entra al digest. Ausente se tolera; presente y equivocado no.
+    """
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=_payment_info(),
+        payer=_payer().get_address(), amount=AMOUNT, chain_id=CHAIN,
+        deadline=NOW + 600, nonce="0x" + "01" * 32,
+    )
+    firma = _firma_ajena(typed, _payer())
+
+    viejo = {k: v for k, v in typed.items() if k != "primaryType"}
+    bloque = lifecycle_auth_from_signature(
+        typed_data=viejo, signature=firma, signer=_payer().get_address()
+    )
+    assert bloque["signature"] == firma
+
+
+def test_el_documento_sobrevive_el_viaje_por_json():
+    """El documento es un tipo de WIRE, y el wire es JSON.
+
+    Dos cosas lo rompian antes de 0.80.0, las dos medidas contra viem 2.56.3:
+
+    1. `nonce` salia como `bytes`. `json.dumps` tira `TypeError` sobre bytes,
+       asi que el documento no se podia ni mandar. Execution Market lo estaba
+       parcheando en el consumidor (`mcp_server/integrations/x402/
+       lifecycle_auth.py`), que es justo lo que upstream-first evita.
+
+    2. Los uint salian como enteros de Python. `salt` es de 32 bytes: como
+       numero JSON, `JSON.parse` lo entrega como `double` y el navegador firma
+       OTRO struct. Medido con `salt = 0xab*32`: Python firmaba
+       `0x15a8587e...` y viem, leyendo ese mismo documento por JSON,
+       `0x4c88c56a...`. Sin error y sin advertencia — solo una orden que el
+       facilitador rechaza como `bad_signature`. Con los uint como string las
+       dos firmas son la misma.
+    """
+    pi = {**_payment_info(), "salt": "0x" + "ab" * 32}
+    typed = build_lifecycle_typed_data(
+        action="release", payment_info=pi, payer=_payer().get_address(),
+        amount=AMOUNT, chain_id=CHAIN, deadline=NOW + 600,
+        nonce="0x" + "01" * 32,
+    )
+
+    # 1. Se puede serializar, y vuelve identico.
+    ida_y_vuelta = json.loads(json.dumps(typed))
+    assert ida_y_vuelta == typed
+    assert _digest(ida_y_vuelta) == _digest(typed)
+
+    # 2. Ningun valor del mensaje es un numero: un numero de 32 bytes no
+    #    sobrevive un `JSON.parse` del otro lado.
+    def _hojas(valor):
+        if isinstance(valor, dict):
+            for v in valor.values():
+                yield from _hojas(v)
+        else:
+            yield valor
+
+    for hoja in _hojas(typed["message"]):
+        assert isinstance(hoja, str), f"{hoja!r} viaja como numero por el JSON"
+
+    # Y el salt sigue siendo el uint256 que el facilitador espera, escrito en
+    # decimal — no el hex del wire.
+    assert typed["message"]["paymentInfo"]["salt"] == str(int("ab" * 32, 16))

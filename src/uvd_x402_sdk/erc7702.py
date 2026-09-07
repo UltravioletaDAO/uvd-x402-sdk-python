@@ -174,7 +174,15 @@ def sign_eip3009_for_delegated(
     """
     domain, types, message = replay_safe_typed_data(inner_digest, chain_id, account)
     signed = wallet.sign_typed_data(
-        {"domain": domain, "types": types, "message": message}
+        # `primaryType` no entra al digest, pero el contrato de
+        # `WalletAdapter.sign_typed_data` lo lleva: un adaptador de navegador
+        # (viem) no puede firmar sin el. Espejo de `escrow-preauth.ts:511`.
+        {
+            "domain": domain,
+            "types": types,
+            "primaryType": "ReplaySafeHash",
+            "message": message,
+        }
     )
     sig = (
         signed.get("signature")

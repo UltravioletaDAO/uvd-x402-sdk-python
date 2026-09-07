@@ -157,6 +157,13 @@ payment_requirements = {
 - Same math as `AdvancedEscrowClient._compute_nonce` but standalone (dict-based, no web3); `EnvKeyAdapter.sign_eip3009` produces the same digest when payer == adapter wallet - parity pinned in `tests/test_escrow_signing.py`
 - Fail-loud: unknown network / incomplete config raises `ValueError` (silent domain fallback = wallet-draining auth)
 
+### The typed data is a WIRE type, and the wire is JSON (escrow_signing.py, v0.80.0)
+- Every typed-data dict this SDK hands a `WalletAdapter` carries **`primaryType`** — `LifecycleOrder`, `ReceiveWithAuthorization` (pre-auth and `advanced_escrow`), `ReplaySafeHash` (`erc7702`). It does NOT enter the digest (EIP-712 hashes domain + types + message) and `eth-account` derives it, but **viem refuses to sign without it**, which closed the browser route for the Python side while every byte-comparison stayed green. TS emitted it from day one
+- `build_lifecycle_typed_data` returns the four keys viem reads and nothing else; its `message` is **all strings** — `nonce` as 0x-hex (`bytes` is not JSON-serializable: `json.dumps` raises) and every uint as a decimal string. A `salt` written as a JSON number is destroyed by `JSON.parse`: measured with `0xab*32`, Python signed `0x15a8587e…` and viem, reading that same document, `0x4c88c56a…` — **two valid signatures over different structs, no error anywhere**
+- The digest is unchanged by all of the above; the pinned vector `0x78fe14…3a71c` is byte-identical before and after (`test_primaryType_no_movio_la_firma_del_vector_fijado`)
+- `lifecycle_auth_from_signature` rejects a `primaryType` that is present and wrong, and **tolerates one that is absent** — every document emitted by 0.78.0/0.79.0 lacks it. The TS twin requires it because it never emitted one without
+- The cross-language gate compares the DOCUMENT, not just the signature (`scripts/xlang/` in the TS repo): the agents return what the SDK handed the wallet, and the message crosses a real `json.dumps` → `JSON.parse` boundary. Proven red in three states, not just green
+
 ### ERC-8128 Signed HTTP Requests (erc8128.py)
 - `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers
 - `fetch_nonce(api_base)` - async, gets the single-use server nonce (5-min TTL, one per signed request including retries)
