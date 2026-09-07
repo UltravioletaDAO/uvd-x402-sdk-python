@@ -21,6 +21,7 @@ src/uvd_x402_sdk/
 ├── response.py              # 402 response helpers
 ├── discovery.py             # BazaarClient - resource registration and discovery
 ├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
+├── solana_signing.py        # Solana rater-authored feedback: sign the prepared tx (ed25519)
 ├── erc8128.py               # ERC-8128 Signed HTTP Requests (RFC 9421) — sign_request() + fetch_nonce()
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
@@ -163,6 +164,15 @@ payment_requirements = {
 - The digest is unchanged by all of the above; the pinned vector `0x78fe14…3a71c` is byte-identical before and after (`test_primaryType_no_movio_la_firma_del_vector_fijado`)
 - `lifecycle_auth_from_signature` rejects a `primaryType` that is present and wrong, and **tolerates one that is absent** — every document emitted by 0.78.0/0.79.0 lacks it. The TS twin requires it because it never emitted one without
 - The cross-language gate compares the DOCUMENT, not just the signature (`scripts/xlang/` in the TS repo): the agents return what the SDK handed the wallet, and the message crosses a real `json.dumps` → `JSON.parse` boundary. Proven red in three states, not just green
+
+### Solana rater-authored feedback (erc8004.py + solana_signing.py, v0.81.0)
+- `prepare_solana_feedback()` / `submit_solana_feedback()` drive `/feedback/solana/prepare` and `/feedback/solana/submit`, live on the deployed facilitator since **v1.74.0** (measured on **v2.16.0**, 2026-09-07) and with **no client on either SDK** until this version. Server half: `x402-rs`, `src/handlers.rs:6674,6786` + `src/erc8004/solana.rs:1036-1174`
+- **`SOLANA_FEEDBACK_NETWORKS` is a SIBLING of `RELAYED_FEEDBACK_NETWORKS`, never a row in it.** That frozenset means "a `FeedbackDelegate` is deployed and verified here" and `erc8004.py` builds `/feedback/evm/prepare` out of it; a `solana` entry routes the call to the EVM URL, which answers 400. Pinned in `tests/test_solana_feedback.py`; `tests/test_relayed_feedback.py:56` is untouched
+- **Solana needs no delegate**: account 0 of the program's `give_feedback` is already `[signer, writable] client (feedback author / fee payer)`, and Solana takes several signers per transaction, so the rater signs as `client` while the facilitator stays fee payer
+- **`sign_solana_feedback_transaction()` never re-serialises the message.** It carries the exact wire bytes and rewrites only the signature array, because `accept_rater_signed_transaction` compares the submitted message against its own rebuild. Decoding to structs and re-encoding is how you get `400 submitted transaction does not match the one this facilitator built` with nothing on the client side to point at
+- Fee payer is signature slot 0 and is left EMPTY: the facilitator fills it after verifying the rater's, so a transaction the network would reject never costs a fee
+- `Ed25519Signer` (extra `solana` -> `cryptography`) takes a 32-byte seed, a 64-byte `solana-keygen` key, its int array or its base58 form, and checks the 64-byte form's public half against the derived one. `SolanaSigner` is a two-member Protocol, so a browser wallet or custodian plugs in unchanged
+- **Wire pinned from a LIVE capture**: `tests/fixtures/solana-feedback-prepare.json` (facilitator v2.16.0). Re-capture with `examples/solana_feedback_smoke.py`, which runs prepare -> sign -> verify against production with an ephemeral rater and **stops before submit** (submit is an on-chain write the facilitator pays for)
 
 ### ERC-8128 Signed HTTP Requests (erc8128.py)
 - `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers

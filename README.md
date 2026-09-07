@@ -1436,6 +1436,86 @@ chain that supports EIP-7702 -- the payment stays where it was made.
 
 Requires facilitator v1.93.0+ for the mainnets; base-sepolia since v1.74.0.
 
+### The same thing on Solana, and it needs no delegate
+
+Solana has the identical defect and a shorter fix. Account 0 of the program's
+`give_feedback` instruction is already declared `[signer, writable] client
+(feedback author / fee payer)`, and `POST /feedback` puts the **facilitator's**
+keypair there. Since Solana takes several signers per transaction natively, the
+rater can simply sign as `client` while the facilitator stays the fee payer --
+no delegation, no contract in between.
+
+Which is why this is a **sibling rail**, not one more network on
+`RELAYED_FEEDBACK_NETWORKS`: that set means "a `FeedbackDelegate` is deployed
+here", and `prepare_relayed_feedback()` builds the **EVM** URL
+`/feedback/evm/prepare` out of it. Solana routes through `SOLANA_FEEDBACK_NETWORKS` and
+`/feedback/solana/*` instead.
+
+```bash
+pip install uvd-x402-sdk[solana]   # ed25519 signing; no RPC client, no web3
+```
+
+```python
+import os
+
+from uvd_x402_sdk import (
+    Ed25519Signer,
+    Erc8004Client,
+    sign_solana_feedback_transaction,
+    supports_solana_feedback,
+)
+
+signer = Ed25519Signer(os.environ["RATER_SECRET_KEY"])  # 32/64 bytes or base58
+
+async with Erc8004Client() as client:
+    if not supports_solana_feedback("solana"):
+        ...  # fall back to submit_feedback(); the facilitator is the author
+
+    # 1. Ask for the transaction. Free, writes nothing, and the `client`
+    #    account it builds is the RATER.
+    prep = await client.prepare_solana_feedback(
+        network="solana",
+        agent_id="247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",  # asset pubkey
+        rater=signer.pubkey,
+        value=87,
+        score=95,          # without it the ATOM Engine records but scores nothing
+        tag1="quality",
+    )
+
+    # 2. Sign it. The message is carried through byte for byte -- the
+    #    facilitator rebuilds it and refuses anything that is not identical.
+    signed = sign_solana_feedback_transaction(prep.transaction, signer.pubkey, signer)
+
+    # 3. Send it back with the SAME feedback parameters. The facilitator
+    #    verifies the rater's signature, then adds its own and pays the fee.
+    result = await client.submit_solana_feedback(
+        network="solana",
+        agent_id="247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+        rater=signer.pubkey,
+        value=87,
+        score=95,
+        tag1="quality",
+        transaction=signed,
+    )
+```
+
+The fee payer's signature slot is left empty on purpose: that one is the
+facilitator's, and it fills it only after the rater's has verified -- so a
+transaction the network would reject never costs a fee.
+
+`prepare` pins the transaction to a recent blockhash, and Solana blockhashes
+expire in about a minute of slots. Prepare when the rater is ready to sign,
+not before -- and once `lastValidBlockHeight` is past, **call `prepare` again**.
+The window is retryable, the signed transaction is not replayable: the
+blockhash lives inside the message, so a new one has to be signed.
+
+`Ed25519Signer` is a convenience, not a requirement: anything with a base58
+`pubkey` and a `sign_message(bytes) -> bytes` satisfies `SolanaSigner`, so a
+browser wallet, a custodian or an HSM plugs in unchanged.
+
+Available on `solana` and `solana-devnet`. Requires facilitator **v1.74.0+**
+(the release that first served both routes); measured live on **v2.16.0**.
+
 ## Server-Side Signing
 
 Create signed EIP-3009 payment headers from your backend without a browser wallet. Useful for server-to-server x402 payments, automated agents, and testing.
@@ -2212,6 +2292,24 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.81.0 (2026-09-07)
+- **Added: the rater can now author their own rating on Solana.** `prepare_solana_feedback()` + `sign_solana_feedback_transaction()` + `submit_solana_feedback()` drive the facilitator's `/feedback/solana/prepare` and `/feedback/solana/submit`, live on the deployed facilitator since **v1.74.0** (measured today on **v2.16.0**) and until now with **no client on either SDK**. The server half has existed since 2026-08-13 (`x402-rs`, `src/erc8004/solana.rs`); nothing could call it
+- **Why it matters**: account 0 of the program's `give_feedback` instruction is declared `[signer, writable] client (feedback author / fee payer)`, and `POST /feedback` puts the FACILITATOR's keypair there. Same defect the EIP-7702 rail fixes on EVM -- the chain records the service, not the person. Solana takes several signers per transaction natively, so the fix needs no delegate and no program change: the rater signs as `client`, the facilitator stays the fee payer
+- **`SOLANA_FEEDBACK_NETWORKS` / `supports_solana_feedback()` are a SIBLING of `RELAYED_FEEDBACK_NETWORKS`, never an addition to it.** That frozenset means "Execution Market deployed a `FeedbackDelegate` here and the facilitator verified it on-chain", and `prepare_relayed_feedback()` builds the EVM URL `/feedback/evm/prepare` from it -- a `solana` entry there routes the call to the EVM URL, which answers 400. Pinned by a test, and the delegate tests are untouched and still green
+- **The message is never re-serialised.** `sign_solana_feedback_transaction()` carries the exact bytes that came off the wire and rewrites only the signature array, because `accept_rater_signed_transaction` compares the submitted message against the one it rebuilds and refuses a mismatch (`submitted transaction does not match the one this facilitator built`). A client that decoded to structs and re-encoded would look correct and fail there, with nothing on its own side to point at
+- **Added: `Ed25519Signer`** (`pip install 'uvd-x402-sdk[solana]'`) -- a `SolanaSigner` over a 32-byte seed, a 64-byte `solana-keygen` key, its JSON int array or its base58 form. The 64-byte form's public half is checked against the derived one: a key pasted a byte short still parses and then signs as somebody else. The key is never in `repr`, never in an error, never on disk
+- **`SolanaSigner` is a two-member Protocol**, so a browser wallet, a custodian or an HSM plugs in with no adapter
+- **Everything that can go wrong fails before the network**: a signer holding another key, a rater that is not a required signer, a versioned (v0) message, a truncated blob, a header that disagrees with the signature array, a signature of the wrong length. From a facilitator 400 those are indistinguishable, and one of them -- the rater in a non-signer slot -- is a rating signed by nobody
+- **Wire pinned against the LIVE facilitator.** `tests/fixtures/solana-feedback-prepare.json` is a capture from `https://facilitator.ultravioletadao.xyz` (v2.16.0, 2026-09-07): two signature slots both empty, fee payer at account 0, rater at account 1, 11 accounts. The decode -> encode round trip is asserted byte-identical, and the rater's signature is pinned by value (ed25519 is deterministic), so a change in *what* gets signed goes red instead of producing a well-formed signature over the wrong thing
+- 968 tests pass (931 before, 37 added, none lost). `submit_feedback()` and the EVM relay rail are byte-for-byte unchanged
+
+### v0.80.0 (2026-09-07)
+- **Fixed: the lifecycle order document could not be signed by a browser.** `build_lifecycle_typed_data()` emitted a document `viem` refuses, and the consumer was patching it by hand (`execution-market:mcp_server/integrations/x402/lifecycle_auth.py`, with its own "[DIVERGENCIA DE LOS SDK, para upstream]" comment). Three divergences, not one: a missing `primaryType`, a `nonce` as `bytes` (`json.dumps` raises, so the document could not even reach the browser), and every uint as a Python int
+- **The third one did not fail -- it signed the wrong struct.** A real 32-byte `salt` is destroyed by `JSON.parse`: measured with `0xab*32`, Python signed `0x15a8587e...` and viem, reading that same document, `0x4c88c56a...`. Two valid signatures over two different structs, with no error anywhere. The pinned vector missed it because its salt (12345) fits in a double
+- **No digest moved.** EIP-712 hashes domain, types and message; `eth-account` decodes a uint from an int or a decimal string to the same value. The shared vector's signature is byte-identical before and after (`0x78fe14...3a71c`, pinned in `tests/test_lifecycle_auth.py`)
+- **`lifecycle_auth_from_signature` rejects a wrong `primaryType` and tolerates an absent one** -- every document emitted by 0.78.0 and 0.79.0 lacks it. The TypeScript twin emitted all three correctly from its first day; Python was the one that was wrong
+- The cross-language gate now compares the DOCUMENT, not just the signature, across a real `json.dumps` -> `JSON.parse` boundary
 
 ### v0.79.0 (2026-09-06)
 - **Added: `release_via_facilitator()` / `refund_via_facilitator()` accept `lifecycle_auth=`** — a lifecycle order **already signed by someone else**, attached to `payload.lifecycleAuth` verbatim. 0.78.0 shipped only `lifecycle_signer=`, which signs with a key held **in the calling process**; that is the wrong shape for the flow the owner picked, where the **payer** signs and Execution Market transports. EM's own handoff measured the gap: *"Mientras no acepte un `lifecycle_auth=`, no puede transportar la orden de un tercero"* — their side is already merged behind `EM_LIFECYCLE_PAYER_SIGNS` (off), waiting on this

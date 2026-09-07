@@ -107,6 +107,37 @@ def supports_relayed_feedback(network: str) -> bool:
     return _wire(network) in RELAYED_FEEDBACK_NETWORKS
 
 
+# Networks where the facilitator serves the SOLANA rater-authored feedback
+# rail: ``POST /feedback/solana/prepare`` + ``POST /feedback/solana/submit``.
+#
+# Deliberately NOT part of :data:`RELAYED_FEEDBACK_NETWORKS`, and the two must
+# never be merged. That set means "Execution Market deployed a
+# ``FeedbackDelegate`` here and the facilitator verified it on-chain", and
+# :meth:`Erc8004Client.prepare_relayed_feedback` builds
+# ``/feedback/evm/prepare`` from it -- so a ``solana`` entry there would send
+# the call to the EVM route, which answers 400.
+#
+# Solana needs no delegate and never will: account 0 of the program's
+# ``give_feedback`` instruction is already declared ``[signer] client``, so the
+# rater can sign as the author natively while the facilitator stays the fee
+# payer. Same outcome as the 7702 rail, reached without a contract in between,
+# which is why it is a sibling rail rather than one more network on that list.
+SOLANA_FEEDBACK_NETWORKS = frozenset({
+    "solana",
+    "solana-devnet",
+})
+
+
+def supports_solana_feedback(network: str) -> bool:
+    """Whether ``network`` serves the Solana rater-authored feedback rail.
+
+    A routing hint, like :func:`supports_relayed_feedback`: the facilitator
+    re-checks per request and answers ``"<network> is not a Solana network
+    served by this facilitator"`` for anything else.
+    """
+    return _wire(network) in SOLANA_FEEDBACK_NETWORKS
+
+
 def _wire(network: str) -> str:
     """Return the network name the facilitator actually accepts.
 
@@ -668,6 +699,52 @@ class PrepareRelayFeedbackResponse(BaseModel):
     account_nonce: Optional[int] = Field(None, alias="accountNonce")
     """The account nonce to put in the EIP-7702 authorization, when needed."""
     chain_id: int = Field(0, alias="chainId")
+    error: Optional[str] = None
+    network: str
+
+    class Config:
+        populate_by_name = True
+
+
+class PrepareSolanaFeedbackResponse(BaseModel):
+    """Response from ``POST /feedback/solana/prepare``.
+
+    An UNSIGNED Solana transaction whose ``client`` account is the rater, for
+    the rater to sign in their own wallet. The facilitator is only the fee
+    payer -- which is the entire point: the chain ends up recording the person
+    who rated, not the service that paid for the write.
+    """
+
+    success: bool
+    transaction: Optional[str] = None
+    """Base64 of the bincode-serialised unsigned transaction.
+
+    Two signature slots, both empty: index 0 is the fee payer (the
+    facilitator, which fills it on submit) and the rater's is wherever their
+    pubkey sits in the account table. Hand this to
+    :func:`~uvd_x402_sdk.solana_signing.sign_solana_feedback_transaction`
+    rather than decoding it: the facilitator refuses anything whose message is
+    not byte-for-byte what it built.
+    """
+    rater: Optional[str] = None
+    """Who must sign as ``client``, i.e. who the chain will record as author."""
+    fee_payer: Optional[str] = Field(None, alias="feePayer")
+    """Who pays the fee. Still the facilitator -- that is the deal."""
+    blockhash: Optional[str] = None
+    """The blockhash baked into the message. Submit before it expires."""
+    last_valid_block_height: Optional[int] = Field(None, alias="lastValidBlockHeight")
+    """Last block height at which this transaction is still valid.
+
+    Solana blockhashes expire in roughly a minute of slots, so this rail has
+    no room for a human to think it over in a wallet UI and come back. Prepare
+    when the rater is ready to sign, not before.
+
+    **Past it, call ``prepare`` again -- never re-send.** An expired window is
+    retryable but the signed transaction is not replayable: the blockhash is
+    inside the message, so the rater has to sign the new one. Re-sending the
+    old blob is the same 400 as sending a message the facilitator did not
+    build.
+    """
     error: Optional[str] = None
     network: str
 
@@ -1318,6 +1395,228 @@ class Erc8004Client:
             body["authorization"] = authorization.model_dump(by_alias=True)
 
         url = f"{self.base_url}/feedback/evm/submit"
+        try:
+            response = await self._client.post(url, json=body)
+            response.raise_for_status()
+            return FeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return FeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return FeedbackResponse(
+                success=False,
+                error=str(e),
+                network=network,
+            )
+
+    async def prepare_solana_feedback(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        rater: str,
+        value: int,
+        *,
+        value_decimals: int = 0,
+        tag1: str = "",
+        tag2: str = "",
+        endpoint: str = "",
+        feedback_uri: str = "",
+        feedback_hash: Optional[str] = None,
+        score: Optional[int] = None,
+        proof: Optional[ProofOfPayment] = None,
+        x402_version: int = 1,
+    ) -> PrepareSolanaFeedbackResponse:
+        """Ask the facilitator for the transaction the rater has to sign (Solana).
+
+        Step 1 of the Solana rater-authored rail. Writes nothing on-chain and
+        costs nothing: it reads the registry collection pubkey and a recent
+        blockhash, then hands back an unsigned transaction whose ``client``
+        account -- account 0 of the program's ``give_feedback`` instruction, the
+        one it declares ``[signer, writable] client (feedback author)`` -- is
+        the rater.
+
+        Why this exists: ``POST /feedback`` puts the FACILITATOR's keypair in
+        that slot, so the chain records the facilitator as the author of the
+        rating. Solana takes several signers per transaction natively, so the
+        rater signs as ``client`` while the facilitator stays the fee payer. No
+        delegation, no program change -- which is why this is a sibling of
+        :meth:`prepare_relayed_feedback` and not one more network on
+        :data:`RELAYED_FEEDBACK_NETWORKS`.
+
+        What the caller does with the answer:
+
+        1. Sign it with
+           :func:`~uvd_x402_sdk.solana_signing.sign_solana_feedback_transaction`,
+           which puts the rater's ed25519 signature in the rater's slot and
+           leaves every byte of the message alone.
+        2. Hand the signed blob to :meth:`submit_solana_feedback` **together
+           with the same feedback parameters**, before the blockhash expires.
+
+        Args:
+            network: A network in :data:`SOLANA_FEEDBACK_NETWORKS`. Anywhere
+                else answers 400 rather than guessing a rail.
+            agent_id: The agent's asset pubkey, base58.
+            rater: The base58 pubkey that will appear on-chain as the author.
+                Required here: the whole endpoint exists so that this account,
+                and not the facilitator, is the one the chain records.
+            value: Feedback value (e.g. 87 for 87/100).
+            value_decimals: Decimal places for ``value`` (0-18).
+            tag1: Primary categorization tag.
+            tag2: Secondary categorization tag.
+            endpoint: Service endpoint that was used.
+            feedback_uri: URI to the off-chain feedback file.
+            feedback_hash: Keccak256 hash of the feedback content.
+            score: Quality score 0-100. **Send it.** Without a score the ATOM
+                Engine records the feedback and scores none of it, so the
+                agent's reputation does not move.
+            proof: Proof of payment.
+            x402_version: x402 protocol version.
+
+        Returns:
+            The unsigned transaction, the rater, the fee payer and the
+            blockhash it is pinned to.
+
+        Example:
+            >>> prep = await client.prepare_solana_feedback(
+            ...     network="solana",
+            ...     agent_id="247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+            ...     rater=signer.pubkey,
+            ...     value=87,
+            ...     score=95,
+            ...     tag1="quality",
+            ... )
+            >>> prep.fee_payer != prep.rater
+            True
+        """
+        if score is not None and not 0 <= score <= 100:
+            raise ValueError(f"score must be between 0 and 100, got {score}")
+
+        params = FeedbackParams(
+            agent_id=agent_id,
+            value=value,
+            value_decimals=value_decimals,
+            tag1=tag1,
+            tag2=tag2,
+            endpoint=endpoint,
+            feedback_uri=feedback_uri,
+            feedback_hash=feedback_hash,
+            score=score,
+            proof=proof,
+        )
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "feedback": params.model_dump(by_alias=True, exclude_none=True),
+        }
+        body["feedback"]["rater"] = rater
+
+        url = f"{self.base_url}/feedback/solana/prepare"
+        try:
+            response = await self._client.post(url, json=body)
+            response.raise_for_status()
+            return PrepareSolanaFeedbackResponse.model_validate(response.json())
+        except httpx.HTTPStatusError as e:
+            return PrepareSolanaFeedbackResponse(
+                success=False,
+                error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
+                network=network,
+            )
+        except Exception as e:
+            return PrepareSolanaFeedbackResponse(
+                success=False,
+                error=str(e),
+                network=network,
+            )
+
+    async def submit_solana_feedback(
+        self,
+        network: Erc8004Network,
+        agent_id: AgentId,
+        rater: str,
+        value: int,
+        *,
+        transaction: str,
+        value_decimals: int = 0,
+        tag1: str = "",
+        tag2: str = "",
+        endpoint: str = "",
+        feedback_uri: str = "",
+        feedback_hash: Optional[str] = None,
+        score: Optional[int] = None,
+        proof: Optional[ProofOfPayment] = None,
+        x402_version: int = 1,
+    ) -> FeedbackResponse:
+        """Send the rater-signed transaction; the facilitator co-signs and pays.
+
+        Step 3 of the Solana rater-authored rail. What lands on-chain has the
+        RATER in the ``client`` account, so ``NewFeedback.client`` is the
+        rater's pubkey and describe.net attributes the rating to them.
+
+        **Pass back the same feedback parameters that went to
+        :meth:`prepare_solana_feedback`.** They are not redundant: the
+        facilitator rebuilds the transaction from them plus the blockhash
+        carried by your submission and refuses to co-sign anything that is not
+        byte-for-byte what it would have offered (``400 submitted transaction
+        does not match the one this facilitator built``). It does not sign
+        blobs it was handed -- doing so would turn the fee-payer keypair into a
+        public signing oracle, and one ``system_program::transfer`` would empty
+        the wallet with the facilitator's signature on it.
+
+        The rater's signature is verified BEFORE the facilitator adds its own,
+        so a transaction the network would reject never costs a fee.
+
+        Args:
+            network: The same network passed to ``prepare``.
+            agent_id: The agent's asset pubkey, base58.
+            rater: The pubkey that signed. Same one ``prepare`` was given.
+            value: Feedback value.
+            transaction: Base64 of the rater-signed transaction, as returned by
+                :func:`~uvd_x402_sdk.solana_signing.sign_solana_feedback_transaction`.
+            value_decimals: Decimal places for ``value`` (0-18).
+            tag1: Primary categorization tag.
+            tag2: Secondary categorization tag.
+            endpoint: Service endpoint that was used.
+            feedback_uri: URI to the off-chain feedback file.
+            feedback_hash: Keccak256 hash of the feedback content.
+            score: Quality score 0-100.
+            proof: Proof of payment.
+            x402_version: x402 protocol version.
+
+        Returns:
+            Feedback response with the transaction signature.
+        """
+        if score is not None and not 0 <= score <= 100:
+            raise ValueError(f"score must be between 0 and 100, got {score}")
+        if not transaction or not transaction.strip():
+            raise ValueError(
+                "transaction is required: submit sends the RATER-SIGNED "
+                "transaction from prepare, it does not build one"
+            )
+
+        params = FeedbackParams(
+            agent_id=agent_id,
+            value=value,
+            value_decimals=value_decimals,
+            tag1=tag1,
+            tag2=tag2,
+            endpoint=endpoint,
+            feedback_uri=feedback_uri,
+            feedback_hash=feedback_hash,
+            score=score,
+            proof=proof,
+        )
+        body: dict[str, Any] = {
+            "x402Version": x402_version,
+            "network": _wire(network),
+            "feedback": params.model_dump(by_alias=True, exclude_none=True),
+            "transaction": transaction,
+        }
+        body["feedback"]["rater"] = rater
+
+        url = f"{self.base_url}/feedback/solana/submit"
         try:
             response = await self._client.post(url, json=body)
             response.raise_for_status()
