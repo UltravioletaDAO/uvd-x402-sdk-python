@@ -648,3 +648,48 @@ class NoAcceptablePaymentError(X402Error):
             details={"resource": resource} if resource else {},
         )
         self.resource = resource
+
+
+class PolicyRefusedError(NoAcceptablePaymentError):
+    """
+    Raised by :meth:`X402Client.fetch` when the caller's own
+    :class:`~uvd_x402_sdk.policy.PurchasePolicy` will not pay for the 402 it was
+    handed — **before anything is signed**.
+
+    Carries the concrete cause. Branch on :attr:`refusal_code`, which is one of
+    the six kebab codes of the contract (``no-readable-offer``,
+    ``offer-expired``, ``recipient-not-permitted``, ``asset-not-budgeted``,
+    ``per-payment-limit``, ``cumulative-limit``) — a closed vocabulary, so a
+    caller can branch without parsing English. The numbers that caused it are in
+    :attr:`details` and on the :attr:`refusal` itself.
+
+    It subclasses :class:`NoAcceptablePaymentError` so that code written before
+    0.82.0 — which caught that when a 402 offered nothing payable — keeps
+    catching this. ``exc.code`` is the SDK's own error code (``POLICY_REFUSED``)
+    and is NOT the contract code; that one is ``exc.refusal_code``.
+    """
+
+    def __init__(
+        self,
+        refusal: Any,
+        *,
+        resource: Optional[str] = None,
+    ) -> None:
+        details = dict(refusal.to_dict())
+        if resource:
+            details["resource"] = resource
+        # Skips NoAcceptablePaymentError.__init__ on purpose: this carries its
+        # own code and the refusal's numbers, not a bare message.
+        X402Error.__init__(
+            self,
+            message=f"payment refused by policy: {refusal.message}",
+            code="POLICY_REFUSED",
+            details=details,
+        )
+        self.refusal = refusal
+        self.resource = resource
+
+    @property
+    def refusal_code(self) -> str:
+        """The contract's kebab code for this refusal."""
+        return self.refusal.code

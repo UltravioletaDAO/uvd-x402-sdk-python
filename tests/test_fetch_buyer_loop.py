@@ -122,10 +122,10 @@ def test_selects_cheapest_option_by_default():
     body = {
         "x402Version": 1,
         "accepts": [
-            {"network": "base", "maxAmountRequired": "50000", "payTo": SELLER,
-             "asset": USDC_BASE, "resource": "r", "description": "d"},
-            {"network": "base", "maxAmountRequired": "10000", "payTo": SELLER,
-             "asset": USDC_BASE, "resource": "r", "description": "d"},
+            {"scheme": "exact", "network": "base", "maxAmountRequired": "50000",
+             "payTo": SELLER, "asset": USDC_BASE, "resource": "r", "description": "d"},
+            {"scheme": "exact", "network": "base", "maxAmountRequired": "10000",
+             "payTo": SELLER, "asset": USDC_BASE, "resource": "r", "description": "d"},
         ],
     }
 
