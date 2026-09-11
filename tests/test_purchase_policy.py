@@ -490,7 +490,8 @@ def test_the_v2_amount_spelling_is_read_too():
         ]}
     )
     assert parsed.offers[0].amount == 10_000
-    assert parsed.offers[0].token_asset.network == "eip155:8453"
+    # The CAIP-2 dialect resolves to the SDK's canonical name: one chain, one key.
+    assert parsed.offers[0].token_asset.network == "base"
 
 
 def test_a_seller_that_sent_no_offers_is_not_a_seller_with_unreadable_ones():
@@ -667,3 +668,114 @@ def test_an_approval_says_what_it_approved():
         "amount": "10000",
         "versusQuote": {"code": "not-compared"},
     }
+
+
+# =============================================================================
+# Portability: one chain, one key, whichever dialect the seller speaks
+# =============================================================================
+
+
+def test_the_same_policy_covers_a_v1_name_and_its_caip2_id():
+    """`base` and `eip155:8453` are the SAME chain under two dialects, and the
+    same seller can answer either. A policy written in one must cover an offer
+    priced in the other -- otherwise a v2 challenge is refused with
+    `asset-not-budgeted`, a cause that is not true, and the Rust and TypeScript
+    buyers pay what this one refuses."""
+    written_as_v1 = PurchasePolicy(per_payment={TokenAsset("base", USDC_BASE): 20_000})
+    assert written_as_v1.evaluate(offer(network="base"), NOW).approved
+    assert written_as_v1.evaluate(offer(network="eip155:8453"), NOW).approved
+
+    # And the other way round: a policy written in CAIP-2 covers a v1 challenge.
+    written_as_v2 = PurchasePolicy(
+        per_payment={TokenAsset("eip155:8453", USDC_BASE): 20_000}
+    )
+    assert written_as_v2.evaluate(offer(network="eip155:8453"), NOW).approved
+    assert written_as_v2.evaluate(offer(network="base"), NOW).approved
+
+
+def test_the_two_dialects_are_literally_the_same_budget_key():
+    """Not two entries that both happen to pass: ONE key. A cumulative limit
+    that counted the dialects separately would hand the caller a second budget
+    for the same chain."""
+    assert TokenAsset("base", USDC_BASE) == TokenAsset("eip155:8453", USDC_BASE)
+
+    policy = PurchasePolicy(cumulative={TokenAsset("base", USDC_BASE): 15_000})
+    policy.record_spend(TokenAsset("eip155:8453", USDC_BASE), 10_000)
+    assert policy.spent(TokenAsset("base", USDC_BASE)) == 10_000
+    assert policy.evaluate(offer(network="eip155:8453"), NOW).code == (
+        "cumulative-limit"
+    )
+
+
+def test_an_alias_resolves_to_the_canonical_name_too():
+    policy = PurchasePolicy(per_payment={TokenAsset("skale-base", USDC_BASE): 20_000})
+    assert policy.evaluate(offer(network="skale"), NOW).approved
+
+
+def test_different_chains_stay_different_keys():
+    """The unification is per chain, not a free pass: Base is not Polygon, and
+    a CAIP-2 id for another chain is not this one."""
+    policy = PurchasePolicy(per_payment={TokenAsset("base", USDC_BASE): 20_000})
+    assert policy.evaluate(offer(network="polygon"), NOW).code == "asset-not-budgeted"
+    assert policy.evaluate(offer(network="eip155:137"), NOW).code == (
+        "asset-not-budgeted"
+    )
+
+
+def test_an_unresolvable_dialect_refuses_rather_than_raising():
+    """A chain this build does not carry must not abort an evaluation. It falls
+    back to the literal, which no budget holds -- so the answer is a refusal
+    with a cause, which is the safe direction for money."""
+    policy = PurchasePolicy(per_payment={TokenAsset("base", USDC_BASE): 20_000})
+    decision = policy.evaluate(offer(network="eip155:999999999"), NOW)
+    assert decision.code == "asset-not-budgeted"
+    assert decision.asset.network == "eip155:999999999"
+
+
+# =============================================================================
+# Portability: a payment we cannot NAME is a payment we cannot make
+# =============================================================================
+
+
+def test_an_offer_without_a_scheme_is_unreadable():
+    """Aligned with Rust, where `Scheme` is a required field and an entry
+    without one fails to deserialize.
+
+    **This changed in 0.82.0**: the SDK assumed `exact`, which is a silent way
+    to sign an `exact` authorization for an offer that asked for something else.
+    Measured against the one real capture in this repo
+    (`tests/test_x402_transport.py`, 36 of 36 live resources answering 402 on
+    2026-08-20): every seller names it, so the assumption covered nobody.
+    """
+    parsed = parse_accepts(
+        [{"network": "base", "payTo": PAYEE, "maxAmountRequired": "10000",
+          "asset": USDC_BASE}]
+    )
+    assert parsed.offers == ()
+    assert len(parsed.unreadable) == 1
+    assert parsed.unreadable[0].scheme is None
+
+
+@pytest.mark.parametrize("scheme", ["", "   ", None, 7, [], {}])
+def test_a_scheme_that_is_not_a_name_is_unreadable(scheme):
+    parsed = parse_accepts(
+        [{"scheme": scheme, "network": "base", "payTo": PAYEE,
+          "maxAmountRequired": "10000", "asset": USDC_BASE}]
+    )
+    assert parsed.offers == (), scheme
+
+
+def test_a_refusal_counts_the_offers_that_named_no_scheme():
+    """`offered[]` carries the NAMED schemes and nothing else -- it is the wire
+    vocabulary the contract fixed. But "offered: []" alone is the message that
+    sends a caller hunting a bug in its own code, so the unnamed ones are
+    counted in the prose."""
+    refusal = no_readable_offer(
+        [
+            UnreadableOffer(scheme="batch-settlement"),
+            UnreadableOffer(scheme=None),
+            UnreadableOffer(scheme=None),
+        ]
+    )
+    assert refusal.offered == ("batch-settlement",)
+    assert "2 offer(s) named no scheme" in refusal.message

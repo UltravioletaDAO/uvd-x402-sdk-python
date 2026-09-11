@@ -72,6 +72,8 @@ from typing import (
     Union,
 )
 
+from uvd_x402_sdk.networks import normalize_network
+
 __all__ = [
     "OFFER_VALIDITY_EXTENSION",
     "KNOWN_SCHEMES",
@@ -174,19 +176,33 @@ canonical_recipient = canonical_address
 
 
 def _canonical_network(network: Any) -> str:
-    """Canonical form of a network identifier.
+    """Canonical form of a network identifier — ONE name per chain.
 
-    Network identifiers are ASCII tokens (``base``, ``solana``) or CAIP-2 ids
-    (``eip155:8453``); neither carries meaning in its case, so folding is safe
-    here in a way it is not for an address.
+    ``base`` and ``eip155:8453`` are the same chain under two dialects: v1 uses
+    the name, v2 uses the CAIP-2 id, and the same seller can answer either. Both
+    resolve here to the SDK's canonical name (via
+    :func:`~uvd_x402_sdk.networks.normalize_network`, which also folds aliases
+    like ``skale`` -> ``skale-base``), so a budget written in one dialect covers
+    an offer priced in the other.
 
-    Note that ``base`` and ``eip155:8453`` are the SAME chain under two names
-    and this does not unify them: a budget declared under one name does not
-    cover an offer priced under the other, and the result is
-    ``asset-not-budgeted`` -- a refusal, which is the safe direction. Declare
-    both spellings if a seller might use either.
+    Without this a policy written as ``base`` refuses a v2 challenge with
+    ``asset-not-budgeted`` — a refusal with a cause that is not true, and one
+    the Rust and TypeScript buyers do not produce. Portability of the DECISION
+    is the point: the same policy must decide the same way in all three.
+
+    An identifier the registry cannot resolve (an unknown CAIP-2 id, a chain
+    this build does not carry) falls back to the lowercased literal rather than
+    raising. Two unresolvable dialects of one chain then stay distinct keys, so
+    the answer is ``asset-not-budgeted`` — a refusal, which is the safe
+    direction for money; normalisation failing must never abort an evaluation.
     """
-    return str(network).strip().lower()
+    text = str(network).strip()
+    if not text:
+        return ""
+    try:
+        return normalize_network(text)
+    except Exception:  # noqa: BLE001 - see the fallback note above
+        return text.lower()
 
 
 # =============================================================================
@@ -272,13 +288,18 @@ class Offer:
         if not isinstance(entry, Mapping):
             raise ValueError("offer is not an object")
 
+        # A payment we cannot NAME is a payment we cannot make, so the scheme is
+        # required and its vocabulary is closed — same as the facilitator's
+        # `Scheme` enum, where an entry without one fails to deserialize. This
+        # SDK assumed `exact` until 0.82.0; measured against the one real
+        # capture in this repo (`tests/test_x402_transport.py`, 36 of 36 live
+        # resources answering 402 on 2026-08-20) every seller names it, so the
+        # assumption was covering nobody and was a silent way to sign an `exact`
+        # authorization for an offer that asked for something else.
         scheme = entry.get("scheme")
-        if scheme is None:
-            # The x402 spec requires it, and sellers in the wild omit it. The
-            # SDK has always signed `exact`, so assuming it here keeps every
-            # seller that works today working today.
-            scheme = "exact"
-        scheme = str(scheme)
+        if not isinstance(scheme, str) or not scheme.strip():
+            raise ValueError("offer names no scheme")
+        scheme = scheme.strip()
         if scheme not in KNOWN_SCHEMES:
             raise ValueError(f"unknown scheme {scheme!r}")
 
@@ -621,13 +642,22 @@ def no_readable_offer(unreadable: Iterable[UnreadableOffer]) -> PolicyRefusal:
     The point is the message: a caller that learns the seller offered
     ``batch-settlement`` knows to look for a facilitator that implements it.
     """
+    unreadable = list(unreadable)
     offered = tuple(o.scheme for o in unreadable if o.scheme)
+    message = (
+        "no offer in this challenge is one this build can pay; offered: "
+        f"{list(offered)}"
+    )
+    # `offered[]` carries the NAMED schemes and nothing else — it is the wire
+    # vocabulary the contract fixed. An offer that named no scheme has nothing
+    # to put there, so it is counted in the prose instead: "offered: []" alone
+    # is the message that sends a caller hunting a bug in its own code.
+    unnamed = len(unreadable) - len(offered)
+    if unnamed:
+        message += f" ({unnamed} offer(s) named no scheme)"
     return PolicyRefusal(
         code="no-readable-offer",
-        message=(
-            "no offer in this challenge is one this build can pay; offered: "
-            f"{list(offered)}"
-        ),
+        message=message,
         offered=offered,
     )
 

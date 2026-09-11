@@ -1324,6 +1324,15 @@ limit. A `(network, address)` tuple or a `{"network", "asset"}` dict works too.
 Amounts are integers in the asset's own base units; nothing is ever compared in
 decimals, because decimals come from a field the seller supplied.
 
+**One chain, one key.** `base` and `eip155:8453` are the same chain under two
+dialects — v1 uses the name, v2 the CAIP-2 id, and the same seller can answer
+either — so both resolve to the SDK's canonical name (aliases like `skale` too).
+A policy written in one dialect covers an offer priced in the other; without
+that, a v2 challenge would be refused with `asset-not-budgeted`, a cause that is
+not true and one the Rust and TypeScript buyers do not produce. Different
+*chains* stay different keys, and a dialect the registry cannot resolve falls
+back to the literal — which no budget holds, so the answer is a refusal.
+
 ### Order of evaluation (fixed — the FIRST failing check is the one reported)
 
 ```
@@ -1391,7 +1400,10 @@ leave running. There is no human-confirmation hook on this path.
 7. **One unreadable offer does not take the list with it.** A seller advertising
    `exact` beside a scheme this build does not implement stays payable; the
    unreadable ones are counted by scheme name, so a refusal can say what the
-   seller actually offered (`no-readable-offer`, with `offered[]`).
+   seller actually offered (`no-readable-offer`, with `offered[]`). **`scheme`
+   is required and its vocabulary is closed** (`exact`, `upto`, `escrow`,
+   `commerce`, `fhe-transfer`) — a payment we cannot name is a payment we cannot
+   make, and an entry without one is unreadable, exactly as in the facilitator.
 
 ### Copies share the purse
 
@@ -2444,7 +2456,9 @@ MIT License - see LICENSE file.
 - **A divergence from a listing is evidence, never a refusal.** `fetch(quote=AdvertisedQuote(...))` reports `not-compared` | `matches` | `amount-differs` | `different-asset` and decides nothing. Stopping to ask would turn every ordinary reprice into a halt, and an agent that halts on ordinary commerce is an agent nobody can leave running — there is no human-confirmation hook on this path
 - **Nothing changes for a caller who wrote no policy.** `X402Client` holds `PurchasePolicy.permissive()` by default, so an unlisted asset is still paid exactly as before; `PurchasePolicy()` — the one you sit down to write — denies. `max_amount` is untouched and still raises `PaymentExceedsMaxError` first, and `PolicyRefusedError` subclasses `NoAcceptablePaymentError` so code written before this version keeps catching it
 - **The policy cannot be widened from inside an evaluation.** No setter, no limit-raising builder, and `per_payment` / `cumulative` are handed out as read-only views — widening means constructing a new policy, which is a visible act in the caller's code. A test asserts no such method appeared
-- 1041 tests pass (968 before, 73 added, none lost). Eleven targeted mutations of `policy.py` — swapping the order, making `evaluate` spend, deep-copying the purse, folding base58, dropping the readable offers, `now >= valid_until`, unreadable-validity-as-zero — each turn a named test red; none survived
+- **One chain, one budget key, whichever dialect the seller speaks.** `base` and `eip155:8453` are the same chain under two dialects — v1 uses the name, v2 the CAIP-2 id, and the same seller can answer either — so both resolve to the SDK's canonical name (aliases like `skale` too), in both directions. Without it a policy written `base` refused a v2 challenge with `asset-not-budgeted`, **a cause that is not true**, while the Rust and TypeScript buyers paid: the same policy has to decide the same way in all three. It is literally one key, so a cumulative limit is not duplicated per dialect; different *chains* stay different keys, and a dialect the registry cannot resolve falls back to the literal — a refusal, never an exception that aborts an evaluation
+- **`scheme` is required, and its vocabulary is closed.** Aligned with the facilitator, where `Scheme` is a required field and an entry without one fails to deserialize. This SDK assumed `exact`, which is a silent way to sign an `exact` authorization for an offer that asked for something else; measured against the repo's one real capture (`tests/test_x402_transport.py`: 36 of 36 live resources answering 402 on 2026-08-20) every seller names it, so the assumption covered nobody. `offered[]` still carries only the NAMED schemes — it is the wire vocabulary the contract fixed — and the unnamed ones are counted in the prose, because a bare `offered: []` is the message that sends a caller hunting a bug in its own code
+- 1058 tests pass (968 before, 90 added, none lost). Fifteen targeted mutations of `policy.py` — swapping the order, making `evaluate` spend, deep-copying the purse, folding base58, dropping the readable offers, `now >= valid_until`, unreadable-validity-as-zero, the network as a bare literal, normalisation raising instead of falling back, a missing `scheme` assumed `exact` — each turn a named test red; none survived
 
 ### v0.81.0 (2026-09-07)
 - **Added: the rater can now author their own rating on Solana.** `prepare_solana_feedback()` + `sign_solana_feedback_transaction()` + `submit_solana_feedback()` drive the facilitator's `/feedback/solana/prepare` and `/feedback/solana/submit`, live on the deployed facilitator since **v1.74.0** (measured today on **v2.16.0**) and until now with **no client on either SDK**. The server half has existed since 2026-08-13 (`x402-rs`, `src/erc8004/solana.rs`); nothing could call it

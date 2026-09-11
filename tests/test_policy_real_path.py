@@ -337,3 +337,101 @@ def test_a_per_call_policy_overrides_the_client_one():
 
     assert excinfo.value.refusal_code == "per-payment-limit"
     assert seller.paid_header is None
+
+
+# =============================================================================
+# Portability on the real path: one policy, both dialects of one chain
+# =============================================================================
+
+
+def _402_v2(amount="10000", network="eip155:8453"):
+    """The shape production actually serves. Measured 2026-08-20: 36 of 36 live
+    resources answering 402 carry the challenge in the header, in this shape."""
+    return {
+        "x402Version": 2,
+        "error": "Payment required",
+        "accepts": [
+            {
+                "scheme": "exact",
+                "network": network,
+                "amount": amount,
+                "asset": USDC_BASE,
+                "payTo": SELLER,
+                "maxTimeoutSeconds": 300,
+            }
+        ],
+    }
+
+
+def test_one_policy_written_as_base_pays_a_v2_challenge():
+    """THE portability failure this closes: the policy is written `base`, the
+    seller answers a v2 challenge naming `eip155:8453`, and before this the
+    buyer refused with `asset-not-budgeted` -- a cause that is not true -- while
+    the Rust and TypeScript buyers paid."""
+    seller = _Seller(_402_v2())
+    policy = PurchasePolicy(per_payment={USDC: 1_000_000}, only_pay=[SELLER])
+
+    resp = _fetch(_client(policy), seller)
+
+    assert resp.status_code == 200
+    assert seller.paid_header is not None
+
+
+def test_the_same_client_and_policy_pay_a_v1_and_a_v2_challenge():
+    """Same object, both dialects, and the spend lands in ONE purse -- not two
+    budgets for the same chain."""
+    policy = PurchasePolicy(per_payment={USDC: 1_000_000}, cumulative={USDC: 25_000})
+    client = _client(policy)
+
+    v1 = _Seller(_402(amount="10000"))
+    assert _fetch(client, v1).status_code == 200
+    policy.record_spend(USDC, 10_000)
+
+    v2 = _Seller(_402_v2(amount="10000"))
+    assert _fetch(client, v2).status_code == 200
+    policy.record_spend(TokenAsset("eip155:8453", USDC_BASE), 10_000)
+
+    # 20_000 of a 25_000 ceiling is gone, counted once per payment on one key.
+    assert policy.spent(USDC) == 20_000
+    third = _Seller(_402(amount="10000"))
+    with pytest.raises(PolicyRefusedError) as excinfo:
+        _fetch(client, third)
+    assert excinfo.value.refusal_code == "cumulative-limit"
+    assert third.paid_header is None
+
+
+def test_a_v2_challenge_on_another_chain_is_still_refused():
+    """The dialect resolves; it does not wave chains through."""
+    seller = _Seller(_402_v2(network="eip155:137"))  # Polygon
+    policy = PurchasePolicy(per_payment={USDC: 1_000_000})
+
+    with pytest.raises(PolicyRefusedError) as excinfo:
+        _fetch(_client(policy), seller)
+
+    assert excinfo.value.refusal_code == "asset-not-budgeted"
+    assert seller.paid_header is None
+
+
+def test_an_offer_with_no_scheme_is_named_instead_of_signed_as_exact():
+    """0.82.0 behaviour change, asserted on purpose so it is not a silent one:
+    until now `fetch()` assumed `exact` and signed. A payment we cannot name is
+    a payment we cannot make."""
+    seller = _Seller(
+        {
+            "x402Version": 1,
+            "accepts": [
+                {"network": "base", "maxAmountRequired": "10000", "payTo": SELLER,
+                 "asset": USDC_BASE}
+            ],
+        }
+    )
+
+    with pytest.raises(PolicyRefusedError) as excinfo:
+        _fetch(_client(), seller)
+
+    assert excinfo.value.refusal_code == "no-readable-offer"
+    # Nothing to name: `offered[]` carries named schemes only, so it is absent,
+    # and the count lands in the prose instead of leaving a bare "offered: []".
+    assert "offered" not in excinfo.value.details
+    assert "1 offer(s) named no scheme" in excinfo.value.message
+    assert seller.paid_header is None
