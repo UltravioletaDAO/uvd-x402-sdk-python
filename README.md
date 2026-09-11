@@ -29,6 +29,7 @@ Accept **gasless stablecoin payments** across **25 blockchain networks** with a 
 - **ERC-8128 Signed HTTP Requests**: RFC 9421 request signing with any WalletAdapter — authenticate against wallet-signed APIs like Execution Market
 - **Escrow Pre-Auth Builder**: `build_escrow_pre_auth()` / `compute_escrow_nonce()` — sign the ADR-002 sign-on-assignment escrow lock (`X-Payment-Auth` header) with any WalletAdapter, no web3 required
 - **Signed escrow lifecycle orders**: `build_lifecycle_auth()` — sign the EIP-712 order that entitles a `release` / `refundInEscrow`, and pass a `lifecycle_signer` to `release_via_facilitator()` / `refund_via_facilitator()`, or a `lifecycle_auth` when someone else already signed it
+- **Purchase policy**: `PurchasePolicy` — what the buyer may sign, evaluated against the offer in hand BEFORE signing, with six refusal codes in a fixed order and the seller's own `validUntil`; same contract as the facilitator's `x402-reqwest` 2.25.0
 
 ## Quick Start (5 Lines)
 
@@ -1268,6 +1269,144 @@ on the happy path) so reading them never depends on whether the settle worked.
 
 ---
 
+---
+
+## Purchase policy — what this buyer may sign (`PurchasePolicy`)
+
+A catalog listing is a claim somebody else made about their own price. The `402`
+that comes back from the actual request is the **offer**. They can differ,
+legitimately: the seller may have repriced. So the buying decision is made
+against **the offer in hand**, every time, **before anything is signed** —
+`X402Client.fetch()` evaluates the policy between reading the 402 and producing
+the `X-PAYMENT` header.
+
+This is the same contract the facilitator fixed in its P3 phase (`x402-rs`
+2.25.0, `crates/x402-reqwest/src/policy.rs`) and the TypeScript SDK implements,
+so a refusal code means the same thing in all three.
+
+```python
+from uvd_x402_sdk import PurchasePolicy, TokenAsset, X402Client, PolicyRefusedError
+
+USDC_BASE = TokenAsset("base", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+
+policy = PurchasePolicy(
+    per_payment={USDC_BASE: 50_000},      # 0.05 USDC in any ONE payment
+    cumulative={USDC_BASE: 5_000_000},    # 5 USDC total while this policy lives
+    only_pay=["0xe4dc963c56979E0260fc146b87eE24F18220e545"],
+)
+
+client = X402Client(recipient_address="0xMerchant...", policy=policy)
+client.connect_with_private_key(key, chain_name="base")
+
+try:
+    resp = client.fetch("https://api.example.com/data")
+except PolicyRefusedError as e:
+    print(e.refusal_code)   # one of the six codes below
+    print(e.details)        # the numbers that caused it
+
+# Evaluating did NOT spend. Record it once the settlement resolved:
+policy.record_spend(USDC_BASE, 50_000)
+```
+
+### Fields
+
+| field | type | meaning |
+|---|---|---|
+| `per_payment[asset]` | int, atomic units | most this policy will pay in ONE payment of that asset |
+| `cumulative[asset]` | int, atomic units | most it will pay in that asset in total, while the policy lives |
+| `spent[asset]` | int | what `record_spend()` has registered; **only `record_spend` moves it** |
+| `only_pay[]` | addresses | permitted recipients, canonicalised **by family** (see rule 4c) |
+| `allow_unlisted_assets` | bool, **false by default** | whether an asset with no declared ceiling may be paid at all |
+
+`asset` is a `TokenAsset(network, address)` — the network is part of the key,
+because USDC on Base and USDC on Polygon are different money to a spending
+limit. A `(network, address)` tuple or a `{"network", "asset"}` dict works too.
+Amounts are integers in the asset's own base units; nothing is ever compared in
+decimals, because decimals come from a field the seller supplied.
+
+### Order of evaluation (fixed — the FIRST failing check is the one reported)
+
+```
+no-readable-offer -> offer-expired -> recipient-not-permitted
+                  -> asset-not-budgeted -> per-payment-limit -> cumulative-limit
+```
+
+`asset-not-budgeted` runs **before** the ceilings on purpose: the ceilings are a
+map, and a map has no opinion about a key it does not hold — which is precisely
+how an unlisted token would sail past a budget that looks complete. The caller
+needs to hear "budget that asset", not "raise a ceiling that does not exist".
+
+### Codes
+
+Closed vocabulary, in kebab, so a caller can branch without parsing English.
+Every one carries the numbers that caused it (`requested`, `allowed`, `spent`,
+`wouldTotal`, `asset`, `payTo`, `validUntil`, `now`, `offered[]`) on
+`PolicyRefusal.to_dict()` and on `PolicyRefusedError.details`:
+
+| code | meaning |
+|---|---|
+| `no-readable-offer` | the challenge carried offers and none is one this build can pay; names the schemes offered |
+| `offer-expired` | the seller's own `validUntil` has passed |
+| `recipient-not-permitted` | `payTo` is not on `only_pay` |
+| `asset-not-budgeted` | no ceiling was ever declared for that asset |
+| `per-payment-limit` | one payment is over the per-payment ceiling |
+| `cumulative-limit` | it would take total spend past the cumulative ceiling |
+
+### Comparison against a listing — reported, never decisive
+
+`fetch(..., quote=AdvertisedQuote(asset=USDC_BASE, amount=10_000))` compares the
+offer against what a catalog advertised and reports one of `not-compared` |
+`matches` | `amount-differs` | `different-asset`. **It never refuses anything.**
+An offer that costs more than the listing but sits inside a policy the operator
+already authorised is paid: stopping to ask would turn every ordinary reprice
+into a halt, and an agent that halts on ordinary commerce is an agent nobody can
+leave running. There is no human-confirmation hook on this path.
+
+### The rules, numbered as the contract numbers them
+
+1. **Evaluating does not spend.** Signing can fail and a settlement can be
+   refused; a limit that counted attempts would lock a caller out of money it
+   never spent. `record_spend()` is a separate call, after the settlement
+   resolved.
+2. **A policy is never widened from inside an evaluation.** There is no setter,
+   no builder that raises a limit, and the mappings handed out are read-only
+   views. Widening means constructing a new policy — a visible act in your code.
+3. **No human confirmation when the policy already covers the operation.**
+4. **A different asset is not the same price.** Numbers are never compared
+   across assets.
+   - **4b. An asset with no ceiling is denied by default.** A budget in USDC is
+     not a budget in any other token, and the signer takes its EIP-712 domain
+     from the seller's own `extra` — it will sign for a token it has never heard
+     of. The permissive mode is asked for by name: `PurchasePolicy.permissive()`.
+   - **4c. Addresses are canonicalised by family, not with `lower()`.** Hex is
+     folded; base58 (Solana, XRPL) is compared exactly. Folding base58 refuses
+     legitimate payments and, worse, can admit an address nobody put on the list.
+5. **`validUntil` comes from the seller**, read from
+   `extensions["offer-receipt/1"].info.validUntil`, in Unix seconds. Absent = no
+   declared validity. Unreadable = absent, **never zero** — "the seller said
+   something we could not read" must not become "this offer expired in 1970",
+   which would refuse every payment to that seller.
+6. **`validUntil == now` still stands.** It is the last instant the offer is in
+   force.
+7. **One unreadable offer does not take the list with it.** A seller advertising
+   `exact` beside a scheme this build does not implement stays payable; the
+   unreadable ones are counted by scheme name, so a refusal can say what the
+   seller actually offered (`no-readable-offer`, with `offered[]`).
+
+### Copies share the purse
+
+A client is copied per request. `copy.copy()` and `copy.deepcopy()` of a policy
+both spend from the **same** running total — if each copy carried its own, a
+cumulative limit would mean nothing. And if that total cannot be read (a held
+lock, a corrupt value), `spent()` reports the **ceiling**, not zero: for money
+the safe direction is to refuse, never to permit.
+
+### Without a policy, nothing changes
+
+`X402Client` holds `PurchasePolicy.permissive()` when the caller supplied none,
+so code written before 0.82.0 pays exactly what it paid before. The asymmetry is
+deliberate: whoever sits down to WRITE a policy gets the safe default.
+
 ## Error Handling
 
 ```python
@@ -2292,6 +2431,20 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.82.0 (2026-09-11)
+- **Added: the buyer decides against the offer in hand, before it signs.** `PurchasePolicy` + `X402Client.fetch(policy=...)` implement the contract the facilitator fixed in its P3 phase (`x402-rs` 2.25.0, `crates/x402-reqwest/src/policy.rs`), field for field and code for code, so a refusal means the same thing in the Rust buyer, this SDK and the TypeScript one. A catalog listing is a claim somebody else made about their own price; the `402` is the offer, and the two can differ legitimately, so the decision is made against **the offer**, every time
+- **Where it runs is the whole point.** The evaluation sits in `fetch()` between reading the 402 and producing the `X-PAYMENT` header — the security review of the Rust PR caught exactly this half-built: the policy existed, the seller declared its validity, and the wiring between them was missing for a whole commit with every unit test green. So `tests/test_policy_real_path.py` goes in through `fetch()` against a mocked transport with a real key and asserts on whether a header was ever produced. **Red-proof**: deleting the block turns 7 of its 13 tests red, "DID NOT RAISE" — the expired offer gets signed and paid
+- **Six refusal codes in a fixed order**, because the FIRST failing check is the one reported and a caller branches on it: `no-readable-offer` → `offer-expired` → `recipient-not-permitted` → `asset-not-budgeted` → `per-payment-limit` → `cumulative-limit`. Each carries the numbers that caused it (`requested`, `allowed`, `spent`, `wouldTotal`, `asset`, `payTo`, `validUntil`, `now`, `offered[]`) on `PolicyRefusedError.details`
+- **`asset-not-budgeted` runs BEFORE the ceilings.** The ceilings are a map, and a map has no opinion about a key it does not hold — which is exactly how a token nobody budgeted sails past a budget that looks complete. And the signer would sign it: `create_authorization` takes the EIP-712 domain from the seller's own `extra` and will sign for a token and a network it has never seen. So an asset with no declared ceiling is refused, and the caller hears "budget that asset" rather than "raise a ceiling that does not exist"
+- **Addresses are canonicalised BY FAMILY, never with `lower()`.** Hex is folded; base58 (Solana, XRPL) is compared exactly. Lowercasing a base58 address does not produce the same address spelled differently — it produces a string that is not an address, so an allowlist written in the seller's own spelling would never match and every legitimate payment to that payee would be refused. And in the dangerous direction, two distinct base58 addresses can fold to the same lowercase string, admitting one nobody put on the list
+- **Evaluating does not spend, and a copy spends from the same purse.** Signing can fail and a settlement can be refused, so `record_spend()` is a separate call made once the settlement resolved. `copy.copy()` and `copy.deepcopy()` share the running total — a deep copy that duplicated it would hand a fresh budget to every copy, which looks like a correct deep copy and is the failure a cumulative limit exists to prevent. If the total cannot be read (a held lock, a corrupt value), `spent()` reports the **ceiling**, never zero
+- **Offer validity, read from the seller's own declaration.** `validUntil` comes from `extensions["offer-receipt/1"].info.validUntil` in Unix seconds — the same versioned key `x402-axum` writes. Absent means no declared validity; **unreadable means absent, never zero**, because "the seller said something we could not read" must not become "this offer expired in 1970" and refuse every payment to them. `validUntil == now` still stands: it is the last instant the offer is in force
+- **One unreadable offer no longer takes the list with it.** A seller advertising `exact` beside a scheme this build does not implement stays payable, and a challenge where NOTHING is readable now answers `no-readable-offer` naming what the seller wanted (`["batch-settlement", "agent-pay"]`) instead of an empty list that sends a caller hunting a bug in its own code. Scheme names are bounded at 64 chars: it is somebody else's string and it lands in an error message
+- **A divergence from a listing is evidence, never a refusal.** `fetch(quote=AdvertisedQuote(...))` reports `not-compared` | `matches` | `amount-differs` | `different-asset` and decides nothing. Stopping to ask would turn every ordinary reprice into a halt, and an agent that halts on ordinary commerce is an agent nobody can leave running — there is no human-confirmation hook on this path
+- **Nothing changes for a caller who wrote no policy.** `X402Client` holds `PurchasePolicy.permissive()` by default, so an unlisted asset is still paid exactly as before; `PurchasePolicy()` — the one you sit down to write — denies. `max_amount` is untouched and still raises `PaymentExceedsMaxError` first, and `PolicyRefusedError` subclasses `NoAcceptablePaymentError` so code written before this version keeps catching it
+- **The policy cannot be widened from inside an evaluation.** No setter, no limit-raising builder, and `per_payment` / `cumulative` are handed out as read-only views — widening means constructing a new policy, which is a visible act in the caller's code. A test asserts no such method appeared
+- 1041 tests pass (968 before, 73 added, none lost). Eleven targeted mutations of `policy.py` — swapping the order, making `evaluate` spend, deep-copying the purse, folding base58, dropping the readable offers, `now >= valid_until`, unreadable-validity-as-zero — each turn a named test red; none survived
 
 ### v0.81.0 (2026-09-07)
 - **Added: the rater can now author their own rating on Solana.** `prepare_solana_feedback()` + `sign_solana_feedback_transaction()` + `submit_solana_feedback()` drive the facilitator's `/feedback/solana/prepare` and `/feedback/solana/submit`, live on the deployed facilitator since **v1.74.0** (measured today on **v2.16.0**) and until now with **no client on either SDK**. The server half has existed since 2026-08-13 (`x402-rs`, `src/erc8004/solana.rs`); nothing could call it

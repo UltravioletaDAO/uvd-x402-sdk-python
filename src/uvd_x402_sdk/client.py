@@ -34,6 +34,7 @@ from uvd_x402_sdk.exceptions import (
     TimeoutError as X402TimeoutError,
     PaymentExceedsMaxError,
     NoAcceptablePaymentError,
+    PolicyRefusedError,
     MAX_RETRY_AFTER_SECONDS,
     body_tx_hash,
     parse_facilitator_error_body,
@@ -46,6 +47,15 @@ from uvd_x402_sdk.models import (
     PaymentResult,
     VerifyResponse,
     SettleResponse,
+)
+from uvd_x402_sdk.policy import (
+    AdvertisedQuote,
+    ParsedAccepts,
+    PolicyRefusal,
+    PurchasePolicy,
+    no_readable_offer,
+    offer_valid_until,
+    parse_accepts,
 )
 from uvd_x402_sdk.networks import (
     get_network,
@@ -344,6 +354,7 @@ class X402Client:
         config: Optional[X402Config] = None,
         *,
         verify_facilitator_support: bool = False,
+        policy: Optional[PurchasePolicy] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -358,6 +369,14 @@ class X402Client:
                 `GET /supported` at construction and raise if an enabled network
                 is routed to a facilitator that does not settle it. Off by
                 default because it performs network I/O; see `verify_routes()`.
+            policy: What this buyer is allowed to sign, evaluated by `fetch()`
+                against the offer in hand BEFORE anything is signed (see
+                :class:`~uvd_x402_sdk.policy.PurchasePolicy`). Defaults to
+                `PurchasePolicy.permissive()`, which is NOT what
+                `PurchasePolicy()` gives you: a policy a caller sits down to
+                WRITE gets the safe default (an asset with no declared ceiling
+                is refused), while a caller that supplied none keeps exactly the
+                behaviour they had before 0.82.0.
             **kwargs: Additional config parameters passed to X402Config —
                 including `facilitator_by_network`, the `network -> facilitator
                 URL` routing table (see X402Config).
@@ -405,6 +424,12 @@ class X402Client:
         # signers cannot drift apart.
         self._sign_typed_data: Optional[Any] = None
         self._connected_chain: Optional[str] = None
+
+        # What this buyer may sign. Permissive unless the caller wrote one:
+        # nothing in the payment path ever widens it (see `policy.py`).
+        self.policy: PurchasePolicy = (
+            policy if policy is not None else PurchasePolicy.permissive()
+        )
 
         if verify_facilitator_support:
             self.verify_routes()
@@ -2030,43 +2055,42 @@ class X402Client:
     # Buyer loop (payer side): fetch a resource, pay the 402, retry
     # =========================================================================
 
-    def _parse_402(self, body: Dict[str, Any]) -> Tuple[int, List[Dict[str, Any]]]:
-        """Normalise a 402 body into (x402_version, [payment options]).
+    def _parse_402(
+        self, body: Dict[str, Any]
+    ) -> Tuple[int, List[Dict[str, Any]], ParsedAccepts]:
+        """Normalise a 402 body into (x402_version, [payment options], parsed).
 
         Handles both the spec shape ``{x402Version, accepts: [...]}`` (v1 and v2)
         and the non-spec shape where a single requirement sits at the top level.
         Each option is normalised to ``{network, asset, amount, payTo,
-        eip712_domain, raw}`` -- ``amount`` in token base units, ``raw`` the
-        original accept object (echoed verbatim for v2).
+        eip712_domain, raw, offer}`` -- ``amount`` in token base units, ``raw``
+        the original accept object (echoed verbatim for v2), ``offer`` the
+        :class:`~uvd_x402_sdk.policy.Offer` the policy will be evaluated
+        against.
+
+        The third element carries the offers this build could NOT read, with
+        their scheme names, and the challenge's ``extensions`` (where the seller
+        declares how long its offer stands). One unreadable entry no longer
+        takes the list with it: a seller advertising ``exact`` beside a scheme we
+        do not implement stays payable, and a challenge where NOTHING is
+        readable can name what the seller actually offered.
         """
         version = int(body.get("x402Version", 1))
-        accepts = body.get("accepts")
-        if accepts is None:
-            accepts = [body] if body.get("payTo") else []
+        parsed = parse_accepts(body)
 
-        options: List[Dict[str, Any]] = []
-        for entry in accepts:
-            if not isinstance(entry, dict):
-                continue
-            # v1 uses `maxAmountRequired`; v2 PaymentOption uses `amount`.
-            amount = entry.get("amount")
-            if amount is None:
-                amount = entry.get("maxAmountRequired")
-            pay_to = entry.get("payTo")
-            network = entry.get("network")
-            if amount is None or not pay_to or not network:
-                continue
-            options.append(
-                {
-                    "network": network,
-                    "asset": entry.get("asset"),
-                    "amount": str(amount),
-                    "payTo": pay_to,
-                    "eip712_domain": entry.get("extra"),
-                    "raw": entry,
-                }
-            )
-        return version, options
+        options: List[Dict[str, Any]] = [
+            {
+                "network": offer.network,
+                "asset": offer.asset or None,
+                "amount": str(offer.amount),
+                "payTo": offer.pay_to,
+                "eip712_domain": offer.extra,
+                "raw": offer.raw,
+                "offer": offer,
+            }
+            for offer in parsed.offers
+        ]
+        return version, options, parsed
 
     def _select_payment_option(
         self,
@@ -2098,6 +2122,8 @@ class X402Client:
         valid_duration: int = 3600,
         eip712_domain: Optional[Dict[str, str]] = None,
         http_client: Optional[httpx.Client] = None,
+        policy: Optional[PurchasePolicy] = None,
+        quote: Optional[AdvertisedQuote] = None,
         **request_kwargs: Any,
     ) -> httpx.Response:
         """Fetch a resource, paying the x402 ``402`` challenge if there is one.
@@ -2131,6 +2157,16 @@ class X402Client:
                 :meth:`create_authorization`); by default the domain from the
                 chosen accept's ``extra`` is used when present.
             http_client: Reuse a specific ``httpx.Client`` (default: the SDK's).
+            policy: Override the client's
+                :class:`~uvd_x402_sdk.policy.PurchasePolicy` for this call. The
+                policy is evaluated against the offer in hand BEFORE anything is
+                signed, and is never widened to fit an offer.
+            quote: What a catalog listing advertised, when one was read
+                (:class:`~uvd_x402_sdk.policy.AdvertisedQuote`). Compared against
+                the real offer and reported at debug level -- a divergence is
+                evidence, never a refusal: a seller repricing inside a policy the
+                operator already authorised is ordinary commerce, and an agent
+                that halts on that is an agent nobody can leave running.
             **request_kwargs: Passed through to the probe and the paid retry
                 (``headers``, ``params``, ``json``, ``timeout``, ...).
 
@@ -2140,6 +2176,8 @@ class X402Client:
         Raises:
             RuntimeError: No signer connected.
             PaymentExceedsMaxError: The price exceeds ``max_amount``.
+            PolicyRefusedError: The purchase policy will not pay for this offer.
+                Carries one of the six contract codes in ``refusal_code``.
             NoAcceptablePaymentError: The 402 offered no option within the ceiling.
 
         Example:
@@ -2170,8 +2208,17 @@ class X402Client:
                 f"402 response body is not JSON: {exc}"
             ) from exc
 
-        version, options = self._parse_402(body)
+        version, options, parsed = self._parse_402(body)
         if not options:
+            # A challenge that CARRIED offers, none of which this build can read,
+            # is not "no matching payment method": it is a seller asking for a
+            # scheme we do not implement, and saying so names what they wanted.
+            # Without this the caller sees an empty list and goes looking for a
+            # bug in its own code.
+            if parsed.unreadable:
+                raise PolicyRefusedError(
+                    no_readable_offer(parsed.unreadable), resource=url
+                )
             raise NoAcceptablePaymentError(
                 "402 response offered no usable payment options", resource=url
             )
@@ -2188,6 +2235,32 @@ class X402Client:
         price = Decimal(chosen["amount"]) / (Decimal(10) ** token_decimals)
         if ceiling is not None and price > ceiling:
             raise PaymentExceedsMaxError(price, ceiling, resource=url)
+
+        # The policy, evaluated against THIS offer, before anything is signed.
+        # An offer that diverges from a listing but sits inside an authorised
+        # policy proceeds; one that does not is refused with a cause, and the
+        # policy is not widened to fit it. Evaluating does NOT record the spend:
+        # signing can still fail and the settlement can still be refused, so
+        # `policy.record_spend(...)` is the caller's separate call afterwards.
+        in_force = self.policy if policy is None else policy
+        offer = chosen.get("offer")
+        if offer is None:
+            # A custom `select` may hand back a dict it built itself.
+            offer = chosen.get("raw") or chosen
+        decision = in_force.evaluate(
+            offer,
+            int(time.time()),
+            quote=quote,
+            valid_until=offer_valid_until(parsed.extensions),
+            unreadable=parsed.unreadable,
+        )
+        if isinstance(decision, PolicyRefusal):
+            raise PolicyRefusedError(decision, resource=url)
+        logger.debug(
+            "policy approved this offer: amount=%s versus_quote=%s",
+            decision.amount,
+            decision.versus_quote.code,
+        )
 
         header = self.create_authorization(
             pay_to=chosen["payTo"],

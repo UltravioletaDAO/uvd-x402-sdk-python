@@ -23,6 +23,7 @@ src/uvd_x402_sdk/
 ├── erc8004.py               # ERC-8004 Trustless Agents (EVM + Solana)
 ├── solana_signing.py        # Solana rater-authored feedback: sign the prepared tx (ed25519)
 ├── erc8128.py               # ERC-8128 Signed HTTP Requests (RFC 9421) — sign_request() + fetch_nonce()
+├── policy.py                # PurchasePolicy - what this buyer may sign, decided BEFORE signing
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
 ├── facilitator.py           # Facilitator addresses and fee payers
@@ -173,6 +174,17 @@ payment_requirements = {
 - Fee payer is signature slot 0 and is left EMPTY: the facilitator fills it after verifying the rater's, so a transaction the network would reject never costs a fee
 - `Ed25519Signer` (extra `solana` -> `cryptography`) takes a 32-byte seed, a 64-byte `solana-keygen` key, its int array or its base58 form, and checks the 64-byte form's public half against the derived one. `SolanaSigner` is a two-member Protocol, so a browser wallet or custodian plugs in unchanged
 - **Wire pinned from a LIVE capture**: `tests/fixtures/solana-feedback-prepare.json` (facilitator v2.16.0). Re-capture with `examples/solana_feedback_smoke.py`, which runs prepare -> sign -> verify against production with an ephemeral rater and **stops before submit** (submit is an on-chain write the facilitator pays for)
+
+### Purchase policy (policy.py, v0.82.0)
+- `PurchasePolicy` implements the contract the facilitator fixed in its P3 phase (`x402-rs` 2.25.0, `crates/x402-reqwest/src/policy.rs`), field for field and code for code. Same contract in the TypeScript SDK
+- **It runs inside `X402Client.fetch()`**, between reading the 402 and producing the `X-PAYMENT` header. That IS the feature: the Rust security review caught this half-built, with the policy and the seller's `validUntil` both present and no cable between them for a whole commit, all unit tests green. `tests/test_policy_real_path.py` enters through `fetch()` and asserts on whether a header was produced
+- **Order is the contract** (first failing check is the one reported): `no-readable-offer` -> `offer-expired` -> `recipient-not-permitted` -> `asset-not-budgeted` -> `per-payment-limit` -> `cumulative-limit`. `asset-not-budgeted` runs BEFORE the ceilings because a map has no opinion about a key it does not hold
+- **Amounts are integers in atomic units** and the asset key carries the network (`TokenAsset("base", USDC)`); `TokenAsset("base", ...)` does NOT cover an offer on `polygon` or on `eip155:8453`
+- **`canonical_address` is not `lower()`**: hex folds, base58 (Solana, XRPL) compares exactly. Folding base58 refuses legitimate payees and can admit one nobody listed
+- **Evaluating does not spend** (`record_spend` is a separate call, after settlement), **copies share the purse** (`copy` AND `deepcopy`), and unreadable purse state reports the CEILING, never zero
+- `validUntil` comes from `extensions["offer-receipt/1"].info.validUntil`, Unix seconds, JSON number only. Unreadable = absent, NEVER zero. `validUntil == now` still stands
+- **Defaults**: `X402Client` holds `PurchasePolicy.permissive()` when no policy was supplied (nothing changes for existing callers); `PurchasePolicy()` denies an asset with no ceiling. `PolicyRefusedError` subclasses `NoAcceptablePaymentError` for compatibility — `exc.code` is `POLICY_REFUSED`, the contract code is `exc.refusal_code`
+- **What it does NOT bring** (same as Rust): offer-receipt signature verification, input binding, `upto` accounting, settlement reconciliation. Nothing is persisted
 
 ### ERC-8128 Signed HTTP Requests (erc8128.py)
 - `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers
