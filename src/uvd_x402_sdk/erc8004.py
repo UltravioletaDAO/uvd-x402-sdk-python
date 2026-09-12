@@ -40,7 +40,13 @@ from typing import Any, Literal, Optional, Union
 import httpx
 from pydantic import BaseModel, Field
 
-from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
+from uvd_x402_sdk.exceptions import (
+    LookupInconclusiveError,
+    RegistrationPendingError,
+    WriterUnavailableError,
+    parse_retry_after,
+    write_retry_is_safe,
+)
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
@@ -560,7 +566,127 @@ class FeedbackRequest(BaseModel):
         populate_by_name = True
 
 
-class FeedbackResponse(BaseModel):
+def _transport_verdict(exc: Exception) -> dict:
+    """The verdict for a write that never got an HTTP response at all.
+
+    A connect error, a read timeout or a reset is not a refusal either. It is
+    ``forward_failed`` by another route: the facilitator may have executed the
+    write and only the reply was lost, so it is transient AND ambiguous.
+    ``safe_to_retry`` is ``False`` here always — on a mint, resolve it with
+    ``get_identity_by_owner`` rather than by re-POSTing.
+    """
+    return {
+        "retryable": isinstance(exc, httpx.RequestError),
+        "reason": None,
+        "retry_after": None,
+        "safe_to_retry": False,
+    }
+
+
+def _writer_unavailable(what: str, response: Any) -> WriterUnavailableError:
+    """Name a 503 from a facilitator WRITE route for what it is."""
+    verdict = _write_verdict(response)
+    return WriterUnavailableError(
+        message=(
+            f"{what}: the facilitator reached no verdict (503"
+            + (f", reason={verdict['reason']}" if verdict["reason"] else "")
+            + "). The request was not refused -- present the SAME one again."
+        ),
+        status_code=503,
+        response_body=getattr(response, "text", None),
+        reason=verdict["reason"],
+        retry_after=verdict["retry_after"],
+    )
+
+
+class FacilitatorWriteVerdict(BaseModel):
+    """The transient/final verdict carried by every ERC-8004 WRITE response.
+
+    These routes return a response object instead of raising, so until now a
+    facilitator that reached **no verdict** was indistinguishable from one that
+    **refused**: both arrived as ``success=False`` with a string. The two demand
+    opposite recoveries. A refusal is final. A 503 from the EVM writer lease
+    means the write was never judged, the request is still valid, and the fix is
+    to present the SAME one again.
+
+    On ``register_agent`` that distinction is not cosmetic. Reading a 503 as
+    "registration failed" and registering again is precisely the sequence that
+    once minted five duplicate agents.
+
+    All four fields default to the "final failure" reading, so a response built
+    anywhere else in the SDK keeps exactly the meaning it had.
+    """
+
+    retryable: bool = False
+    """The facilitator reached no verdict. Re-present the same request."""
+
+    reason: Optional[str] = None
+    """The facilitator's own machine-readable diagnosis, verbatim.
+
+    From the writer lease: ``holder_unknown``, ``forwarding_disabled``,
+    ``forwarded_but_not_writer``, ``body_unreadable`` (never ran) or
+    ``forward_failed`` (ambiguous). Carried through untouched — a value this SDK
+    has never seen must still reach the caller.
+    """
+
+    retry_after: Optional[float] = Field(None, alias="retryAfter")
+    """Seconds the facilitator asked us to wait, clamped to a sane ceiling.
+
+    A misconfigured deployment answering ``Retry-After: 3600`` gets to say
+    "later", not to park a caller for an hour.
+    """
+
+    safe_to_retry: bool = Field(False, alias="safeToRetry")
+    """Whether re-sending this exact request verbatim is provably harmless.
+
+    ``True`` only for the reasons the facilitator emits BEFORE it reaches the
+    lease holder. ``False`` for ``forward_failed`` and for any unrecognised
+    reason: the holder may have executed the write and only the reply was lost.
+
+    **On a mint, never resolve a ``False`` by re-POSTing.** Resolve it with
+    ``get_identity_by_owner(network, recipient)`` first, honouring that call's
+    404-vs-503 distinction (it raises ``LookupInconclusiveError`` for the 503,
+    which is also not an answer).
+    """
+
+    class Config:
+        populate_by_name = True
+
+
+def _write_verdict(response: Any) -> dict:
+    """Read the transient verdict off a failed facilitator write response.
+
+    Never raises: a body that is not JSON, or carries no ``reason``, still
+    produces a usable verdict from the status code alone.
+    """
+    status = getattr(response, "status_code", None)
+    reason: Optional[str] = None
+    try:
+        body = response.json()
+        if isinstance(body, dict) and isinstance(body.get("reason"), str):
+            reason = body["reason"] or None
+    except Exception:  # noqa: BLE001 - a non-JSON error body is still an error
+        reason = None
+
+    retry_after = None
+    try:
+        retry_after = parse_retry_after(response.headers.get("retry-after"))
+    except Exception:  # noqa: BLE001 - a header read must not break error handling
+        retry_after = None
+
+    # 503 and 429 are "no verdict"; so is any other 5xx. A 4xx is a decision.
+    retryable = status is None or status == 429 or status >= 500
+    return {
+        "retryable": retryable,
+        "reason": reason,
+        "retry_after": retry_after,
+        # Only meaningful when the facilitator never reached a verdict. An
+        # unknown reason stays ambiguous on purpose.
+        "safe_to_retry": bool(retryable and write_retry_is_safe(reason)),
+    }
+
+
+class FeedbackResponse(FacilitatorWriteVerdict):
     """Feedback response from POST /feedback."""
 
     success: bool
@@ -603,7 +729,7 @@ class RelayAuthorizationParams(BaseModel):
         populate_by_name = True
 
 
-class PrepareRelayFeedbackResponse(BaseModel):
+class PrepareRelayFeedbackResponse(FacilitatorWriteVerdict):
     """Response from ``POST /feedback/evm/prepare``.
 
     Everything the rater has to sign so the CHAIN records them as the author
@@ -682,7 +808,7 @@ class MetadataEntryParam(BaseModel):
     value: str
 
 
-class RegisterAgentResponse(BaseModel):
+class RegisterAgentResponse(FacilitatorWriteVerdict):
     """Response from POST /register."""
 
     success: bool
@@ -1086,16 +1212,21 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return FeedbackResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     async def prepare_relayed_feedback(
@@ -1213,16 +1344,21 @@ class Erc8004Client:
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return PrepareRelayFeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return PrepareRelayFeedbackResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     async def submit_relayed_feedback(
@@ -1323,16 +1459,21 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return FeedbackResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     async def revoke_feedback(
@@ -1390,16 +1531,21 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return FeedbackResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     def get_contracts(self, network: Erc8004Network) -> Optional[Erc8004ContractAddresses]:
@@ -1501,14 +1647,19 @@ class Erc8004Client:
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return PrepareRelayFeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return PrepareRelayFeedbackResponse(
-                success=False, error=str(e), network=network
+                success=False, error=str(e), network=network,
+                **_transport_verdict(e),
             )
 
     async def submit_relayed_response(
@@ -1557,13 +1708,20 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
-            return FeedbackResponse(success=False, error=str(e), network=network)
+            return FeedbackResponse(
+                success=False, error=str(e), network=network,
+                **_transport_verdict(e),
+            )
 
     async def append_response(
         self,
@@ -1634,16 +1792,21 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            # A 503 is NOT a refusal: the facilitator reached no verdict and
+            # the same request should be presented again. Carried as data
+            # rather than raised, because these routes return responses.
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **_write_verdict(e.response),
             )
         except Exception as e:
             return FeedbackResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     async def register_agent(
@@ -1729,27 +1892,45 @@ class Erc8004Client:
             # Flattening it into a bare string threw away the only thing that
             # lets a caller resolve instead of re-POSTing, and re-POSTing a mint
             # is exactly how duplicate agents get created. Keep the body.
+            #
+            # A 5xx is a different animal from a 4xx and MUST NOT read the same.
+            # A 4xx is a decision: the mint was refused. A 503 from the EVM
+            # writer lease is NO VERDICT AT ALL -- and `forward_failed` means the
+            # holder may have minted while only the reply was lost. Reporting
+            # either as a flat failure is what makes a caller register again,
+            # and registering again after an ambiguous mint is exactly how five
+            # duplicate agents were produced.
+            #
+            # `safe_to_retry` says which of the two this is; resolve a False one
+            # with get_identity_by_owner() before re-sending anything.
+            verdict = _write_verdict(e.response)
             parsed: Optional[RegisterAgentResponse] = None
             try:
                 parsed = RegisterAgentResponse.model_validate(e.response.json())
             except Exception:
                 parsed = None
             if parsed is not None:
-                # Never let a 4xx body claim success, whatever it says.
+                # Never let an error body claim success, whatever it says.
                 parsed.success = False
                 if not parsed.error:
                     parsed.error = f"Facilitator error: {e.response.status_code}"
+                parsed.retryable = verdict["retryable"]
+                parsed.reason = verdict["reason"]
+                parsed.retry_after = verdict["retry_after"]
+                parsed.safe_to_retry = verdict["safe_to_retry"]
                 return parsed
             return RegisterAgentResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                **verdict,
             )
         except Exception as e:
             return RegisterAgentResponse(
                 success=False,
                 error=str(e),
                 network=network,
+                **_transport_verdict(e),
             )
 
     async def register_agent_async(
@@ -1797,6 +1978,13 @@ class Erc8004Client:
         response = await self._client.post(
             url, json=payload, headers={"Prefer": "respond-async"}
         )
+        # 503 is the writer lease saying it reached no verdict -- the job was
+        # never created, so there is nothing to poll and nothing was minted.
+        # Named rather than left as a bare HTTPStatusError, because the recovery
+        # (re-send the SAME request after Retry-After) is the opposite of what a
+        # caller does with a 4xx.
+        if response.status_code == 503:
+            raise _writer_unavailable("POST /register (async)", response)
         response.raise_for_status()
         return RegisterJobResponse.model_validate(response.json())
 
@@ -1816,6 +2004,20 @@ class Erc8004Client:
         """
         url = f"{self.base_url}/register/status/{job_id}"
         response = await self._client.get(url)
+        # Same 404-vs-503 discipline as get_identity_by_owner. 404 means the job
+        # is unknown or aged out -- an answer. 503 means the facilitator could
+        # not tell, and a caller that reads it as "the registration is gone"
+        # registers again, minting a duplicate for a job that may be running.
+        if response.status_code == 503:
+            raise LookupInconclusiveError(
+                message=(
+                    f"Facilitator could not report the status of job {job_id} "
+                    f"(503). The job may still be running -- poll again; do NOT "
+                    f"register a second time."
+                ),
+                status_code=503,
+                response_body=response.text,
+            )
         response.raise_for_status()
         return RegisterJobResponse.model_validate(response.json())
 
@@ -1854,10 +2056,27 @@ class Erc8004Client:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
 
+        last_status = "pending"
         while True:
-            job = await self.get_register_status(job_id)
+            try:
+                job = await self.get_register_status(job_id)
+            except LookupInconclusiveError:
+                # The STATUS lookup failed, not the registration. Letting this
+                # escape would hand the caller an exception on a job that is
+                # very likely still running, and the reflex answer to that is to
+                # register again. Keep polling until the deadline; only then
+                # report "still pending", which names the right recovery.
+                if loop.time() >= deadline:
+                    raise RegistrationPendingError(
+                        job_id=job_id,
+                        last_status=last_status,
+                        timeout_seconds=timeout,
+                    ) from None
+                await asyncio.sleep(poll_interval)
+                continue
             if job.is_terminal:
                 return job
+            last_status = job.status
             if loop.time() >= deadline:
                 raise RegistrationPendingError(
                     job_id=job_id,

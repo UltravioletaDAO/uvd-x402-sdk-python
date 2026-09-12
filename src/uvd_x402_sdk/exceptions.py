@@ -303,6 +303,10 @@ class FacilitatorError(X402Error):
         retryable = (
             status_code is None or status_code == 429 or status_code >= 500
         )
+        # Clamped HERE rather than only at the parse site, so a value handed in
+        # by a caller (or by a future code path that reads the header itself)
+        # cannot smuggle `Retry-After: 3600` past the ceiling.
+        retry_after = parse_retry_after(retry_after)
         details: Dict[str, Any] = {
             "statusCode": status_code,
             "response": response_body,
@@ -361,7 +365,7 @@ class LookupInconclusiveError(X402Error):
         self.retryable = True
 
 
-class WriterUnavailableError(X402Error):
+class WriterUnavailableError(FacilitatorError):
     """
     Raised when the facilitator could not reach a verdict because no instance
     of it held the EVM writer lease.
@@ -376,6 +380,13 @@ class WriterUnavailableError(X402Error):
     this SDK does not recognise: the holder may have executed the write and
     only the reply was lost. On a mint, resolve that with
     ``GET /identity/{network}/owner/{recipient}`` before re-sending anything.
+
+    It subclasses :class:`FacilitatorError` deliberately. Every consumer written
+    before this class existed catches ``FacilitatorError`` and reads
+    ``status_code``; making the 503 a sibling instead of a child would have
+    turned "the SDK now names this failure" into "the SDK now escapes your
+    handler", which is a worse bug than the one being fixed. Existing handlers
+    keep working unchanged; new ones can be specific.
     """
 
     def __init__(
@@ -388,23 +399,23 @@ class WriterUnavailableError(X402Error):
         retry_after: Optional[float] = None,
     ) -> None:
         super().__init__(
-            message=message,
-            code="WRITER_UNAVAILABLE",
-            details={
-                "statusCode": status_code,
-                "response": response_body,
-                "reason": reason,
-                "retryAfter": retry_after,
-                "retryable": True,
-                "safeToRetry": write_retry_is_safe(reason),
-            },
+            message,
+            status_code=status_code,
+            response_body=response_body,
+            reason=reason,
+            retry_after=retry_after,
         )
-        self.status_code = status_code
-        self.response_body = response_body
-        self.reason = reason
-        self.retry_after = retry_after
-        self.retryable = True
+        self.code = "WRITER_UNAVAILABLE"
         self.safe_to_retry = write_retry_is_safe(reason)
+        # A no-verdict answer is transient by definition, whatever the status
+        # code turned out to be.
+        self.retryable = True
+        self.details["retryable"] = True
+        self.details["safeToRetry"] = self.safe_to_retry
+        # Always present on this class, even as None, so a consumer can read
+        # them without a membership test.
+        self.details["reason"] = reason
+        self.details["retryAfter"] = self.retry_after
 
 
 class RegistrationPendingError(X402Error):

@@ -1967,6 +1967,84 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
+### v0.72.0 (2026-08-31)
+
+**A 503 is not a 402.** `402` means *the payment was rejected, sign a new
+authorization*. `503` means *no verdict was reached, present the same credential
+again*. Collapsing the second into the first makes a buyer pay twice for a
+payment nobody refused; on the ERC-8004 mint path it produces a duplicate agent.
+This release draws that line at every border the SDK owns.
+
+- **Added**: `WriterUnavailableError`, now actually raised. It was defined and
+  documented but nothing raised it, so a 503 from `verify`, `settle`, `/accepts`,
+  `/supported`, `/version` or `/blacklist` arrived as a generic
+  `FacilitatorError`. It **subclasses** `FacilitatorError`, so every existing
+  `except FacilitatorError` keeps working
+- Exposes the facilitator's `reason` (`holder_unknown`, `forwarding_disabled`,
+  `forwarded_but_not_writer`, `body_unreadable`, `forward_failed`) and
+  `safe_to_retry`. `safe_to_retry` is `True` only for the reasons emitted
+  **before** the lease holder is touched; `forward_failed` and anything
+  unrecognised stay ambiguous, because the holder may have executed the write and
+  only the reply was lost
+- `Retry-After` is honoured with a **ceiling** (`MAX_RETRY_AFTER_SECONDS`),
+  clamped in the constructor rather than only at the parse site — a misconfigured
+  facilitator answering `Retry-After: 3600` gets to say "later", not to park a
+  request for an hour
+- **Added**: the same verdict on the **ERC-8004 write routes**, which return a
+  response instead of raising. `FeedbackResponse`, `PrepareRelayFeedbackResponse`
+  and `RegisterAgentResponse` now carry `retryable` / `reason` / `retry_after` /
+  `safe_to_retry`. `register_agent_async` names a 503 instead of leaking a bare
+  `HTTPStatusError`; `get_register_status` answers a 503 with
+  `LookupInconclusiveError` (404 is "unknown job", 503 is "I could not tell");
+  and `wait_for_registration` no longer aborts on one inconclusive poll
+- **Added**: the same verdict on the **escrow** path. `TransactionResult` and
+  `AuthorizationResult` carry it, and `_settle_via_facilitator` judges the status
+  **before** parsing the body — an ALB's HTML 503 used to surface as
+  `error="Expecting value: line 1 column 1"`, a no-verdict wearing the costume of
+  a malformed reply
+- Exported from the package root: `WriterUnavailableError`,
+  `transient_503_response`, `retry_after_seconds`, `facilitator_reason`,
+  `write_retry_is_safe`, `parse_retry_after`, `MAX_RETRY_AFTER_SECONDS`,
+  `WRITE_NOT_ATTEMPTED_REASONS`, `WRITE_AMBIGUOUS_REASONS`
+
+**An expired escrow is recoverable, and this SDK said it was not.**
+
+- **Fixed (documentation, and it was costing money)**: `build_payment_info`'s
+  docstring — echoed in the test suite — claimed that past `authorizationExpiry`
+  the funds "can only be moved by the payer's `reclaim()`". False.
+  `refundInEscrow` → `escrow.partialVoid()` is `onlySender(operator)` — the
+  operator is the **facilitator** — sends the tokens to the **payer**, and checks
+  no expiry at all (`AuthCaptureEscrow.sol:336-354`). `reclaim()` is a second
+  door, not the only one. Believing otherwise leaves money in escrows whose payer
+  never comes back
+- **Added**: `refund_all_via_facilitator()` — reads `capturableAmount` from
+  `POST /escrow/state` and refunds exactly that, gaslessly. Refunding
+  `max_amount` blind reverts with `PartialVoidExceedsCapturable` once part was
+  captured, which is how a "recovery" fails to recover. An already-empty escrow
+  returns success rather than a failure nobody can act on
+- **Added**: `refundable_amount()`
+
+**DX402: bring your own storage.**
+
+- **Added**: `upload` on `anchor_evidence()` — a **callable**, `f(sealed: bytes)
+  -> pointer: str`, same idiom as `signer`. The SDK still seals (the buyer has to
+  be able to decrypt), hands you the ciphertext, and sends only your pointer. The
+  facilitator has accepted this shape since v0.1; both SDKs only ever sent
+  `sealed`. With `upload` the ciphertext never enters the request, so the
+  request-size bound does not apply to it
+- The seller signature is now computed over the pointer **as sent**. Signing the
+  empty pointer while sending a real one raises nothing and leaves the anchor
+  silently provisional — the exact hijack a signed anchor exists to prevent
+- **Added**: `backend` on `anchor_evidence()` (`"s3"` default, `"ipfs"`,
+  `"arweave"`) so a seller-hosted blob is labelled truthfully
+- An `upload` that raises, or returns anything but a non-empty string, degrades
+  to a skip. It never fails the sale
+- A 5xx from `/dx402/anchor` is marked `retryable` in the skip notice
+
+Everything here is additive: new fields default to the previous reading, new
+parameters default to the previous behaviour, and the default wire request is
+byte-identical.
+
 ### v0.44.0 (2026-08-11)
 - **Added**: per-network facilitator routing — `X402Config(facilitator_by_network={"base": CDP_URL, "avalanche": UVD_URL})` (also `X402Client(...)` and `configure_x402(...)`, and the `X402_FACILITATOR_BY_NETWORK` env var as a JSON object). `verify`, `settle`, the post-timeout settle re-check and `/accepts` each go to the facilitator that owns their network
 - **The translation refuses to guess**: a network that is neither in the table nor covered by the reserved `"*"` fallback key raises `ConfigurationError` — it is NEVER routed to `facilitator_url` silently. Settling on a facilitator that does not settle that chain is a money bug, not a config nit
@@ -2334,6 +2412,36 @@ certified.
 Why the split: `verified` was previously decided against the `payee` field *in
 the request*, which the caller supplies. Proving "I control the address I typed
 into my own request" was enough to own a stranger's evidence permanently.
+
+### Bring your own storage
+
+By default the sealed envelope travels inside the anchor request and the
+facilitator hosts it, so the request-size bound applies to your response body.
+Pass `upload` and it does not: the SDK seals exactly as before, hands you the
+ciphertext, and sends only the pointer you return.
+
+```python
+def upload(sealed: bytes) -> str:
+    key = f"evidence/{payment_id}.bin"
+    s3.put_object(Bucket="my-evidence", Key=key, Body=sealed)
+    return f"https://my-evidence.s3.amazonaws.com/{key}"
+
+anchor_evidence(body, ..., upload=upload, backend="s3")
+```
+
+`upload` is a **callable, not a precomputed pointer**, for the same reason
+`signer` is one: the SDK owns the sealing, so it is the only thing that can hand
+you the exact bytes the pointer must resolve to. A pointer computed elsewhere
+could drift from them with nothing to catch it.
+
+The pointer has to be fetchable by the buyer — a plain `https://` URL, a
+`<backend>+https://` tagged one, `ipfs://` or `ar://`. It is also covered by the
+seller signature, which `anchor_evidence` handles for you; signing the empty
+pointer while sending a real one raises nothing and leaves the anchor silently
+provisional, which is the one failure this parameter had to get right.
+
+If `upload` raises or returns anything but a non-empty string, the result is a
+skip. It never fails the sale.
 
 ### Choosing where evidence is stored
 

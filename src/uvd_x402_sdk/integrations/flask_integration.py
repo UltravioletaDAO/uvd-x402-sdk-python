@@ -18,7 +18,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[flask]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error, transient_503_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.response import create_402_response, create_402_headers
@@ -178,6 +178,15 @@ class FlaskX402:
                     return func(*args, **kwargs)
 
                 except X402Error as e:
+                    # 402 tells the buyer the payment was REJECTED and to sign
+                    # a new authorization -- a double payment when the truth is
+                    # "no verdict". A transient failure answers 503 instead.
+                    if is_transient_error(e):
+                        body, headers = transient_503_response(e)
+                        response = make_response(jsonify(body), 503)
+                        for key, value in headers.items():
+                            response.headers[key] = value
+                        return response
                     response_body = create_402_response(
                         amount_usd=required_amount,
                         config=self.config,
@@ -251,6 +260,13 @@ def flask_require_payment(
                 return func(*args, **kwargs)
 
             except X402Error as e:
+                # See FlaskX402.require_payment: transient is 503, never 402.
+                if is_transient_error(e):
+                    body, headers = transient_503_response(e)
+                    response = make_response(jsonify(body), 503)
+                    for key, value in headers.items():
+                        response.headers[key] = value
+                    return response
                 response_body = e.to_dict()
                 response = make_response(jsonify(response_body), 402)
                 return response

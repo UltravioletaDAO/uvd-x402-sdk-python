@@ -71,7 +71,14 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
-from uvd_x402_sdk.client import X402Client, is_transient_error
+from uvd_x402_sdk.client import (
+    X402Client,
+    is_transient_error,
+    transient_503_response,
+    retry_after_seconds,
+    facilitator_reason,
+    DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS,
+)
 from uvd_x402_sdk.config import (
     X402Config,
     NetworkConfig,
@@ -89,10 +96,16 @@ from uvd_x402_sdk.exceptions import (
     PaymentExceedsMaxError,
     NoAcceptablePaymentError,
     FacilitatorError,
+    WriterUnavailableError,
     LookupInconclusiveError,
     RegistrationPendingError,
     ConfigurationError,
     TimeoutError as X402TimeoutError,
+    write_retry_is_safe,
+    parse_retry_after,
+    MAX_RETRY_AFTER_SECONDS,
+    WRITE_NOT_ATTEMPTED_REASONS,
+    WRITE_AMBIGUOUS_REASONS,
 )
 from uvd_x402_sdk.models import (
     # Payload models
@@ -414,6 +427,10 @@ __all__ = [
     # Main client
     "X402Client",
     "is_transient_error",
+    "transient_503_response",
+    "retry_after_seconds",
+    "facilitator_reason",
+    "DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS",
     "build_uvd_feedback_params",
     "UVD_FEEDBACK_ROLES",
     "UVD_PRODUCTS",
@@ -436,6 +453,12 @@ __all__ = [
     "PaymentExceedsMaxError",
     "NoAcceptablePaymentError",
     "FacilitatorError",
+    "WriterUnavailableError",
+    "write_retry_is_safe",
+    "parse_retry_after",
+    "MAX_RETRY_AFTER_SECONDS",
+    "WRITE_NOT_ATTEMPTED_REASONS",
+    "WRITE_AMBIGUOUS_REASONS",
     "LookupInconclusiveError",
     "RegistrationPendingError",
     "ConfigurationError",

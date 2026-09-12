@@ -10,7 +10,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, Union, Dict
 
 from uvd_x402_sdk.config import X402Config
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error, transient_503_response
 from uvd_x402_sdk.exceptions import (
     X402Error,
     PaymentRequiredError,
@@ -300,6 +300,39 @@ def _create_error_response(
         body["error"] = error.message
         body["details"] = error.details
         return _create_402_response(body)
+
+    # The facilitator could not reach a verdict - 503, not 400. A 400 blames
+    # the caller for a request that was fine and gives it no reason to retry;
+    # the credential it presented is still valid and must be re-presented, not
+    # re-signed.
+    if is_transient_error(error):
+        body, headers = transient_503_response(error)
+
+        try:
+            from flask import jsonify, make_response
+            response = make_response(jsonify(body), 503)
+            for key, value in headers.items():
+                response.headers[key] = value
+            return response
+        except ImportError:
+            pass
+
+        try:
+            from starlette.responses import JSONResponse
+            return JSONResponse(status_code=503, content=body, headers=headers)
+        except ImportError:
+            pass
+
+        try:
+            from django.http import JsonResponse
+            response = JsonResponse(body, status=503)
+            for key, value in headers.items():
+                response[key] = value
+            return response
+        except ImportError:
+            pass
+
+        return {"statusCode": 503, "headers": headers, "body": body}
 
     # Other errors - return 400
     body = error.to_dict()

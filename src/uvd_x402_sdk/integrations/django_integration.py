@@ -20,7 +20,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[django]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error, transient_503_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -119,6 +119,14 @@ class DjangoX402Middleware:
             return self.get_response(request)
 
         except X402Error as e:
+            # 402 means "rejected, sign again" -- a double payment when the
+            # facilitator simply reached no verdict. Transient answers 503.
+            if is_transient_error(e):
+                body, headers = transient_503_response(e)
+                response = JsonResponse(body, status=503)
+                for key, value in headers.items():
+                    response[key] = value
+                return response
             response = JsonResponse(e.to_dict(), status=402)
             for key, value in create_402_headers().items():
                 response[key] = value
@@ -177,6 +185,13 @@ def django_require_payment(
                 return func(request, *args, **kwargs)
 
             except X402Error as e:
+                # See X402Middleware: transient is 503, never 402.
+                if is_transient_error(e):
+                    body, headers = transient_503_response(e)
+                    response = JsonResponse(body, status=503)
+                    for key, value in headers.items():
+                        response[key] = value
+                    return response
                 response = JsonResponse(e.to_dict(), status=402)
                 for key, value in create_402_headers().items():
                     response[key] = value
@@ -232,6 +247,14 @@ class X402PaymentView:
             return super().dispatch(request, *args, **kwargs)  # type: ignore
 
         except X402Error as e:
+            # 402 means "rejected, sign again" -- a double payment when the
+            # facilitator simply reached no verdict. Transient answers 503.
+            if is_transient_error(e):
+                body, headers = transient_503_response(e)
+                response = JsonResponse(body, status=503)
+                for key, value in headers.items():
+                    response[key] = value
+                return response
             response = JsonResponse(e.to_dict(), status=402)
             for key, value in create_402_headers().items():
                 response[key] = value

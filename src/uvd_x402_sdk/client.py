@@ -29,6 +29,7 @@ from uvd_x402_sdk.exceptions import (
     TimeoutError as X402TimeoutError,
     PaymentExceedsMaxError,
     NoAcceptablePaymentError,
+    WriterUnavailableError,
     MAX_RETRY_AFTER_SECONDS,
     parse_retry_after,
     write_retry_is_safe,
@@ -131,6 +132,38 @@ def _response_retry_after(response: Any) -> Optional[float]:
         return parse_retry_after(response.headers.get("retry-after"))
     except Exception:  # noqa: BLE001 - a header read must not break error handling
         return None
+
+
+def facilitator_http_error(message: str, response: Any) -> FacilitatorError:
+    """Build the right exception for a non-200 facilitator response.
+
+    A **503 is not a rejection**. It is the facilitator saying it reached no
+    verdict — the EVM writer lease could not be taken, or a task was being
+    replaced. The credential the buyer presented was never refused, so the
+    recovery is to re-present the SAME one. Flattening it into the generic
+    ``FacilitatorError`` that every other status produces is what lets a
+    paywall answer 402 and charge somebody a second time for a payment nobody
+    turned down.
+
+    ``WriterUnavailableError`` subclasses ``FacilitatorError``, so this is a
+    pure refinement: existing ``except FacilitatorError`` handlers still catch
+    it, and new code can be specific.
+
+    A 503 with no ``reason`` (an ALB, a task rolling) is still returned as
+    ``WriterUnavailableError`` — ``safe_to_retry`` is then ``False``, which is
+    the conservative reading of an unknown.
+    """
+    reason = _facilitator_reason(getattr(response, "text", None))
+    retry_after = _response_retry_after(response)
+    status = getattr(response, "status_code", None)
+    cls = WriterUnavailableError if status == 503 else FacilitatorError
+    return cls(
+        message=message,
+        status_code=status,
+        response_body=getattr(response, "text", None),
+        reason=reason,
+        retry_after=retry_after,
+    )
 
 
 def retry_after_seconds(exc: Exception, default: Optional[float] = None) -> Optional[float]:
@@ -449,10 +482,9 @@ class X402Client:
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"GET {facilitator_url}/supported failed: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"GET {facilitator_url}/supported failed: {e.response.status_code}",
+                e.response,
             )
         except Exception as e:
             raise FacilitatorError(
@@ -839,12 +871,9 @@ class X402Client:
             )
 
             if response.status_code != 200:
-                raise FacilitatorError(
-                    message=f"Facilitator verify failed with status {response.status_code}",
-                    status_code=response.status_code,
-                    response_body=response.text,
-                    reason=_facilitator_reason(response.text),
-                    retry_after=_response_retry_after(response),
+                raise facilitator_http_error(
+                    f"Facilitator verify failed with status {response.status_code}",
+                    response,
                 )
 
             data = response.json()
@@ -1041,12 +1070,9 @@ class X402Client:
             )
 
             if response.status_code != 200:
-                raise FacilitatorError(
-                    message=f"Facilitator settle failed with status {response.status_code}",
-                    status_code=response.status_code,
-                    response_body=response.text,
-                    reason=_facilitator_reason(response.text),
-                    retry_after=_response_retry_after(response),
+                raise facilitator_http_error(
+                    f"Facilitator settle failed with status {response.status_code}",
+                    response,
                 )
 
             data = response.json()
@@ -1262,10 +1288,9 @@ class X402Client:
             data = response.json()
             return data.get("accepts", [])
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"Facilitator /accepts error: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"Facilitator /accepts error: {e.response.status_code}",
+                e.response,
             )
         except httpx.TimeoutException:
             raise X402TimeoutError(operation="accepts", timeout_seconds=self.config.verify_timeout)
@@ -1316,10 +1341,9 @@ class X402Client:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"GET /version failed: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"GET /version failed: {e.response.status_code}",
+                e.response,
             )
         except Exception as e:
             raise FacilitatorError(message=f"GET /version failed: {e}")
@@ -1351,10 +1375,9 @@ class X402Client:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"GET /supported failed: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"GET /supported failed: {e.response.status_code}",
+                e.response,
             )
         except Exception as e:
             raise FacilitatorError(message=f"GET /supported failed: {e}")
@@ -1423,10 +1446,9 @@ class X402Client:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"GET {path} failed: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"GET {path} failed: {e.response.status_code}",
+                e.response,
             )
         except Exception as e:
             raise FacilitatorError(message=f"GET {path} failed: {e}")
@@ -1451,10 +1473,9 @@ class X402Client:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            raise FacilitatorError(
-                message=f"GET /blacklist failed: {e.response.status_code}",
-                status_code=e.response.status_code,
-                response_body=e.response.text,
+            raise facilitator_http_error(
+                f"GET /blacklist failed: {e.response.status_code}",
+                e.response,
             )
         except Exception as e:
             raise FacilitatorError(message=f"GET /blacklist failed: {e}")

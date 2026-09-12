@@ -12,7 +12,7 @@ from decimal import Decimal
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error, transient_503_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -245,6 +245,15 @@ class LambdaX402:
             return result
 
         except X402Error as e:
+            # 402 tells the buyer the payment was REJECTED and to sign a new
+            # authorization. When the facilitator merely failed to reach a
+            # verdict, obeying that is a second payment for the same purchase.
+            if is_transient_error(e):
+                logger.warning(
+                    "Payment inconclusive (transient): %s — answering 503", e.message
+                )
+                body, headers = transient_503_response(e)
+                return _create_lambda_response(503, body, headers)
             logger.warning(f"Payment failed: {e.message}")
             body = create_402_response(
                 amount_usd=Decimal(str(amount_usd)),

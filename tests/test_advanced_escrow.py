@@ -16,8 +16,15 @@ def test_micro_tier_release_window_outlasts_a_real_review():
 
     MICRO's raw tier window is 7200s. Measured in production: a release attempted
     26.2 HOURS after `authorizationExpiry` reverted with
-    `AfterAuthorizationExpiry`, the worker went unpaid, and the escrow could only
-    be moved by the payer's `reclaim()`. 8 escrows stuck on one network in 24h.
+    `AfterAuthorizationExpiry` and the worker went unpaid. 8 escrows stuck on one
+    network in 24h.
+
+    An earlier version of this docstring added "and the escrow could only be
+    moved by the payer's `reclaim()`", which is false and was itself costing
+    money: `refundInEscrow` -> `escrow.partialVoid()` is `onlySender(operator)`,
+    pays the payer, and checks no expiry (AuthCaptureEscrow.sol:336-354). The
+    money is always recoverable. What expiry destroys is the RELEASE, which is
+    what this floor protects.
     """
     import time
 

@@ -22,7 +22,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[fastapi]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, is_transient_error, transient_503_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -143,6 +143,13 @@ class FastAPIX402:
                     expected_amount_usd=required_amount,
                 )
             except X402Error as e:
+                # 402 means "REJECTED, sign a new authorization"; a buyer that
+                # obeys it after a transient facilitator failure pays twice for
+                # a payment nobody refused. 503 means "no verdict, re-present
+                # the SAME credential".
+                if is_transient_error(e):
+                    body, headers = transient_503_response(e)
+                    raise HTTPException(status_code=503, detail=body, headers=headers)
                 raise HTTPException(
                     status_code=402,
                     detail=e.to_dict(),
@@ -204,6 +211,10 @@ class X402Depends:
                 expected_amount_usd=self._amount,
             )
         except X402Error as e:
+            # See require_payment: a transient failure is 503, never 402.
+            if is_transient_error(e):
+                body, headers = transient_503_response(e)
+                raise HTTPException(status_code=503, detail=body, headers=headers)
             raise HTTPException(
                 status_code=402,
                 detail=e.to_dict(),
@@ -265,6 +276,10 @@ def fastapi_require_payment(
                 return await func(request, *args, **kwargs)
 
             except X402Error as e:
+                # See require_payment: a transient failure is 503, never 402.
+                if is_transient_error(e):
+                    body, headers = transient_503_response(e)
+                    return JSONResponse(status_code=503, content=body, headers=headers)
                 return JSONResponse(
                     status_code=402,
                     content=e.to_dict(),
@@ -336,6 +351,10 @@ class X402Middleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         except X402Error as e:
+            # See require_payment: a transient failure is 503, never 402.
+            if is_transient_error(e):
+                body, headers = transient_503_response(e)
+                return JSONResponse(status_code=503, content=body, headers=headers)
             return JSONResponse(
                 status_code=402,
                 content=e.to_dict(),

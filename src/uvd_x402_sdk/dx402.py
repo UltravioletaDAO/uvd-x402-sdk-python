@@ -989,7 +989,11 @@ def _chain_id_for(network: str) -> "int | None":
 
 
 def _seller_digest_for(
-    payment_id_value: str, content_hash_value: str, payee: str, network: str
+    payment_id_value: str,
+    content_hash_value: str,
+    payee: str,
+    network: str,
+    pointer: str = "",
 ) -> "bytes | None":
     """The digest the facilitator will ACTUALLY verify, chosen by the payee's curve.
 
@@ -1005,9 +1009,14 @@ def _seller_digest_for(
     everything else identical, the ed25519 form was refused
     (``409 dx402_already_anchored``) and the EVM form superseded the provisional.
 
-    `pointer` stays the empty string on both branches: this call sends `sealed`,
-    so the facilitator issues the pointer and you cannot sign what you have not
-    seen.
+    `pointer` is the empty string when the anchor carries `sealed`: the
+    facilitator issues the pointer and you cannot sign what you have not seen.
+    When the anchor carries a POINTER instead -- the seller uploaded the blob
+    itself -- the pointer must be passed here, because the gate verifies against
+    `req.pointer` verbatim (`dx402/service.rs`, `pointer: req.pointer...
+    .unwrap_or("")`). Signing `""` while sending a pointer produces a signature
+    that never verifies and an anchor that stays silently provisional -- the
+    same failure mode as signing the wrong curve's form.
     """
     if _is_evm_address(payee):
         chain_id = _chain_id_for(network)
@@ -1022,14 +1031,23 @@ def _seller_digest_for(
             # Refuse instead. The caller anchors unsigned, which is honest and
             # recoverable, rather than signed-but-worthless, which looks done.
             return None
-        return anchor_digest(payment_id_value, content_hash_value, "", payee, chain_id)
-    return anchor_digest(payment_id_value, content_hash_value, "", ZERO_ADDRESS, 0)
+        return anchor_digest(
+            payment_id_value, content_hash_value, pointer, payee, chain_id
+        )
+    return anchor_digest(
+        payment_id_value, content_hash_value, pointer, ZERO_ADDRESS, 0
+    )
 
 
 #: Largest `POST /dx402/anchor` request the facilitator accepts, mirroring its
-#: `MAX_REQUEST_BODY_BYTES` (default 64 KiB, an anti-OOM bound on every route).
-#: With base64 inflation and ~600 bytes of metadata this leaves ~47 KB of
-#: plaintext.
+#: `MAX_REQUEST_BODY_BYTES` (an anti-OOM bound on every route). It is a mirror,
+#: not a policy: moving it either way only trades an orderly skip for a late 413.
+#:
+#: How much PLAINTEXT that leaves depends on the envelope (a nonce, one wrapped
+#: CEK per recipient, base64's 4/3) -- which is why the check below measures the
+#: serialised request rather than the body. Pass `upload` to `anchor_evidence`
+#: and the bound stops applying to your body altogether: the ciphertext goes to
+#: your own store and only a pointer travels.
 ANCHOR_MAX_REQUEST_BYTES = 64 * 1024
 
 
@@ -1044,8 +1062,10 @@ def anchor_evidence(
     payer_key: bytes,
     seller_encryption_key: "bytes | None" = None,
     signer: "callable | None" = None,
+    upload: "callable | None" = None,
     proof_of_payment: "dict | None" = None,
     storage: "str | None" = None,
+    backend: str = "s3",
     retention: str = "90d",
     facilitator: str = "https://facilitator.ultravioletadao.xyz",
     timeout: float = 15.0,
@@ -1085,6 +1105,29 @@ def anchor_evidence(
       it receives the digest and returns the signature without the seed ever
       leaving it. Without a signer the anchor is **provisional** — it holds the
       slot but a signed anchor for the same payment supersedes it.
+    - `upload`: `f(sealed: bytes) -> str` returning a pointer. **Bring your own
+      storage.** Without it, the sealed envelope travels inside the anchor
+      request and the facilitator hosts it, so the request-size bound applies to
+      your response body. With it, the SDK still seals exactly as before (the
+      buyer has to be able to decrypt), hands you the ciphertext, and sends only
+      the pointer you return — the ciphertext never enters the request, so the
+      request bound does not apply to it.
+
+      A callable, not a precomputed pointer, for the same reason `signer` is one:
+      the SDK owns the sealing, so it is the only thing that can hand you the
+      exact bytes the pointer must resolve to. Giving it a pointer computed
+      elsewhere would let the two drift apart with nothing to catch it.
+
+      The pointer must be something a buyer can fetch — a plain `https://` URL,
+      a `<backend>+https://` tagged one, `ipfs://` or `ar://` (see
+      :func:`dereference_pointer`). It is also **covered by the seller
+      signature**, which is handled here.
+
+      If `upload` raises, or returns anything but a non-empty string, the result
+      is a skip. It never fails the sale.
+    - `backend`: which store the bytes ended up in (`"s3"`, `"ipfs"`,
+      `"arweave"`). A label the facilitator records; set it to match your own
+      sink when you pass `upload`.
     """
     try:
         recipients = [(ROLE_PAYER, payer_key)]
@@ -1093,19 +1136,41 @@ def anchor_evidence(
         blob = seal_evidence_to(body, recipients, payment_id_value)
 
         digest_hash = content_hash(body)
+
+        # Two modes, and the facilitator dispatches on exactly this: `sealed`
+        # present -> it hosts the blob and derives the pointer; `sealed` absent
+        # and `pointer` present -> it uses ours; neither -> error
+        # (`dx402/service.rs`, `match (&sealed_blob, &req.pointer)`).
+        pointer = ""
+        if upload is not None:
+            handed = upload(blob)
+            if not isinstance(handed, str) or not handed.strip():
+                # An upload that did not produce a fetchable pointer would
+                # anchor a receipt for bytes nobody can reach. Skip, loudly in
+                # the result and silently for the buyer, who still got served.
+                return {
+                    "v": 1,
+                    "skipped": "anchor_failed",
+                    "error": "upload returned no pointer",
+                }
+            pointer = handed.strip()
+
         payload = {
             "paymentId": payment_id_value,
             "network": network,
             "txHash": tx_hash,
             "payer": payer,
             "payee": payee,
-            "sealed": base64.b64encode(blob).decode(),
-            "backend": "s3",
+            "backend": backend,
             "contentHash": digest_hash,
             "keyAlg": "ECIES-X25519" if len(payer_key) == 32 else "ECIES-secp256k1",
             "mode": "direct",
             "retention": retention,
         }
+        if pointer:
+            payload["pointer"] = pointer
+        else:
+            payload["sealed"] = base64.b64encode(blob).decode()
 
         # The only thing that reaches `verified: true`. Without it the
         # facilitator has checked no chain, so it records the anchor as
@@ -1118,7 +1183,12 @@ def anchor_evidence(
 
         unsigned_reason = None
         if signer is not None:
-            digest = _seller_digest_for(payment_id_value, digest_hash, payee, network)
+            # Over the pointer we ACTUALLY send -- empty in sealed mode, the
+            # seller's own in pointer mode. The gate hashes `req.pointer`
+            # verbatim, so the two must be the same string.
+            digest = _seller_digest_for(
+                payment_id_value, digest_hash, payee, network, pointer
+            )
             if digest is None:
                 # See `_seller_digest_for`: signing the wrong form is worse than
                 # not signing, because it looks like the seller did its part.
@@ -1126,14 +1196,17 @@ def anchor_evidence(
             else:
                 payload["sellerSignature"] = signer(digest)
 
-        # Measure the SEALED, serialised request -- not the plaintext.
-        # The envelope adds a nonce, the wrapped CEK and its JSON, and the
-        # ciphertext travels base64 (4/3). Checking the plaintext lets through
-        # bodies the facilitator then rejects, which arrives as a generic
-        # failure long after the work of sealing was done.
-        # Measured by KarmaKadabra, 2026-08-19: 47 KB of plaintext fits, 48 KB
-        # does not.
-        if len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
+        # This bound is about the REQUEST, so it only applies while the
+        # ciphertext is in it. With `upload` the blob went to the seller's own
+        # store and the request carries a pointer instead -- there is nothing
+        # left here for the bound to be about.
+        #
+        # In sealed mode, measure the SEALED, serialised request -- not the
+        # plaintext. The envelope adds a nonce, the wrapped CEK and its JSON,
+        # and the ciphertext travels base64 (4/3). Checking the plaintext lets
+        # through bodies the facilitator then rejects, which arrives as a
+        # generic failure long after the work of sealing was done.
+        if not pointer and len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
             return {"v": 1, "skipped": "too_large"}
 
         if client is None:
@@ -1155,12 +1228,21 @@ def anchor_evidence(
                 detail = response.json()
             except Exception:  # noqa: BLE001 - a non-JSON error body is still a failure
                 pass
-            return {
+            out = {
                 "v": 1,
                 "skipped": "anchor_failed",
                 "status": response.status_code,
                 "error": detail.get("error"),
             }
+            # A 5xx (or 429) is the facilitator reaching NO VERDICT, not
+            # refusing the anchor. Same distinction as everywhere else on the
+            # payment path -- surfaced rather than acted on, because evidence
+            # must never hold up a response.
+            if response.status_code >= 500 or response.status_code == 429:
+                out["retryable"] = True
+                if isinstance(detail, dict) and isinstance(detail.get("reason"), str):
+                    out["reason"] = detail["reason"]
+            return out
         result = response.json()
         if unsigned_reason and isinstance(result, dict):
             result["unsigned"] = unsigned_reason

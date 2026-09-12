@@ -19,6 +19,18 @@ Gasless facilitator-proxied flows (facilitator pays gas, v1.32.0+):
 Contract deposit limit: $100 USDC per deposit (enforced on-chain).
 Dispute resolution: use refund_in_escrow() (keep funds in escrow, arbiter decides).
 
+AN EXPIRED ESCROW IS NOT STUCK, AND RECOVERING IT DOES NOT NEED THE PAYER.
+`reclaim()` is `onlySender(payer)` and only after `authorizationExpiry`, which is
+why the facilitator does not expose it -- but it is NOT the only way out, and any
+statement that it is has cost real money by making operators wait on a payer who
+never came back. `refundInEscrow` -> `escrow.partialVoid()` is
+`onlySender(operator)`, the operator is the FACILITATOR, the funds go to the
+PAYER, and it does not check `authorizationExpiry` at all
+(AuthCaptureEscrow.sol:336-354). So a past-expiry escrow is recovered gaslessly
+with `refund_via_facilitator()` -- or, for exactly what is left,
+`refund_all_via_facilitator()`, which reads `capturableAmount` from
+POST /escrow/state first.
+
 Contract mapping:
     operator.authorize()        -> escrow.authorize()   (lock funds)
     operator.release()          -> escrow.capture()      (pay receiver)
@@ -61,7 +73,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import httpx
 from eth_abi import encode
@@ -473,6 +485,55 @@ class AuthorizationResult:
     salt: Optional[str] = None
     error: Optional[str] = None
 
+    # See TransactionResult: a facilitator that reached NO VERDICT is not a
+    # facilitator that refused. It matters more here than anywhere -- an
+    # ambiguous authorize that is retried blind can lock the buyer's funds a
+    # second time.
+    retryable: bool = False
+    """The facilitator reached no verdict. Re-send the SAME request."""
+    reason: Optional[str] = None
+    """The facilitator's machine-readable diagnosis, verbatim, when it sent one."""
+    retry_after: Optional[float] = None
+    """Seconds it asked us to wait, clamped to a sane ceiling."""
+    safe_to_retry: bool = False
+    """Whether re-sending verbatim is provably harmless.
+
+    ``False`` for ``forward_failed`` and for anything unrecognised: the lease
+    holder may have submitted the authorization already. Check
+    :meth:`AdvancedEscrowClient.query_escrow_state` before re-sending.
+    """
+
+
+def _facilitator_verdict(response: Any) -> dict:
+    """Read the transient verdict off a facilitator response that reached none.
+
+    Never raises. A body that is not JSON (an ALB's HTML 503, say) still yields
+    a usable verdict from the status code alone -- which is the case that used
+    to arrive as a JSON parse error masquerading as a refusal.
+    """
+    from uvd_x402_sdk.exceptions import parse_retry_after, write_retry_is_safe
+
+    reason = None
+    try:
+        body = response.json()
+        if isinstance(body, dict) and isinstance(body.get("reason"), str):
+            reason = body["reason"] or None
+    except Exception:  # noqa: BLE001 - a non-JSON error body is still an error
+        reason = None
+
+    retry_after = None
+    try:
+        retry_after = parse_retry_after(response.headers.get("retry-after"))
+    except Exception:  # noqa: BLE001 - a header read must not break error handling
+        retry_after = None
+
+    return {
+        "retryable": True,
+        "reason": reason,
+        "retry_after": retry_after,
+        "safe_to_retry": bool(write_retry_is_safe(reason)),
+    }
+
 
 @dataclass
 class TransactionResult:
@@ -482,6 +543,26 @@ class TransactionResult:
     transaction_hash: Optional[str] = None
     gas_used: Optional[int] = None
     error: Optional[str] = None
+
+    # --- the transient/final verdict, for the facilitator-proxied paths ---
+    #
+    # A refused release and a facilitator that reached NO VERDICT both used to
+    # arrive here as `success=False` plus a string. They demand opposite
+    # recoveries: a refusal is final, a 503 from the writer lease means the same
+    # request should be presented again. Defaults are the "final" reading, so
+    # every on-chain path keeps the meaning it had.
+    retryable: bool = False
+    """The facilitator reached no verdict. Re-send the SAME request."""
+    reason: Optional[str] = None
+    """The facilitator's machine-readable diagnosis, verbatim, when it sent one."""
+    retry_after: Optional[float] = None
+    """Seconds it asked us to wait, clamped to a sane ceiling."""
+    safe_to_retry: bool = False
+    """Whether re-sending verbatim is provably harmless.
+
+    ``False`` for ``forward_failed`` and for any unrecognised reason: the lease
+    holder may have executed the write and only the reply was lost.
+    """
 
 
 # ============================================================
@@ -793,10 +874,19 @@ class AdvancedEscrowClient:
         The release window is floored so a release is still possible AFTER the
         work is reviewed. The tier windows alone are not: ``MICRO`` gives two
         hours, and a buyer who approves later than that gets
-        ``AfterAuthorizationExpiry`` on-chain -- the release reverts, the worker
-        is not paid, and the funds sit until only the payer's ``reclaim()`` can
-        move them. Measured in production 2026-08-19: a release attempted **26.2
-        hours** past the expiry, with 8 escrows stuck on one network in 24h.
+        ``AfterAuthorizationExpiry`` on-chain -- the release reverts and the
+        worker is not paid. Measured in production 2026-08-19: a release
+        attempted **26.2 hours** past the expiry, with 8 escrows stuck on one
+        network in 24h.
+
+        Those funds are recoverable without the payer, and an earlier version of
+        this docstring said otherwise. ``reclaim()`` is indeed
+        ``onlySender(payer)`` and post-expiry only, but ``refundInEscrow`` ->
+        ``escrow.partialVoid()`` is ``onlySender(operator)``, pays the PAYER, and
+        performs no expiry check whatsoever (AuthCaptureEscrow.sol:336-354). Call
+        :meth:`refund_all_via_facilitator` and the money comes back. What the
+        expiry costs is the RELEASE -- the worker cannot be paid any more -- and
+        that is what this floor exists to prevent.
 
         This is not a new policy. ``escrow_signing.build_escrow_pre_auth`` -- the
         other path in this same SDK -- already floors both windows at
@@ -905,6 +995,26 @@ class AdvancedEscrowClient:
                 json=payload,
                 timeout=120,
             )
+
+            # Judge the STATUS before the body. A 503 from the EVM writer lease
+            # answers `{"error":..., "reason":...}` -- and a 503 from an ALB
+            # mid-deploy answers HTML, which used to blow up in `.json()` and
+            # surface as `error="Expecting value: line 1 column 1"`. Either way
+            # the caller read a NO-VERDICT as a refusal and stopped, when the
+            # right move was to send the same request again.
+            if response.status_code >= 500 or response.status_code == 429:
+                verdict = _facilitator_verdict(response)
+                return AuthorizationResult(
+                    success=False,
+                    error=(
+                        f"authorize reached no verdict "
+                        f"(HTTP {response.status_code}"
+                        + (f", reason={verdict['reason']}" if verdict["reason"] else "")
+                        + "). The request was not refused -- send the same one again."
+                    ),
+                    **verdict,
+                )
+
             result = response.json()
 
             if result.get("success"):
@@ -917,7 +1027,12 @@ class AdvancedEscrowClient:
             else:
                 return AuthorizationResult(success=False, error=result.get("errorReason"))
         except Exception as e:
-            return AuthorizationResult(success=False, error=str(e))
+            # A lost reply is not a refusal: the authorization may be on-chain.
+            return AuthorizationResult(
+                success=False,
+                error=str(e) or f"{type(e).__name__} with no message during authorize",
+                retryable=isinstance(e, httpx.RequestError),
+            )
 
     def release(self, payment_info: PaymentInfo, amount: Optional[int] = None) -> TransactionResult:
         """
@@ -941,9 +1056,17 @@ class AdvancedEscrowClient:
 
         Calls PaymentOperator.refundInEscrow() -> escrow.partialVoid()
 
+        ``partialVoid`` is ``onlySender(operator)``, pays the PAYER, and checks
+        no expiry (AuthCaptureEscrow.sol:336-354) -- so this is also how an
+        escrow past ``authorizationExpiry`` is unstuck, without the payer having
+        to call ``reclaim()``. This variant needs the operator key and gas;
+        :meth:`refund_all_via_facilitator` does the same thing gaslessly and for
+        exactly the amount that is left.
+
         Args:
             payment_info: PaymentInfo from the authorize step
-            amount: Amount to refund (defaults to max_amount)
+            amount: Amount to refund (defaults to max_amount, which REVERTS with
+                ``PartialVoidExceedsCapturable`` if part was already captured)
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
@@ -1010,6 +1133,26 @@ class AdvancedEscrowClient:
                 json=payload,
                 timeout=120,
             )
+
+            # Judge the STATUS before the body. A 503 from the EVM writer lease
+            # answers `{"error":..., "reason":...}` -- and a 503 from an ALB
+            # mid-deploy answers HTML, which used to blow up in `.json()` and
+            # surface as `error="Expecting value: line 1 column 1"`. Either way
+            # the caller read a NO-VERDICT as a refusal and stopped, when the
+            # right move was to send the same request again.
+            if response.status_code >= 500 or response.status_code == 429:
+                verdict = _facilitator_verdict(response)
+                return TransactionResult(
+                    success=False,
+                    error=(
+                        f"{action} reached no verdict "
+                        f"(HTTP {response.status_code}"
+                        + (f", reason={verdict['reason']}" if verdict["reason"] else "")
+                        + "). The request was not refused -- send the same one again."
+                    ),
+                    **verdict,
+                )
+
             result = response.json()
 
             if result.get("success"):
@@ -1051,9 +1194,15 @@ class AdvancedEscrowClient:
         except Exception as e:
             # A ReadTimeout stringifies to "" — say what happened instead of
             # handing the caller an empty string.
+            #
+            # And a transport failure is NO VERDICT, not a refusal: the
+            # facilitator may have submitted the transaction and only the reply
+            # was lost. Transient, and never `safe_to_retry` — check
+            # `query_escrow_state()` before re-sending a release.
             return TransactionResult(
                 success=False,
                 error=str(e) or f"{type(e).__name__} with no message during {action}",
+                retryable=isinstance(e, httpx.RequestError),
             )
 
     def release_via_facilitator(
@@ -1085,15 +1234,67 @@ class AdvancedEscrowClient:
         Unlike refund_in_escrow() which requires gas + operator private key, this
         method goes through the facilitator which pays all gas fees.
 
-        Requires facilitator v1.32.0+ with escrow settle support.
+        **This works after ``authorizationExpiry``.** It is the way an expired
+        escrow gets unstuck, and it does not need the payer to do anything.
+        ``refundInEscrow`` calls ``escrow.partialVoid()``, which is
+        ``onlySender(operator)`` -- the operator being the facilitator -- sends
+        the tokens to the payer, and performs **no expiry check at all**
+        (AuthCaptureEscrow.sol:336-354). The payer-only, post-expiry
+        ``reclaim()`` is a second door, not the only one; treating it as the only
+        one is what leaves money sitting in escrows whose payer never comes back.
+
+        What expiry DOES cost is the release: past ``authorizationExpiry`` the
+        worker can no longer be paid. Refunding is still open.
 
         Args:
             payment_info: PaymentInfo from the authorize step
-            amount: Amount to refund in atomic units (defaults to max_amount)
+            amount: Amount to refund in atomic units (defaults to max_amount).
+                ``partialVoid`` reverts with ``PartialVoidExceedsCapturable`` if
+                this is larger than what is actually left, which is why
+                :meth:`refund_all_via_facilitator` exists.
 
         Returns:
-            TransactionResult with the on-chain transaction hash
+            TransactionResult with the on-chain transaction hash. On a
+            facilitator that reached no verdict (503), ``retryable`` is True and
+            the request should be presented again rather than abandoned.
         """
+        return self._settle_via_facilitator("refundInEscrow", payment_info, amount)
+
+    def refundable_amount(self, payment_info: PaymentInfo) -> int:
+        """How much is actually still sitting in this escrow, in atomic units.
+
+        Reads ``capturableAmount`` from ``POST /escrow/state``. That is the exact
+        figure ``partialVoid`` accepts: refunding ``max_amount`` after a partial
+        capture reverts with ``PartialVoidExceedsCapturable``.
+        """
+        state = self.query_escrow_state(payment_info)
+        return int(state.get("capturableAmount") or 0)
+
+    def refund_all_via_facilitator(
+        self, payment_info: PaymentInfo
+    ) -> TransactionResult:
+        """Return everything still escrowed to the payer, gaslessly.
+
+        The recovery for an escrow that expired: reads ``capturableAmount`` from
+        ``POST /escrow/state`` and refunds exactly that, so the call cannot
+        revert with ``PartialVoidExceedsCapturable`` the way a blind
+        ``refund_via_facilitator(pi)`` can once part of it was captured.
+
+        Needs nothing from the payer, and is not blocked by
+        ``authorizationExpiry`` -- see :meth:`refund_via_facilitator`.
+
+        Returns a successful no-op result when the escrow is already empty:
+        ``partialVoid`` rejects a zero amount (``validAmount``), and reporting
+        "nothing left to refund" as a failure sends an operator hunting for a
+        problem that does not exist.
+        """
+        amount = self.refundable_amount(payment_info)
+        if amount <= 0:
+            return TransactionResult(
+                success=True,
+                error=None,
+                transaction_hash=None,
+            )
         return self._settle_via_facilitator("refundInEscrow", payment_info, amount)
 
     def query_escrow_state(self, payment_info: PaymentInfo) -> dict:
