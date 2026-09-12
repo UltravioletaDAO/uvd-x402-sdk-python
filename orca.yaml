@@ -1,0 +1,26 @@
+# Generado por c0der (PM del stack Ultravioleta DAO) para los worktrees de Orca.
+# Deja un checkout limpio de este SDK con su venv propio y la suite corriendo, sin intervencion humana.
+
+scripts:
+  # venv PROPIO por worktree, a proposito: el editable install escribe una ruta
+  # absoluta en __editable__.uvd_x402_sdk-*.pth, asi que un .venv compartido haria
+  # que todo worktree importe el src del checkout principal en vez del suyo.
+  # Extras = los de CI (.github/workflows/ci.yml) + fastapi, que destapa 6 tests
+  # que si no quedan en SKIP. ~7s en frio con el cache global de uv, 2s si ya existe.
+  setup: uv venv --python 3.11 --allow-existing && uv pip install -e ".[signer,dev,dx402,escrow,fastapi]"
+  # Cada worktree carga ~158M de venv; al archivar se recuperan. Dirigido a .venv
+  # para no tocar archivos .env ignorados que puedan vivir en el worktree.
+  archive: git clean -xdf .venv
+
+# El codigo se lee y se planea sin dependencias, y el setup son segundos.
+setupAgentStartupPolicy: wait-for-setup
+
+defaultTabs:
+  # --no-sync es obligatorio: `uv run` a secas escribe un uv.lock que este repo no
+  # trackea ni ignora, y ensuciaria el worktree en cada corrida.
+  - title: tests
+    color: "#a855f7"
+    command: uv run --no-sync pytest -q
+  - title: repl
+    color: "#737373"
+    command: uv run --no-sync python

@@ -156,3 +156,5 @@ Thumbs.db
 .unused/
 mempalace.yaml
 .claude/
+.claude/irc-config.json
+.claude/skills/
