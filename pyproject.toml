@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.82.0"
+version = "0.83.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 25 blockchains (including Robinhood Chain, XRPL, Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT, USDG)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -96,6 +96,12 @@ flask = [
 fastapi = [
     "fastapi>=0.100.0",
     "starlette>=0.27.0",
+    # A FastAPI server is where an ERC-8128 signed request gets verified, and
+    # verify_request recovers the signer with eth_account, imported lazily.
+    # Without it here `[fastapi]` imported fine and raised ModuleNotFoundError
+    # on the first signed request. Proven in a fresh venv by
+    # scripts/smoke_fastapi_extra.py.
+    "eth-account>=0.11.0",
 ]
 django = [
     "django>=4.0.0",

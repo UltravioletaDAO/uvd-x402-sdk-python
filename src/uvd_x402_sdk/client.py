@@ -9,9 +9,11 @@ This module provides the X402Client class which handles:
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
+import re
 import time
 from decimal import Decimal
 from typing import Optional, Tuple, List, Dict, Any, Union
@@ -87,6 +89,68 @@ logger = logging.getLogger(__name__)
 
 SETTLE_RETRY_ATTEMPTS = 3
 _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
+
+
+# =============================================================================
+# Idempotency-Key (sent on /verify and /settle unless the config turns it off)
+# =============================================================================
+#
+# What the facilitator does with the header, measured on x402-rs 2.28.0
+# (`src/handlers.rs`, `post_settle`, and its `settle_idempotency_tests`):
+#
+#   * it hashes the RAW request body (sha256, no JSON re-encoding);
+#   * same key + same hash -> the cached response, 200 with
+#     `Idempotent-Replayed: true`, and nothing new executes;
+#   * same key + different hash -> 409 `idempotency_key_conflict`;
+#   * only a SUCCESSFUL settle is cached, so a failure never locks a retry out;
+#   * a store it cannot read -> 503 `idempotency_store_unavailable`, and it does
+#     NOT settle (fail-closed). `X402Config.send_idempotency_key=False` is the
+#     switch for a caller that has to settle through that;
+#   * `/verify` ignores the header today.
+
+#: The header the facilitator deduplicates a settle on.
+IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+
+_IDEMPOTENCY_OPERATIONS = ("verify", "settle")
+
+
+def derive_idempotency_key(payload: PaymentPayload, operation: str) -> Optional[str]:
+    """The ``Idempotency-Key`` this SDK sends for ``operation`` on ``payload``.
+
+    ``x402-<operation>-<sha256 hex>`` over the signed ``payload`` block,
+    serialised with sorted keys and no whitespace. The same authorization gives
+    the same key in any process and on any run, so a buyer re-presenting the
+    same ``X-PAYMENT`` to a seller that restarted lands on the facilitator's
+    cached settle instead of executing it again.
+
+    * **Namespaced by operation.** ``/verify`` and ``/settle`` carry the same
+      payload and the facilitator's store is one namespace: one key for both
+      would let a future verify cache answer a settle.
+    * **The signed block only, not the requirements.** A settle of the same
+      authorization under different terms must reuse the key, so the
+      facilitator refuses it (``409``) instead of running it.
+    * **Unguessable to anyone who does not already hold the credential.** The
+      store is shared by every caller of the facilitator, which is why its own
+      MCP tool asks for an unguessable key. This one is computable only from the
+      ``X-PAYMENT``, and whoever holds that could settle the payment anyway.
+    * ``None`` for an empty block: every empty payload would share one key.
+
+    It does NOT catch a buyer who signs a NEW authorization for the same
+    purchase: different block, different key, a second settlement. That needs
+    a purchase-scoped key, which the SDK cannot invent.
+
+    Raises:
+        ValueError: If ``operation`` is not ``"verify"`` or ``"settle"``.
+    """
+    if operation not in _IDEMPOTENCY_OPERATIONS:
+        raise ValueError(
+            f"operation must be one of {_IDEMPOTENCY_OPERATIONS}, got {operation!r}"
+        )
+    signed = payload.payload
+    if not signed:
+        return None
+    canonical = json.dumps(signed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return f"x402-{operation}-{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 #: The one reader of a facilitator error body, shared with the verdict
@@ -242,6 +306,131 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
         details = getattr(exc, "details", None) or {}
         return bool(details.get("retryable", False))
     return False
+
+
+# =============================================================================
+# Spent-nonce classification
+# =============================================================================
+#
+# Ported from tarotof's paywall (api/main.py, `_codigo_de_nonce_gastado` and
+# `_huele_a_nonce_gastado`). What it can see depends on the facilitator. On EVM
+# the UVD facilitator returns a used EIP-3009 authorization as an opaque
+# `400 contract_call_failed (ref: ...)` (x402-rs `handlers.rs`, ContractCall
+# arm, which withholds revert reasons on purpose), so neither a code nor the
+# wording names the nonce there. What does reach it: other facilitators, the
+# nonce-store rejections of non-EVM chains, and `409 idempotency_key_conflict`.
+
+#: Codes with which a facilitator says "this authorization was already used",
+#: compared NORMALISED (lowercase, separators stripped) against the values of
+#: code-bearing fields, never against free text.
+_SPENT_NONCE_CODES = frozenset(
+    {
+        "nonceused",
+        "noncealreadyused",
+        "noncespent",
+        "nonceconsumed",
+        "alreadyused",
+        "alreadysettled",
+        "alreadyprocessed",
+        "duplicatenonce",
+        "duplicatepayment",
+        "authorizationused",
+        "authorizationalreadyused",
+        # Not a nonce code, and here on purpose: x402-rs caches only a
+        # SUCCESSFUL settle under an Idempotency-Key, so a conflict means a
+        # settle under that key already succeeded with another body. Under the
+        # key derive_idempotency_key() sends, that is this authorization.
+        "idempotencykeyconflict",
+    }
+)
+_SPENT_NONCE_CODE_FIELDS = ("code", "errorCode", "error_code", "error", "reason", "status")
+_SPENT_NONCE_PHRASES = ("already used", "already settled", "already processed")
+_NONCE_WORD = re.compile(r"\bnonces?\b")
+_SPENT_WORD = re.compile(r"\b(?:used|spent|consumed|duplicated?|replay(?:ed)?)\b")
+
+
+def _normalised_code(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
+def _spent_nonce_code(data: Any) -> Optional[str]:
+    """A spent-nonce code anywhere in ``data`` (nested dicts and lists), verbatim."""
+    pending = [data]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, list):
+            pending.extend(current)
+            continue
+        if not isinstance(current, dict):
+            continue
+        for field in _SPENT_NONCE_CODE_FIELDS:
+            value = current.get(field)
+            if value is not None and _normalised_code(value) in _SPENT_NONCE_CODES:
+                return str(value)
+        pending.extend(v for v in current.values() if isinstance(v, (dict, list)))
+    return None
+
+
+def _mentions_spent_nonce(text: Optional[str]) -> bool:
+    """Free text saying the authorization was used, matched by WHOLE WORD.
+
+    tarotof matched substrings, and ``"refused"`` contains ``"used"``: the
+    facilitator's own "the node refused this transaction on nonce or mempool
+    grounds and never queued it" -- a transient failure, where retrying the SAME
+    credential is right -- read as a spent authorization. ``_`` and ``-`` count
+    as separators, so ``nonce_used`` is still two words.
+    """
+    lowered = re.sub(r"[_\-]+", " ", (text or "").lower())
+    if any(phrase in lowered for phrase in _SPENT_NONCE_PHRASES):
+        return True
+    return bool(_NONCE_WORD.search(lowered) and _SPENT_WORD.search(lowered))
+
+
+def spent_nonce_evidence(exc: Exception) -> Optional[str]:
+    """How this failure says the authorization was ALREADY USED, if it does.
+
+    ``"structured"`` when a code-bearing field says so (``code``, ``errorCode``,
+    ``error``, ``reason``... anywhere in the exception's ``details`` or in the
+    facilitator's JSON body), ``"wording"`` when only the free text does, and
+    ``None`` otherwise, including for any exception outside the payment path.
+
+    The question behind it: a 402 tells the buyer "sign a new authorization",
+    and said over one that already settled, that is how a buyer pays twice. So
+    the text heuristic leans to the false positive ("check, you may have paid
+    already" costs a lookup; "pay again" costs money), and a code wins over the
+    wording, because a code is a contract and a message is prose.
+
+    Where it sits among the other verdicts, first match wins:
+
+    1. a transaction hash on the error (``FacilitatorError.transaction``,
+       ``PaymentSettlementError.tx_hash``): the facilitator broadcast;
+    2. this function: the authorization was already used, so answer "may be
+       settled, check before paying again", never a 402;
+    3. :func:`is_transient_error`: no verdict, retry the SAME credential (503);
+    4. otherwise final: the payment was rejected (402).
+    """
+    if not isinstance(exc, X402Error):
+        return None
+    body_text = getattr(exc, "response_body", None)
+    try:
+        body = json.loads(body_text) if body_text else None
+    except (ValueError, TypeError):
+        body = None
+    if _spent_nonce_code(exc.details) is not None or _spent_nonce_code(body) is not None:
+        return "structured"
+    reason = getattr(exc, "reason", None)
+    text = " ".join(
+        part for part in (exc.message, reason, body_text) if isinstance(part, str) and part
+    )
+    return "wording" if _mentions_spent_nonce(text) else None
+
+
+def is_spent_nonce_error(exc: Exception) -> bool:
+    """Does this payment-path failure say the authorization was already used?
+
+    See :func:`spent_nonce_evidence`, which also says how it knows.
+    """
+    return spent_nonce_evidence(exc) is not None
 
 
 #: What a paywall waits before inviting a retry when the facilitator gave no
@@ -837,6 +1026,19 @@ class X402Client:
     # Facilitator Communication
     # =========================================================================
 
+    def _facilitator_headers(self, payload: PaymentPayload, operation: str) -> Dict[str, str]:
+        """JSON content type, plus the ``Idempotency-Key`` for ``operation``.
+
+        The key is left out when ``config.send_idempotency_key`` is off, or when
+        the payload has no signed block to derive it from.
+        """
+        headers = {"Content-Type": "application/json"}
+        if self.config.send_idempotency_key:
+            key = derive_idempotency_key(payload, operation)
+            if key is not None:
+                headers[IDEMPOTENCY_KEY_HEADER] = key
+        return headers
+
     def verify_payment(
         self,
         payload: PaymentPayload,
@@ -897,7 +1099,7 @@ class X402Client:
             response = client.post(
                 f"{self.facilitator_url_for(payload.network)}/verify",
                 json=verify_request,
-                headers={"Content-Type": "application/json"},
+                headers=self._facilitator_headers(payload, "verify"),
                 timeout=self.config.verify_timeout,
             )
 
@@ -1110,6 +1312,7 @@ class X402Client:
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
+        headers = self._facilitator_headers(payload, "settle")
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
             f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
@@ -1122,7 +1325,7 @@ class X402Client:
             response = client.post(
                 f"{facilitator_url}/settle",
                 json=settle_request,
-                headers={"Content-Type": "application/json"},
+                headers=headers,
                 timeout=settle_timeout,
             )
 
@@ -1156,7 +1359,7 @@ class X402Client:
                 f"checking on-chain state..."
             )
             fallback = self._check_settle_fallback(
-                settle_request, settle_timeout, facilitator_url
+                settle_request, settle_timeout, facilitator_url, headers=headers
             )
             if fallback:
                 return fallback
@@ -1169,6 +1372,7 @@ class X402Client:
         settle_request: Dict[str, Any],
         settle_timeout: float,
         facilitator_url: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Optional[SettleResponse]:
         """
         Check on-chain state after a settle timeout.
@@ -1181,6 +1385,9 @@ class X402Client:
             facilitator_url: The facilitator the timed-out settle was sent to.
                 Must be that same one — re-resolving or defaulting could ask a
                 DIFFERENT facilitator about a payment it never saw.
+            headers: The headers of the timed-out settle. Same reason: under
+                the same ``Idempotency-Key`` a settle that completed is
+                answered from the facilitator's cache instead of executing.
 
         Returns:
             SettleResponse if payment was confirmed on-chain, None otherwise.
@@ -1191,7 +1398,7 @@ class X402Client:
             response = client.post(
                 f"{url}/settle",
                 json=settle_request,
-                headers={"Content-Type": "application/json"},
+                headers=headers or {"Content-Type": "application/json"},
                 timeout=30.0,  # Short timeout for fallback check
             )
 

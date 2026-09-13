@@ -84,6 +84,8 @@ class X402Config:
         resource_url: Resource URL sent to facilitator
         description: Description sent to facilitator
         x402_version: Protocol version to use (1, 2, or "auto")
+        send_idempotency_key: Send an ``Idempotency-Key`` derived from the
+            signed payload on ``/verify`` and ``/settle`` (default True)
         multi_payment: Multi-payment configuration for accepting multiple networks
     """
 
@@ -136,6 +138,13 @@ class X402Config:
 
     # x402 protocol version: 1, 2, or "auto" (detect from payload)
     x402_version: Literal[1, 2, "auto"] = "auto"
+
+    # Send an Idempotency-Key on /verify and /settle, derived from the signed
+    # payload (client.derive_idempotency_key). The facilitator refuses a keyed
+    # settle it cannot check against its store (503
+    # idempotency_store_unavailable, fail-closed on purpose); this is the
+    # switch for a caller that has to settle through such an outage.
+    send_idempotency_key: bool = True
 
     # Multi-payment configuration
     multi_payment: Optional[MultiPaymentConfig] = None
