@@ -1230,14 +1230,39 @@ Never retried:
   tx (e.g. a non-fatal post-settle hook failed); retrying would settle TWICE
 - **A 5xx whose body states `"retryable": false`** — the facilitator saying so outright
 
-### Idempotency-Key on verify and settle (on by default since 0.83.0)
+### Idempotency-Key on verify and settle (opt-in since 0.83.1)
 
-`verify_payment()` and `settle_payment()` send an `Idempotency-Key` derived from the signed
-payload: `derive_idempotency_key(payload, "settle")` is `x402-settle-<sha256>` over the signed
-block serialised with sorted keys and no whitespace (`x402-verify-…` for verify). The same
-authorization gives the same key in any process, so when a buyer re-presents the same
-`X-PAYMENT` to a seller that restarted, the facilitator answers from its cache of successful
-settles instead of executing again.
+```python
+client = X402Client(recipient_address="0xYourWallet...", send_idempotency_key=True)
+
+result = client.process_payment(
+    x_payment_header,
+    Decimal("0.10"),
+    idempotency_scope=order.id,  # this purchase's own identifier
+)
+```
+
+Off by default. With `send_idempotency_key=True` (an `X402Config` field), `verify_payment()`,
+`settle_payment()`, `try_settle_payment()` and `process_payment()` send an `Idempotency-Key` on
+every call that passes `idempotency_scope`, the caller's own identifier for the purchase.
+`derive_idempotency_key(payload, "settle", scope=...)` is `x402-settle-<sha256>` over
+`{"payload": <signed block>, "scope": <scope>}` serialised with sorted keys and no whitespace
+(`x402-verify-…` for verify). The same authorization for the same purchase gives the same key in
+any process, so when a buyer re-presents the same `X-PAYMENT` to a seller that restarted, the
+facilitator answers from its cache of successful settles instead of executing again.
+
+- **Why it is opt-in, and why it needs a scope.** A key derived only from the payment does not
+  tell two purchases of the same price apart: their settle requests are byte-identical. Only the
+  caller knows which purchase a payment is for. Same authorization + same scope = same key; the
+  same payment under another scope gets another key.
+- **Key on, no scope: no key.** The call goes out exactly as with the key off, and the SDK logs one
+  warning per process. A blank scope counts as none; a scope that is not a string raises
+  `TypeError` before anything is sent.
+- **Choosing the scope:** one value per purchase (an order id), created before the settle and
+  stored with the purchase, so a retry after a restart reuses it. Never a value two purchases
+  share (a resource URL, a price, a payer). Prefer a random id to a sequential one: the key is only
+  as private as the scope.
+- `derive_idempotency_key(payload, op)` without `scope` is still the 0.83.0 key, byte for byte.
 
 What the facilitator does with it (x402-rs 2.28.0, `post_settle`):
 
@@ -1252,12 +1277,15 @@ What the facilitator does with it (x402-rs 2.28.0, `post_settle`):
   opaque `400 contract_call_failed (ref: …)`. Without the key, the retry of a payment that
   already moved reads as a rejection.
 - **What it does not catch:** a buyer who signs a *new* authorization for the same purchase.
-  Different signed block, different key.
+  Different signed block, different key; the scope does not change that.
 - **`process_payment()` verifies first**, and `/verify` has no cache: a credential that already
   settled fails at verify before the settle cache is reached. The replay serves callers that
   settle directly, `retry=True`, and the timeout fallback (which re-asks under the same key).
-- **Off switch:** `X402Client(..., send_idempotency_key=False)` (an `X402Config` field), for a
-  caller that has to settle while the facilitator's store is down.
+- **With the key on, the store is a dependency.** A keyed settle the facilitator cannot check is
+  `503 idempotency_store_unavailable` and does not execute: `is_transient_error()` reads it as
+  transient, so present the same credential again. A `409 idempotency_key_conflict` means a
+  settle under that key already succeeded: `spent_nonce_evidence()` returns `"structured"`, so do
+  not release the purchase and do not ask for a new signature.
 
 ### Spent nonce: never answer 402 over a payment that may have moved
 
@@ -2496,6 +2524,14 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.83.1 (2026-09-14)
+- **Changed: the `Idempotency-Key` is opt-in, and bound to a purchase the caller names.** `X402Config.send_idempotency_key` now defaults to `False`. With it on, `verify_payment()`, `settle_payment()`, `try_settle_payment()` and `process_payment()` take `idempotency_scope`, the caller's own identifier for the purchase (an order id), and mix it into the key. A key derived only from the payment does not tell two purchases of the same price apart, because their requests are byte-identical, and only the caller knows which purchase a payment is for
+- **Key on, no scope: no key**, and one warning per process. Fail-safe: the call goes out exactly as with the key off. A blank scope counts as none; a scope that is not a string raises `TypeError` before anything is sent
+- **`derive_idempotency_key(payload, op, scope=None)`**: without `scope`, the 0.83.0 key byte for byte (its pinned vector is unchanged); with it, the sha256 covers `{"payload": <signed block>, "scope": <scope>}` with sorted keys and no whitespace. The signed block stays in, so two sellers that use the same order id get different keys. A second pinned vector for the TypeScript twin, computed from the literal text
+- **Upgrading from 0.83.0:** a caller that set nothing sends no key again, as in 0.82.0, and no longer depends on the facilitator's idempotency store. A caller that wants a completed settle replayed sets `send_idempotency_key=True` and passes the same `idempotency_scope` to verify, settle and every retry of that purchase
+- **Classification, unchanged and now pinned end to end:** a `409 idempotency_key_conflict` is evidence that a settle under that key already succeeded (`spent_nonce_evidence()` returns `"structured"`, and it is not transient), and a `503 idempotency_store_unavailable` moved nothing and is transient. Both verdicts date from 0.83.0; `tests/test_idempotency_opt_in.py` pins them through the scoped path against a local facilitator with the x402-rs semantics
+- 1159 tests pass, 1 skipped (1139 before, 20 added, none lost). Against 0.83.0, 7 of the 8 tests in `tests/test_idempotency_opt_in.py` fail; the eighth, a 409 that is not an idempotency conflict, already passed there
 
 ### v0.83.0 (2026-09-13)
 - **Added: `Idempotency-Key` on `/verify` and `/settle`, on by default.** `derive_idempotency_key(payload, op)` is `x402-<verify|settle>-<sha256>` over the signed payload block (sorted keys, no whitespace), so the same authorization gives the same key in any process. Measured on x402-rs 2.28.0 `post_settle`: the facilitator hashes the raw body; same key + same body is answered from its cache of SUCCESSFUL settles (`200`, `Idempotent-Replayed: true`) and nothing executes; same key + another body is `409 idempotency_key_conflict`. Until now a buyer re-presenting the same `X-PAYMENT` to a seller that restarted reached the chain again, and on EVM the UVD facilitator answers a used authorization with an opaque `400 contract_call_failed (ref)`, which a paywall reads as "rejected, sign again"

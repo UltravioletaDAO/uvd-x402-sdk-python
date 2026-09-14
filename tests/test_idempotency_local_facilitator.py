@@ -21,9 +21,9 @@ It is NOT the facilitator binary. Running x402-rs locally needs chain RPC and a
 funded signer, and its own handoff (``docs/handoffs/2026-09-02-mcp-listo.md``)
 records ``POST /settle`` hanging locally without AWS credentials.
 
-Only APIs that existed before 0.83.0 are imported here, so this file runs
-against the previous release and shows what changed: there, the second settle
-reaches the chain.
+The key is opt-in since 0.83.1 and bound to a purchase the caller names, so
+every seller below that wants it asks for it (``send_idempotency_key=True``)
+and names the purchase (``idempotency_scope``).
 """
 from __future__ import annotations
 
@@ -164,16 +164,29 @@ def _seller(facilitator: _LocalFacilitator, **config) -> X402Client:
     return X402Client(recipient_address=RECIPIENT, facilitator_url=facilitator.url, **config)
 
 
+#: The purchase every keyed seller below is settling.
+ORDER = "order-1"
+
+
+def _keyed_seller(facilitator: _LocalFacilitator) -> X402Client:
+    """The same, asking for the key: it is opt-in since 0.83.1."""
+    return _seller(facilitator, send_idempotency_key=True)
+
+
 def test_a_repeated_settle_of_the_same_authorization_executes_once(facilitator):
-    """The buyer re-presents the same X-PAYMENT, and the seller that took it
-    has restarted in between.
+    """The buyer re-presents the same X-PAYMENT for the same purchase, and the
+    seller that took it has restarted in between.
 
     Without the key the second settle reaches the chain, which refuses the
     spent authorization with an opaque 400: the seller's only reading of that
     is "rejected", and a paywall answers 402, "sign again", for a payment that
     already moved. With it the facilitator answers the first settle's success."""
-    first = _seller(facilitator).try_settle_payment(_payload(), Decimal("0.01"))
-    again = _seller(facilitator).try_settle_payment(_payload(), Decimal("0.01"))
+    first = _keyed_seller(facilitator).try_settle_payment(
+        _payload(), Decimal("0.01"), idempotency_scope=ORDER
+    )
+    again = _keyed_seller(facilitator).try_settle_payment(
+        _payload(), Decimal("0.01"), idempotency_scope=ORDER
+    )
 
     assert facilitator.executed == 1, f"the retry reached the chain: {again}"
     assert first["success"] and again["success"]
@@ -182,10 +195,14 @@ def test_a_repeated_settle_of_the_same_authorization_executes_once(facilitator):
 
 
 def test_the_same_authorization_under_other_terms_is_refused_not_executed(facilitator):
-    _seller(facilitator).settle_payment(_payload(), Decimal("0.01"))
+    _keyed_seller(facilitator).settle_payment(
+        _payload(), Decimal("0.01"), idempotency_scope=ORDER
+    )
 
     with pytest.raises(FacilitatorError) as caught:
-        _seller(facilitator).settle_payment(_payload(), Decimal("0.02"))
+        _keyed_seller(facilitator).settle_payment(
+            _payload(), Decimal("0.02"), idempotency_scope=ORDER
+        )
 
     assert facilitator.executed == 1
     assert caught.value.status_code == 409
@@ -194,12 +211,12 @@ def test_the_same_authorization_under_other_terms_is_refused_not_executed(facili
 
 def test_verify_and_settle_carry_different_keys_for_the_same_authorization(facilitator):
     """The store is one namespace; a verify cache must never answer a settle."""
-    client = _seller(facilitator)
+    client = _keyed_seller(facilitator)
     try:
-        client.verify_payment(_payload(), Decimal("0.01"))
+        client.verify_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
     except FacilitatorError:
         pass  # the local facilitator has no /verify; only the key it saw matters
-    client.settle_payment(_payload(), Decimal("0.01"))
+    client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
 
     keys = dict(facilitator.keys)
     assert keys["/verify"] and keys["/settle"]
@@ -231,15 +248,17 @@ def test_a_settle_still_in_flight_when_the_client_gives_up_moves_the_money_once(
     it again, it comes back from the cache with the first transaction."""
     local = _LocalFacilitator(hold_first_settle=1.5)
     try:
-        client = _seller(local)
+        client = _keyed_seller(local)
         monkeypatch.setattr(client, "_get_settle_timeout", lambda network: 0.3)
 
         with pytest.raises(X402TimeoutError) as caught:
-            client.settle_payment(_payload(), Decimal("0.01"))
+            client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
         assert is_transient_error(caught.value)
 
         time.sleep(1.8)  # the first settle finishes and writes its record
-        again = _seller(local).try_settle_payment(_payload(), Decimal("0.01"))
+        again = _keyed_seller(local).try_settle_payment(
+            _payload(), Decimal("0.01"), idempotency_scope=ORDER
+        )
 
         assert local.moved == 1
         assert again["success"]

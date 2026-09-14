@@ -141,22 +141,79 @@ class TestDerive:
         with pytest.raises(ValueError):
             derive_idempotency_key(_payload(), "refund")
 
+    def test_the_pinned_scoped_vector(self):
+        """The same for a scope: ``{"payload": <block>, "scope": <scope>}``, keys
+        sorted at every level and no whitespace, is exactly the text below, and
+        the key is its sha256. The digest was computed from the literal text,
+        not from this SDK."""
+        canonical = (
+            '{"payload":{"authorization":{"from":"0xSender","nonce":"0x01",'
+            '"to":"0x1234567890123456789012345678901234567890",'
+            '"validAfter":"0","validBefore":"9999999999","value":"10000"},'
+            '"signature":"0xsig"},"scope":"order-1"}'
+        )
+        assert json.dumps(
+            {"payload": _payload().payload, "scope": "order-1"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ) == canonical
+        assert derive_idempotency_key(_payload(), "settle", scope="order-1") == (
+            "x402-settle-1243a777189db338deaaa3956b485b2b64cfcadfe665e811c2112e4125309fe8"
+        )
+
+    def test_no_scope_is_the_unscoped_key(self):
+        assert derive_idempotency_key(_payload(), "settle", scope=None) == (
+            derive_idempotency_key(_payload(), "settle")
+        )
+
+    def test_the_same_authorization_and_scope_give_the_same_key(self):
+        assert derive_idempotency_key(_payload(), "settle", scope="order-1") == (
+            derive_idempotency_key(_payload(), "settle", scope="order-1")
+        )
+
+    def test_another_scope_gives_another_key(self):
+        key = derive_idempotency_key(_payload(), "settle", scope="order-1")
+        assert derive_idempotency_key(_payload(), "settle", scope="order-2") != key
+        assert derive_idempotency_key(_payload(), "settle") != key
+
+    def test_the_scope_does_not_take_the_block_out_of_the_key(self):
+        # Two sellers that name their purchases alike still get two keys.
+        assert derive_idempotency_key(_payload(nonce="0x02"), "settle", scope="order-1") != (
+            derive_idempotency_key(_payload(), "settle", scope="order-1")
+        )
+
+    def test_verify_and_settle_stay_namespaced_under_a_scope(self):
+        assert derive_idempotency_key(_payload(), "verify", scope="order-1") != (
+            derive_idempotency_key(_payload(), "settle", scope="order-1")
+        )
+
+    @pytest.mark.parametrize("scope", ["", "   "], ids=["empty", "blank"])
+    def test_an_empty_scope_is_refused(self, scope):
+        with pytest.raises(ValueError):
+            derive_idempotency_key(_payload(), "settle", scope=scope)
+
+    def test_a_scope_that_is_not_a_string_is_refused(self):
+        with pytest.raises(TypeError):
+            derive_idempotency_key(_payload(), "settle", scope=42)
+
 
 class TestOnTheWire:
-    def test_settle_sends_the_key(self, monkeypatch):
-        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)])
-        client.settle_payment(_payload(), Decimal("0.01"))
+    def test_settle_sends_the_scoped_key(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
+        client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
 
         headers = fake.calls[0]["headers"]
-        assert headers[IDEMPOTENCY_KEY_HEADER] == derive_idempotency_key(_payload(), "settle")
+        assert headers[IDEMPOTENCY_KEY_HEADER] == derive_idempotency_key(
+            _payload(), "settle", scope="order-1"
+        )
         assert headers["Content-Type"] == "application/json"
 
-    def test_verify_sends_its_own_key(self, monkeypatch):
-        client, fake = _wire(monkeypatch, [_Response(_VERIFY_OK)])
-        client.verify_payment(_payload(), Decimal("0.01"))
+    def test_verify_sends_its_own_scoped_key(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_VERIFY_OK)], send_idempotency_key=True)
+        client.verify_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
 
         assert fake.calls[0]["headers"][IDEMPOTENCY_KEY_HEADER] == derive_idempotency_key(
-            _payload(), "verify"
+            _payload(), "verify", scope="order-1"
         )
 
     def test_the_switch_sends_no_key(self, monkeypatch):
@@ -165,20 +222,36 @@ class TestOnTheWire:
             [_Response(_VERIFY_OK), _Response(_SETTLE_OK)],
             send_idempotency_key=False,
         )
-        client.verify_payment(_payload(), Decimal("0.01"))
-        client.settle_payment(_payload(), Decimal("0.01"))
+        client.verify_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
+        client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
 
         assert len(fake.calls) == 2
         assert all(IDEMPOTENCY_KEY_HEADER not in call["headers"] for call in fake.calls)
+
+    @pytest.mark.parametrize("scope", ["", "   "], ids=["empty", "blank"])
+    def test_a_blank_scope_is_no_scope(self, monkeypatch, scope):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
+        client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=scope)
+
+        assert IDEMPOTENCY_KEY_HEADER not in fake.calls[0]["headers"]
+
+    def test_a_scope_that_is_not_a_string_is_refused_before_anything_is_sent(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
+
+        with pytest.raises(TypeError):
+            client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=42)
+        assert fake.calls == []
 
     def test_the_timeout_fallback_asks_with_the_same_key(self, monkeypatch):
         """The fallback asks "did my settle land?". Under the same key, a settle
         that completed is answered from the facilitator's cache instead of being
         executed a second time."""
         client, fake = _wire(
-            monkeypatch, [httpx.TimeoutException("too slow"), _Response(_SETTLE_OK)]
+            monkeypatch,
+            [httpx.TimeoutException("too slow"), _Response(_SETTLE_OK)],
+            send_idempotency_key=True,
         )
-        client.settle_payment(_payload(), Decimal("0.01"))
+        client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
 
         assert len(fake.calls) == 2
         first, fallback = (call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls)
