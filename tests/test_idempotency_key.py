@@ -6,6 +6,7 @@ is, in the docstring of :func:`uvd_x402_sdk.client.derive_idempotency_key`.
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
 from decimal import Decimal
@@ -142,23 +143,47 @@ class TestDerive:
             derive_idempotency_key(_payload(), "refund")
 
     def test_the_pinned_scoped_vector(self):
-        """The same for a scope: ``{"payload": <block>, "scope": <scope>}``, keys
-        sorted at every level and no whitespace, is exactly the text below, and
-        the key is its sha256. The digest was computed from the literal text,
-        not from this SDK."""
+        """The same for a scope: the JSON array ``["x402-idempotency-scope/1",
+        <block>, <scope>]``, keys sorted at every level and no whitespace, is
+        exactly the text below, and the key is its sha256. The digest was
+        computed from the literal text, not from this SDK."""
         canonical = (
-            '{"payload":{"authorization":{"from":"0xSender","nonce":"0x01",'
+            '["x402-idempotency-scope/1",'
+            '{"authorization":{"from":"0xSender","nonce":"0x01",'
             '"to":"0x1234567890123456789012345678901234567890",'
             '"validAfter":"0","validBefore":"9999999999","value":"10000"},'
-            '"signature":"0xsig"},"scope":"order-1"}'
+            '"signature":"0xsig"},"order-1"]'
         )
         assert json.dumps(
-            {"payload": _payload().payload, "scope": "order-1"},
+            ["x402-idempotency-scope/1", _payload().payload, "order-1"],
             sort_keys=True,
             separators=(",", ":"),
         ) == canonical
         assert derive_idempotency_key(_payload(), "settle", scope="order-1") == (
-            "x402-settle-1243a777189db338deaaa3956b485b2b64cfcadfe665e811c2112e4125309fe8"
+            "x402-settle-ef86baf730caf7d60f5ec8c88e3c8904e211beb42139b9e37b28b0223a3d6083"
+        )
+
+    def test_the_pinned_non_ascii_scoped_vector(self):
+        """Non-ASCII text is hashed as its UTF-8 bytes, never as JSON escapes: the
+        scope enters the canonical text exactly as written below. Computed from
+        the literal text, like the vectors above."""
+        assert derive_idempotency_key(_payload(), "settle", scope="pedido-ñandú-€") == (
+            "x402-settle-28ffb4b65f92ae391d745f14df3bac41ffcce883b53b06261094fce7e1dbd629"
+        )
+
+    def test_a_block_shaped_like_a_scoped_material_does_not_derive_the_scoped_key(self):
+        """Domain separation. 0.83.1 hashed the object ``{"payload": <block>,
+        "scope": <scope>}`` for a scoped key, so the UNSCOPED key of a block built
+        with that shape was the scoped key. A block is always a JSON object and
+        the scoped material is now an array, so no shape of block reaches it."""
+        shaped = PaymentPayload(
+            x402Version=1,
+            scheme="exact",
+            network="base",
+            payload={"payload": _payload().payload, "scope": "order-1"},
+        )
+        assert derive_idempotency_key(shaped, "settle") != (
+            derive_idempotency_key(_payload(), "settle", scope="order-1")
         )
 
     def test_no_scope_is_the_unscoped_key(self):
@@ -257,3 +282,40 @@ class TestOnTheWire:
         first, fallback = (call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls)
         assert first is not None
         assert fallback == first
+
+    def test_a_settle_with_retry_sends_the_scoped_key_on_every_attempt(self, monkeypatch):
+        monkeypatch.setattr("uvd_x402_sdk.client.time.sleep", lambda seconds: None)
+        client, fake = _wire(
+            monkeypatch,
+            [
+                _Response({"error": "upstream unavailable"}, status_code=502),
+                _Response(_SETTLE_OK),
+            ],
+            send_idempotency_key=True,
+        )
+        client.settle_payment(
+            _payload(), Decimal("0.01"), retry=True, idempotency_scope="order-1"
+        )
+
+        expected = derive_idempotency_key(_payload(), "settle", scope="order-1")
+        sent = [call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls]
+        assert sent == [expected, expected]
+
+    def test_process_payment_sends_the_scoped_key_on_verify_and_on_settle(self, monkeypatch):
+        client, fake = _wire(
+            monkeypatch,
+            [_Response(_VERIFY_OK), _Response(_SETTLE_OK)],
+            send_idempotency_key=True,
+        )
+        envelope = {
+            "x402Version": 1,
+            "scheme": "exact",
+            "network": "base",
+            "payload": _payload().payload,
+        }
+        header = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
+        client.process_payment(header, Decimal("0.01"), idempotency_scope="order-1")
+
+        verify, settle = (call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls)
+        assert verify == derive_idempotency_key(_payload(), "verify", scope="order-1")
+        assert settle == derive_idempotency_key(_payload(), "settle", scope="order-1")
