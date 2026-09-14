@@ -84,8 +84,10 @@ class X402Config:
         resource_url: Resource URL sent to facilitator
         description: Description sent to facilitator
         x402_version: Protocol version to use (1, 2, or "auto")
-        send_idempotency_key: Send an ``Idempotency-Key`` derived from the
-            signed payload on ``/verify`` and ``/settle`` (default True)
+        send_idempotency_key: Send an ``Idempotency-Key`` on ``/verify`` and
+            ``/settle`` (default False: opt-in). Only calls that also pass
+            ``idempotency_scope`` carry it, derived from the signed payload and
+            that scope; see ``client.derive_idempotency_key``
         multi_payment: Multi-payment configuration for accepting multiple networks
     """
 
@@ -139,12 +141,15 @@ class X402Config:
     # x402 protocol version: 1, 2, or "auto" (detect from payload)
     x402_version: Literal[1, 2, "auto"] = "auto"
 
-    # Send an Idempotency-Key on /verify and /settle, derived from the signed
-    # payload (client.derive_idempotency_key). The facilitator refuses a keyed
-    # settle it cannot check against its store (503
-    # idempotency_store_unavailable, fail-closed on purpose); this is the
-    # switch for a caller that has to settle through such an outage.
-    send_idempotency_key: bool = True
+    # Opt-in since 0.83.1. When on, /verify and /settle carry an Idempotency-Key
+    # derived from the signed payload AND the caller's idempotency_scope
+    # (client.derive_idempotency_key); a call without a scope sends none and
+    # logs one warning per process. Off by default because a key derived from
+    # the payment alone does not tell two purchases of the same price apart,
+    # and only the caller knows which purchase a payment is for. With it on,
+    # the facilitator also refuses a keyed settle it cannot check against its
+    # store (503 idempotency_store_unavailable, fail-closed on purpose).
+    send_idempotency_key: bool = False
 
     # Multi-payment configuration
     multi_payment: Optional[MultiPaymentConfig] = None

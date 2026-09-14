@@ -92,8 +92,13 @@ _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 
 
 # =============================================================================
-# Idempotency-Key (sent on /verify and /settle unless the config turns it off)
+# Idempotency-Key (opt-in: X402Config.send_idempotency_key + idempotency_scope)
 # =============================================================================
+#
+# Off by default since 0.83.1. With the config on, a call carries the key only
+# when the caller also names the purchase with `idempotency_scope`: a key
+# derived from the payment alone does not tell two purchases of the same price
+# apart, because their requests are byte-identical.
 #
 # What the facilitator does with the header, measured on x402-rs 2.28.0
 # (`src/handlers.rs`, `post_settle`, and its `settle_idempotency_tests`):
@@ -104,8 +109,7 @@ _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 #   * same key + different hash -> 409 `idempotency_key_conflict`;
 #   * only a SUCCESSFUL settle is cached, so a failure never locks a retry out;
 #   * a store it cannot read -> 503 `idempotency_store_unavailable`, and it does
-#     NOT settle (fail-closed). `X402Config.send_idempotency_key=False` is the
-#     switch for a caller that has to settle through that;
+#     NOT settle (fail-closed); a call without the key does not depend on it;
 #   * `/verify` ignores the header today.
 
 #: The header the facilitator deduplicates a settle on.
@@ -114,50 +118,89 @@ IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 _IDEMPOTENCY_OPERATIONS = ("verify", "settle")
 
 
-def derive_idempotency_key(payload: PaymentPayload, operation: str) -> Optional[str]:
+def derive_idempotency_key(
+    payload: PaymentPayload, operation: str, scope: Optional[str] = None
+) -> Optional[str]:
     """The ``Idempotency-Key`` this SDK sends for ``operation`` on ``payload``.
 
-    ``x402-<operation>-<sha256 hex>`` over the signed ``payload`` block,
-    serialised with sorted keys and no whitespace. The same authorization gives
-    the same key in any process and on any run, so a buyer re-presenting the
-    same ``X-PAYMENT`` to a seller that restarted lands on the facilitator's
-    cached settle instead of executing it again.
+    ``x402-<operation>-<sha256 hex>``. Without ``scope``, over the signed
+    ``payload`` block serialised with sorted keys and no whitespace: the 0.83.0
+    key, unchanged. With ``scope``, over ``{"payload": <that block>, "scope":
+    <scope>}`` serialised the same way. The same authorization and the same
+    scope give the same key in any process and on any run, so a buyer
+    re-presenting the same ``X-PAYMENT`` for the same purchase to a seller that
+    restarted lands on the facilitator's cached settle instead of executing it
+    again.
 
+    * **The scope names the purchase, and only the caller knows it.** A key
+      derived from the signed block alone does not tell two purchases of the
+      same price apart: their settle requests are byte-identical. So
+      :class:`X402Client` sends a key only on a call that passes
+      ``idempotency_scope`` (see ``X402Config.send_idempotency_key``). One value
+      per purchase, stable across that purchase's retries, never shared by two.
     * **Namespaced by operation.** ``/verify`` and ``/settle`` carry the same
       payload and the facilitator's store is one namespace: one key for both
       would let a future verify cache answer a settle.
-    * **The signed block only, not the requirements.** A settle of the same
-      authorization under different terms must reuse the key, so the
-      facilitator refuses it (``409``) instead of running it.
-    * **Computable only from the ``X-PAYMENT``, which is not a secret.** The
-      store is one namespace shared by every caller of the facilitator. Whoever
-      sees the header before the seller settles (a proxy, a log) can settle an
-      authorization of THEIR OWN under this key first -- another body, one
-      micro-payment -- and the legitimate settle then gets
+    * **The signed block and the scope, not the requirements.** A settle of the
+      same authorization for the same purchase under different terms must
+      reuse the key, so the facilitator refuses it (``409``) instead of running
+      it.
+    * **Not a secret.** The store is one namespace shared by every caller of the
+      facilitator, and the key is computable by whoever holds the ``X-PAYMENT``
+      and the scope. Whoever has both before the seller settles (a proxy, a
+      log) can settle an authorization of THEIR OWN under this key first --
+      another body, one micro-payment -- and the legitimate settle then gets
       ``409 idempotency_key_conflict`` for 24 hours, which
       :func:`spent_nonce_evidence` reads as "already settled" while the real
-      authorization stays unpaid: check it on-chain before delivering. Closing
-      that belongs to the facilitator (scope the key by payer or ``payTo``, or
-      bind it to the body); ``X402Config.send_idempotency_key=False`` is the
-      switch meanwhile.
+      authorization stays unpaid: check it on-chain before delivering. A scope
+      nobody else can guess (a random order id, not a sequential one) keeps the
+      key out of their reach; closing it for good belongs to the facilitator
+      (scope the key by payer or ``payTo``, or bind it to the body).
     * ``None`` for an empty block: every empty payload would share one key.
 
     It does NOT catch a buyer who signs a NEW authorization for the same
-    purchase: different block, different key, a second settlement. That needs
-    a purchase-scoped key, which the SDK cannot invent.
+    purchase: different block, different key, a second settlement. The scope
+    does not change that, because the block still enters the key.
 
     Raises:
-        ValueError: If ``operation`` is not ``"verify"`` or ``"settle"``.
+        ValueError: If ``operation`` is not ``"verify"`` or ``"settle"``, or
+            ``scope`` is an empty or blank string.
+        TypeError: If ``scope`` is neither ``None`` nor a string.
     """
     if operation not in _IDEMPOTENCY_OPERATIONS:
         raise ValueError(
             f"operation must be one of {_IDEMPOTENCY_OPERATIONS}, got {operation!r}"
         )
+    if scope is not None:
+        if not isinstance(scope, str):
+            raise TypeError(f"scope must be a string, got {type(scope).__name__}")
+        if not scope.strip():
+            raise ValueError("scope must not be empty or blank")
     signed = payload.payload
     if not signed:
         return None
-    canonical = json.dumps(signed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    material: Any = signed if scope is None else {"payload": signed, "scope": scope}
+    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return f"x402-{operation}-{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+
+#: Set once the warning for a keyed call without a scope has been logged: one
+#: line per process, not one per payment.
+_missing_idempotency_scope_warned = False
+
+
+def _warn_missing_idempotency_scope() -> None:
+    """Log, once per process, that the key is on and a call named no purchase."""
+    global _missing_idempotency_scope_warned
+    if _missing_idempotency_scope_warned:
+        return
+    _missing_idempotency_scope_warned = True
+    logger.warning(
+        "X402Config.send_idempotency_key is on, but this call passed no "
+        "idempotency_scope, so no Idempotency-Key was sent. Pass the purchase's "
+        "own identifier (an order id) as idempotency_scope to verify_payment(), "
+        "settle_payment() and process_payment(). Logged once per process."
+    )
 
 
 #: The one reader of a facilitator error body, shared with the verdict
@@ -1056,17 +1099,32 @@ class X402Client:
     # Facilitator Communication
     # =========================================================================
 
-    def _facilitator_headers(self, payload: PaymentPayload, operation: str) -> Dict[str, str]:
+    def _facilitator_headers(
+        self,
+        payload: PaymentPayload,
+        operation: str,
+        idempotency_scope: Optional[str] = None,
+    ) -> Dict[str, str]:
         """JSON content type, plus the ``Idempotency-Key`` for ``operation``.
 
-        The key is left out when ``config.send_idempotency_key`` is off, or when
-        the payload has no signed block to derive it from.
+        The key goes out only when ``config.send_idempotency_key`` is on, the
+        caller named the purchase with ``idempotency_scope``, and the payload
+        has a signed block to derive it from. On without a scope (``None`` or
+        blank): no key and one warning per process, so the call goes out
+        exactly as with the config off -- never with a key that cannot tell
+        two purchases apart.
         """
         headers = {"Content-Type": "application/json"}
-        if self.config.send_idempotency_key:
-            key = derive_idempotency_key(payload, operation)
-            if key is not None:
-                headers[IDEMPOTENCY_KEY_HEADER] = key
+        if not self.config.send_idempotency_key:
+            return headers
+        if idempotency_scope is None or (
+            isinstance(idempotency_scope, str) and not idempotency_scope.strip()
+        ):
+            _warn_missing_idempotency_scope()
+            return headers
+        key = derive_idempotency_key(payload, operation, scope=idempotency_scope)
+        if key is not None:
+            headers[IDEMPOTENCY_KEY_HEADER] = key
         return headers
 
     def verify_payment(
@@ -1078,6 +1136,7 @@ class X402Client:
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
+        idempotency_scope: Optional[str] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -1092,6 +1151,10 @@ class X402Client:
                 Must match what settle_payment will use.
             eip712_domain: Override the EIP-712 domain params sent via `extra`
                 ({"name": ..., "version": ...})
+            idempotency_scope: The caller's own identifier for this purchase
+                (an order id), mixed into the ``Idempotency-Key``. Read only
+                when ``config.send_idempotency_key`` is on; without it no key
+                is sent. Pass the same value to ``settle_payment``.
 
         Returns:
             VerifyResponse from facilitator
@@ -1129,7 +1192,7 @@ class X402Client:
             response = client.post(
                 f"{self.facilitator_url_for(payload.network)}/verify",
                 json=verify_request,
-                headers=self._facilitator_headers(payload, "verify"),
+                headers=self._facilitator_headers(payload, "verify", idempotency_scope),
                 timeout=self.config.verify_timeout,
             )
 
@@ -1170,6 +1233,7 @@ class X402Client:
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
         retry: bool = False,
+        idempotency_scope: Optional[str] = None,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -1193,6 +1257,12 @@ class X402Client:
                 transient transport errors and 5xx — but NEVER on 4xx,
                 business failures, or a 5xx whose body already carries a
                 transaction hash (anti-double-settle guard).
+            idempotency_scope: The caller's own identifier for this purchase
+                (an order id), mixed into the ``Idempotency-Key``. Read only
+                when ``config.send_idempotency_key`` is on; without it no key
+                is sent. The same value on a retry of the same purchase is
+                what lets the facilitator answer a settle that already
+                completed from its cache.
 
         Returns:
             SettleResponse from facilitator
@@ -1207,6 +1277,7 @@ class X402Client:
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals,
+                idempotency_scope=idempotency_scope,
             )
 
         for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
@@ -1215,6 +1286,7 @@ class X402Client:
                     payload, expected_amount_usd, pay_to=pay_to,
                     asset=asset, eip712_domain=eip712_domain,
                     token_decimals=token_decimals,
+                    idempotency_scope=idempotency_scope,
                 )
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
@@ -1251,6 +1323,7 @@ class X402Client:
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
         retry: bool = False,
+        idempotency_scope: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Settle payment without raising on payment-flow errors.
@@ -1286,6 +1359,7 @@ class X402Client:
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals, retry=retry,
+                idempotency_scope=idempotency_scope,
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
@@ -1320,6 +1394,7 @@ class X402Client:
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
+        idempotency_scope: Optional[str] = None,
     ) -> SettleResponse:
         """Single settle attempt — the pre-retry settle_payment body, unchanged."""
         normalized_network = self.validate_network(payload.network)
@@ -1342,7 +1417,7 @@ class X402Client:
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
-        headers = self._facilitator_headers(payload, "settle")
+        headers = self._facilitator_headers(payload, "settle", idempotency_scope)
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
             f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
@@ -1463,6 +1538,7 @@ class X402Client:
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
+        idempotency_scope: Optional[str] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -1485,6 +1561,10 @@ class X402Client:
                 the USD amount is converted with the network's USDC decimals,
                 which mis-prices any token that does not share them. Pass it
                 whenever `asset` is passed. Applied to both steps.
+            idempotency_scope: The caller's own identifier for this purchase
+                (an order id), mixed into the ``Idempotency-Key`` of both
+                steps. Read only when ``config.send_idempotency_key`` is on;
+                without it no key is sent.
 
         Returns:
             PaymentResult with payer address, transaction hash, etc.
@@ -1506,6 +1586,7 @@ class X402Client:
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
             token_decimals=token_decimals,
+            idempotency_scope=idempotency_scope,
         )
 
         # Settle payment
@@ -1513,6 +1594,7 @@ class X402Client:
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
             token_decimals=token_decimals,
+            idempotency_scope=idempotency_scope,
         )
 
         # Build result
