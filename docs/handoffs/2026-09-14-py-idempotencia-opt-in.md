@@ -109,6 +109,7 @@ src/uvd_x402_sdk/config.py:152:    send_idempotency_key: bool = False
    y en cada reintento de esa compra.
 3. **Qué scope:** el identificador de la compra u orden que el vendedor crea ANTES del settle y
    guarda con la compra, para que sobreviva un reinicio. Por ejemplo, un UUID v4 por orden.
+   - Lo genera el vendedor y lo guarda con la compra; nunca es un valor tomado del request.
    - Nunca un valor que compartan dos compras: la URL del recurso, el precio, el pagador, la red,
      una constante o `resource_url`/`description` de la config.
    - Mejor aleatorio que secuencial: la llave es tan privada como el scope.
@@ -147,3 +148,21 @@ compra. Este PR no cambia esa clasificación: la fija de punta a punta por el ca
 | 2026-09-14 | Las integraciones no pasan `idempotency_scope` | `decorators.py` y las integraciones de Flask, Django y Lambda llaman `process_payment()` sin scope: con la llave prendida no la mandan y loguean el aviso | P2 | ABIERTA |
 | 2026-09-14 | `transient_503_response()` no marca `safeToRetry` en `503 idempotency_store_unavailable` | El cuerpo trae `error` y no `reason`, y `safeToRetry` solo se escribe cuando hay `reason`; ese 503 no ejecutó nada | P2 | ABIERTA |
 | 2026-09-14 | `verify_only()` no acepta `idempotency_scope` | Con la llave prendida loguea el aviso; `/verify` ignora el header hoy | P3 | ABIERTA |
+
+## Después del merge de 0.83.1 (va en la próxima versión)
+
+0.83.1 quedó mergeada y con tag `v0.83.1`. Un seguimiento, sin cambio de versión:
+
+- **El material de la llave con scope pasa a ser un arreglo JSON:**
+  `["x402-idempotency-scope/1", <bloque firmado>, <scope>]`. En 0.83.1 era el objeto
+  `{"payload", "scope"}`, así que la llave SIN scope de un bloque con esa forma coincidía con la
+  llave CON scope. Un bloque firmado siempre es un objeto JSON, de modo que ningún bloque llega
+  a un arreglo. La llave sin scope no cambia (el vector de 0.83.0 sigue igual). Las llaves con
+  scope de 0.83.1 no coinciden con las nuevas: un reintento que cruce la actualización no sale de
+  la cache, y su settle se ejecuta por su cuenta.
+- **Vectores fijados para el gemelo TypeScript** en `tests/test_idempotency_key.py`: con scope
+  ASCII y con scope no-ASCII (UTF-8, no escapes JSON). Reemplazan al vector con scope de 0.83.1.
+- **La guía del scope dice quién lo genera:** el vendedor, que lo guarda con la compra; nunca un
+  valor tomado del request (README, docstring de `derive_idempotency_key` y este handoff).
+- **Tests que antes faltaban:** `settle_payment(retry=True)` manda la llave con scope en cada
+  intento, `process_payment()` la manda también en verify, y el vector no-ASCII.
