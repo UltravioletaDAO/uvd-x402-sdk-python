@@ -216,7 +216,7 @@ pip install uvd-x402-sdk[signer]     # Alias for wallet (backward compat)
 
 # With framework support
 pip install uvd-x402-sdk[flask]      # Flask integration
-pip install uvd-x402-sdk[fastapi]    # FastAPI/Starlette integration
+pip install uvd-x402-sdk[fastapi]    # FastAPI/Starlette integration + ERC-8128 verifier
 pip install uvd-x402-sdk[django]     # Django integration
 pip install uvd-x402-sdk[aws]        # AWS Lambda helpers
 pip install uvd-x402-sdk[algorand]   # Algorand atomic group helpers
@@ -1229,6 +1229,59 @@ Never retried:
 - **A 5xx whose body already carries a transaction hash** — the facilitator broadcast the
   tx (e.g. a non-fatal post-settle hook failed); retrying would settle TWICE
 - **A 5xx whose body states `"retryable": false`** — the facilitator saying so outright
+
+### Idempotency-Key on verify and settle (on by default since 0.83.0)
+
+`verify_payment()` and `settle_payment()` send an `Idempotency-Key` derived from the signed
+payload: `derive_idempotency_key(payload, "settle")` is `x402-settle-<sha256>` over the signed
+block serialised with sorted keys and no whitespace (`x402-verify-…` for verify). The same
+authorization gives the same key in any process, so when a buyer re-presents the same
+`X-PAYMENT` to a seller that restarted, the facilitator answers from its cache of successful
+settles instead of executing again.
+
+What the facilitator does with it (x402-rs 2.28.0, `post_settle`):
+
+| Request | Answer |
+|---|---|
+| same key, same body, and that settle succeeded | the cached `200`, with `Idempotent-Replayed: true`; nothing executes |
+| same key, different body (same authorization, other terms) | `409 idempotency_key_conflict` |
+| the facilitator cannot read its store | `503 idempotency_store_unavailable`, and **no settle** |
+| `/verify` | header ignored today |
+
+- **Why it matters on EVM:** the UVD facilitator returns a used EIP-3009 authorization as an
+  opaque `400 contract_call_failed (ref: …)`. Without the key, the retry of a payment that
+  already moved reads as a rejection.
+- **What it does not catch:** a buyer who signs a *new* authorization for the same purchase.
+  Different signed block, different key.
+- **`process_payment()` verifies first**, and `/verify` has no cache: a credential that already
+  settled fails at verify before the settle cache is reached. The replay serves callers that
+  settle directly, `retry=True`, and the timeout fallback (which re-asks under the same key).
+- **Off switch:** `X402Client(..., send_idempotency_key=False)` (an `X402Config` field), for a
+  caller that has to settle while the facilitator's store is down.
+
+### Spent nonce: never answer 402 over a payment that may have moved
+
+`is_spent_nonce_error(exc)` says whether a failure means the authorization was **already
+used**; `spent_nonce_evidence(exc)` also says how it knows: `"structured"` for a code
+(`nonce_already_used`, `alreadySettled`, `idempotency_key_conflict`, …, normalised, anywhere in
+the details or the facilitator's JSON body) or `"wording"` for free text. The wording match is
+tarotof's substring match (it reads `NonceAlreadyUsed` and `NonceReused { .. }` inside prose and
+structs) minus two measured words that contain "used" without meaning it: `refused` and `unused`.
+It leans to the false positive on purpose: "check, you may have paid already" costs a lookup.
+A 402 tells the buyer to sign again, so check in this order:
+
+```python
+from uvd_x402_sdk import is_spent_nonce_error, is_transient_error, transient_503_response
+
+def answer(exc):
+    if getattr(exc, "transaction", None) or getattr(exc, "tx_hash", None):
+        return may_have_settled(exc)          # broadcast: check the chain
+    if is_spent_nonce_error(exc):
+        return may_have_settled(exc)          # already used: do NOT sign again
+    if is_transient_error(exc):
+        return transient_503_response(exc)    # no verdict: same credential, later
+    return payment_rejected(exc)              # 402
+```
 
 ### When the facilitator refuses a retry, it says where to look
 
@@ -2443,6 +2496,19 @@ MIT License - see LICENSE file.
 ---
 
 ## Changelog
+
+### v0.83.0 (2026-09-13)
+- **Added: `Idempotency-Key` on `/verify` and `/settle`, on by default.** `derive_idempotency_key(payload, op)` is `x402-<verify|settle>-<sha256>` over the signed payload block (sorted keys, no whitespace), so the same authorization gives the same key in any process. Measured on x402-rs 2.28.0 `post_settle`: the facilitator hashes the raw body; same key + same body is answered from its cache of SUCCESSFUL settles (`200`, `Idempotent-Replayed: true`) and nothing executes; same key + another body is `409 idempotency_key_conflict`. Until now a buyer re-presenting the same `X-PAYMENT` to a seller that restarted reached the chain again, and on EVM the UVD facilitator answers a used authorization with an opaque `400 contract_call_failed (ref)`, which a paywall reads as "rejected, sign again"
+- **Namespaced by operation, and the requirements stay out of the key.** One store, two endpoints carrying the same payload: a shared key would let a future verify cache answer a settle. And the same authorization under other terms has to land on the same key, so the facilitator refuses it instead of running it
+- **The timeout fallback re-asks under the same key**, so a settle that completed while the client timed out comes back from the cache
+- **Off switch: `X402Config.send_idempotency_key=False`.** Production runs the DynamoDB store, and a keyed settle the facilitator cannot check is `503 idempotency_store_unavailable` with no settle (fail-closed on purpose). **The header is on by default, so a consumer that bumps to 0.83.0 without reading this inherits that dependency:** while the facilitator's store is down, its settles answer 503 instead of settling
+- **What it does not do:** catch a buyer who signs a NEW authorization for the same purchase (different block, different key), or help `process_payment()` with a credential that already settled: verify runs first, simulates the transfer on EVM, and `/verify` has no cache
+- **The key is not a secret, and the store is shared.** Anyone who sees the `X-PAYMENT` before the seller settles can settle an authorization of their own under the same key first; the legitimate settle then gets `409 idempotency_key_conflict` for 24 hours, reads as "already settled", and stays unpaid. Check the chain before delivering on a conflict. The fix belongs to the facilitator (scope the key by payer or `payTo`)
+- **Added: `is_spent_nonce_error()` / `spent_nonce_evidence()`**, ported upstream from tarotof's paywall: does this failure say the authorization was ALREADY USED? `"structured"` (a code in any code-bearing field, normalised, nested) wins over `"wording"` (free text). What it serves is the answer a paywall gives: a 402 over an authorization that already settled is how a buyer pays twice
+- **A superset of the copy it came from, which is what upstream-first means.** It keeps tarotof's substring match — `NonceAlreadyUsed`, `NonceReused { .. }` and `nonce_used` inside prose and structs all read as spent — and subtracts exactly two measured words that contain "used" without meaning it: `refused` (the facilitator's own transient "the node refused this transaction on nonce or mempool grounds and never queued it") and `unused`. A whole-word match was tried first and missed four measured spent inputs, which is the direction that costs money. Pinned row by row against tarotof's own verdicts in `tests/test_spent_nonce.py` (table from `api/main.py` at commit `534d133d`), including its cheap false positives, kept on purpose
+- **Three things it reads that tarotof does not:** `409 idempotency_key_conflict` and `503 idempotency_cache_corrupt` — the facilitator caches only successful settles, so both mean a settle under this key already succeeded — and USDC's own revert, "authorization is used or canceled", which never says "nonce"
+- **Fixed: `pip install uvd-x402-sdk[fastapi]` can run the ERC-8128 verifier.** `verify_request` imports `eth_account` lazily and the extra did not bring it, so the server imported fine and raised `ModuleNotFoundError` on the first signed request. Measured in a fresh venv with the new `scripts/smoke_fastapi_extra.py`: `ModuleNotFoundError: No module named 'eth_account'` on 0.82.0, `verify vectors: 77 passed, 0 failed` now
+- 1139 tests pass (1052 before, 87 added, none lost). 17 targeted mutations of the key and the classifier (among them the whole-word match, subtracting `reused`, and each of the five stems): none survived
 
 ### v0.82.0 (2026-09-11)
 - **Added: the buyer decides against the offer in hand, before it signs.** `PurchasePolicy` + `X402Client.fetch(policy=...)` implement the contract the facilitator fixed in its P3 phase (`x402-rs` 2.25.0, `crates/x402-reqwest/src/policy.rs`), field for field and code for code, so a refusal means the same thing in the Rust buyer, this SDK and the TypeScript one. A catalog listing is a claim somebody else made about their own price; the `402` is the offer, and the two can differ legitimately, so the decision is made against **the offer**, every time

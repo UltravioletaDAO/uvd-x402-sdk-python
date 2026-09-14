@@ -71,7 +71,14 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
-from uvd_x402_sdk.client import X402Client, is_transient_error
+from uvd_x402_sdk.client import (
+    IDEMPOTENCY_KEY_HEADER,
+    X402Client,
+    derive_idempotency_key,
+    is_spent_nonce_error,
+    is_transient_error,
+    spent_nonce_evidence,
+)
 from uvd_x402_sdk.config import (
     X402Config,
     NetworkConfig,
@@ -467,6 +474,10 @@ __all__ = [
     # Main client
     "X402Client",
     "is_transient_error",
+    "is_spent_nonce_error",
+    "spent_nonce_evidence",
+    "derive_idempotency_key",
+    "IDEMPOTENCY_KEY_HEADER",
     "build_uvd_feedback_params",
     "UVD_FEEDBACK_ROLES",
     "UVD_PRODUCTS",
