@@ -151,10 +151,11 @@ contiene "used".** El mensaje transitorio del propio facilitador para
 `Reason::NonceOrMempool` (`src/chain/failure.rs`, `client_message()`), *"The node refused
 this transaction on nonce or mempool grounds and never queued it. Retry later."*, sale
 como nonce gastado. Le diría al comprador "no reintentes, quizá ya pagaste" sobre algo que
-nunca se encoló. El port compara por palabra completa (`_` y `-` cuentan como separador,
-así que `nonce_used` sigue siendo dos palabras) y lo fija con ese mensaje y con
-`"the nonce is unused"`. En la mutación "subcadena como tarotof" esos dos tests se ponen
-rojos.
+nunca se encoló. **Estado final (ronda 2):** el port conserva la subcadena de tarotof y
+antes de buscar resta solo las palabras medidas `refused` y `unused`. La ronda 1 la había
+cambiado por palabra completa, y eso perdía cuatro casos gastados que tarotof sí leía (ver
+*Ronda 2* al final). Lo fijan ese mensaje, `"the nonce is unused"` y la tabla contra
+tarotof `534d133d` en `tests/test_spent_nonce.py`.
 
 **Corrección 2: `idempotency_key_conflict` entra al conjunto de códigos.** El facilitador
 solo cachea éxitos, así que con la llave derivada un 409 de conflicto significa "esta
@@ -245,8 +246,9 @@ tagea `v0.83.0`. Yo no tageo ni publico.
 - **Tag y publicación a PyPI:** te tocan a vos, según el spec.
 - **La mitad TypeScript de la fila 88 y el port del clasificador a TS:** es una task
   aparte con `--deps` sobre esta. Tiene que reproducir el vector fijado de arriba, la
-  separación por operación, la comparación por palabra completa y
-  `idempotency_key_conflict` en el conjunto de códigos.
+  separación por operación, la tabla superset contra tarotof de `tests/test_spent_nonce.py`
+  (subcadena menos `refused`/`unused`) y `idempotency_key_conflict` /
+  `idempotency_cache_corrupt` en el conjunto de códigos.
 - **Adoptarlo en tarotof y 402milly:** fuera del encargo. Para tarotof: reemplazar
   `_codigo_de_nonce_gastado` / `_huele_a_nonce_gastado` por `spent_nonce_evidence` (su
   `deteccion` pasa a `"structured"`/`"wording"`) y heredar la corrección de "refused".
@@ -278,3 +280,78 @@ Para otros repos (no escritas allá):
 | tarotof | Adoptar `spent_nonce_evidence` al subir a 0.83.0 (el 409 de conflicto hoy sale como 402) | P1 |
 | 402milly | Comparar `handler.py:23`/`:955` contra `spent_nonce_evidence` antes de adoptar | P2 |
 | uvd-x402-sdk-python | `publish.yml:17-19` dice "OIDC trusted publishing, no token to steal", pero `:35` sube con `secrets.PYPI_TOKEN`: el comentario o el paso miente | P2 |
+
+---
+
+# Ronda 2 (2026-09-14): el clasificador tenía que CONTENER a tarotof
+
+Verificación independiente de c0der sobre `eab40f70`: MERGEABLE_CON_CAMBIOS, 0 P0, 1 P1.
+
+## El P1, reproducido
+
+El match por palabra entera de la ronda 1 leía **menos** que tarotof justo en la
+dirección cara. Corriendo el clasificador original (`tarotof/api/main.py` en el
+commit `534d133d`) contra este SDK en `eab40f70`, sobre el mismo corpus:
+
+| entrada | tarotof | SDK eab40f70 |
+|---|---|---|
+| `invalid payment: NonceAlreadyUsed` | wording | **None** |
+| `NonceReused { from: "G", nonce: 5 }` | wording | **None** |
+| `nonce reused` | wording | **None** |
+| `PaymentSettlementError` con reason `error: NonceAlreadyUsed` | wording | **None** |
+
+`\bnonces?\b` no matchea camelCase pegado y la lista de palabras no tenía
+`reused`. Un paywall que adoptara la función contestaba **402** y el comprador
+firmaba otra autorización por un pago que ya se había movido. Además rompía el
+cierre upstream-first de la fila 63: tarotof no lo podía adoptar sin regresión.
+
+## El arreglo
+
+`_mentions_spent_nonce` vuelve a la **subcadena de tarotof** — lee camelCase,
+`NonceReused { .. }` y `nonce_used` dentro de prosa y de structs — y la única
+diferencia es **sustractiva y nombrada**: `_NOT_SPENT_WORDS` (`refused`,
+`unused`) se quitan del texto antes de buscar. Así el arreglo de la ronda 1 (el
+`NonceOrMempool` transitorio del facilitador, que dice "refused", no se lee como
+nonce gastado) se conserva sin costarle a nadie un cobro.
+
+Los falsos positivos baratos que hereda de tarotof quedan **a propósito** y
+escritos en el docstring: el nonce del EOA ("nonce has already been used"), las
+negaciones ("no nonce consumed", "the nonce was not used") y un cuerpo que trae
+`nonce` al lado de `gas_used`. Cuestan una consulta; la dirección contraria
+cuesta plata.
+
+## Los P2 del reporte
+
+| P2 | Qué hice |
+|---|---|
+| Falta la frase del revert real de USDC | `"authorization is used"` entra a `_SPENT_NONCE_PHRASES` (`FiatTokenV2: authorization is used or canceled`). Test en el cuerpo del facilitador y en un `PaymentVerificationError` |
+| `idempotency_cache_corrupt` se leía como transitorio | Entra al conjunto de códigos: x402-rs lo emite **solo** en la rama de replay, con un registro del MISMO hash de cuerpo, es decir un settle de esta misma petición que salió bien. Como transitorio eran 24 h de 503 sobre un pago que se movió |
+| Falsos positivos compartidos con tarotof | Documentados en el docstring y fijados en la tabla (filas `cheap-*`) en vez de agregar negaciones: agregarlas rompería el superset y devolvería la dirección cara |
+| La llave global se puede ocupar antes que el vendedor | Corregido el docstring de `derive_idempotency_key` (decía que quien tiene el `X-PAYMENT` "podría liquidar el pago de todos modos", que no es el mismo efecto), más un párrafo en el README y una fila de backlog para el facilitador. Quien vea el header antes del settle puede liquidar una autorización SUYA bajo esa llave y dejar 24 h de 409 sobre la legítima, que queda sin cobrar: verificar en cadena antes de entregar |
+| El default arrastra una dependencia de DynamoDB | Dicho en el changelog: el consumidor que bumpee sin leer hereda que, con el store caído, sus settles contestan 503 en vez de liquidar |
+| El stub no es el binario y cachea sincrónico | `_LocalFacilitator` ahora escribe el registro **después** del settle y sin lock sobre la llave, como x402-rs, y hay un caso `in_flight`: el cliente se cansa mientras el primer settle corre, el fallback llega antes del registro, la cadena rechaza la autorización gastada, y lo que el vendedor recibe es **transitorio** (503, misma credencial), con la re-presentación posterior saliendo de la cache. Dinero movido: 1 |
+| Conflicto con el PR #2 en `config.py` | No es código de acá: mergear #18 primero y que #2 rebasee |
+
+## Rojo y verde de la ronda 2
+
+Contra `eab40f70` (`PYTHONPATH` al worktree de ese commit): **13 failed, 61
+passed** — las 4 regresiones (en su test propio y en la tabla), los dos de
+`idempotency_cache_corrupt` y los tres del revert de USDC. Con el arreglo: **74
+passed** en esos dos archivos, y **1139 passed, 1 skipped** en la suite completa
+(eran 1086; 53 tests nuevos en esta ronda, 87 sobre la base 0.82.0).
+
+**17 mutaciones dirigidas, 0 sobreviven**, entre ellas: el match por palabra
+entera del primer corte (mata los 4 casos), restar de más (`reused` en
+`_NOT_SPENT_WORDS`, mata `prose-reused`), no restar nada (mata `refused` y
+`unused`), sacar la frase de USDC, sacar `idempotency_cache_corrupt`, sacar
+`idempotency_key_conflict`, y cada uno de los cinco stems por separado.
+
+## Pre-CI de la ronda 2
+
+| Paso | Resultado |
+|---|---|
+| `ci.yml:25` + `ci.yml:28` en venv nuevo (3.11) | **1139 passed, 1 skipped** |
+| `ci.yml:36-83` cross-language contra clon limpio de TS (`919d580`) | vectores `up to date`, exit 0; **CROSS-LANGUAGE CONFORMANCE PASSED — 430 checks across 8 phases**, exit 0 |
+| build | `uvd_x402_sdk-0.83.0-py3-none-any.whl` |
+| ruff | `client.py` 52, **igual que en `eab40f70`**; en `tests/test_spent_nonce.py` la tabla fija lleva `# ruff: noqa: E501` con su motivo |
+| mutaciones | 17, **0 sobreviven** |

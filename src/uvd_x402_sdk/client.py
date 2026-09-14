@@ -129,10 +129,17 @@ def derive_idempotency_key(payload: PaymentPayload, operation: str) -> Optional[
     * **The signed block only, not the requirements.** A settle of the same
       authorization under different terms must reuse the key, so the
       facilitator refuses it (``409``) instead of running it.
-    * **Unguessable to anyone who does not already hold the credential.** The
-      store is shared by every caller of the facilitator, which is why its own
-      MCP tool asks for an unguessable key. This one is computable only from the
-      ``X-PAYMENT``, and whoever holds that could settle the payment anyway.
+    * **Computable only from the ``X-PAYMENT``, which is not a secret.** The
+      store is one namespace shared by every caller of the facilitator. Whoever
+      sees the header before the seller settles (a proxy, a log) can settle an
+      authorization of THEIR OWN under this key first -- another body, one
+      micro-payment -- and the legitimate settle then gets
+      ``409 idempotency_key_conflict`` for 24 hours, which
+      :func:`spent_nonce_evidence` reads as "already settled" while the real
+      authorization stays unpaid: check it on-chain before delivering. Closing
+      that belongs to the facilitator (scope the key by payer or ``payTo``, or
+      bind it to the body); ``X402Config.send_idempotency_key=False`` is the
+      switch meanwhile.
     * ``None`` for an empty block: every empty payload would share one key.
 
     It does NOT catch a buyer who signs a NEW authorization for the same
@@ -341,12 +348,27 @@ _SPENT_NONCE_CODES = frozenset(
         # settle under that key already succeeded with another body. Under the
         # key derive_idempotency_key() sends, that is this authorization.
         "idempotencykeyconflict",
+        # Same reasoning: x402-rs answers `503 idempotency_cache_corrupt` only
+        # when the record under this key carries the SAME body hash -- a settle
+        # of this exact request that succeeded -- and cannot be parsed back.
+        "idempotencycachecorrupt",
     }
 )
 _SPENT_NONCE_CODE_FIELDS = ("code", "errorCode", "error_code", "error", "reason", "status")
-_SPENT_NONCE_PHRASES = ("already used", "already settled", "already processed")
-_NONCE_WORD = re.compile(r"\bnonces?\b")
-_SPENT_WORD = re.compile(r"\b(?:used|spent|consumed|duplicated?|replay(?:ed)?)\b")
+_SPENT_NONCE_PHRASES = (
+    "already used",
+    "already settled",
+    "already processed",
+    # USDC's own revert for a used or cancelled EIP-3009 authorization
+    # (FiatTokenV2: "authorization is used or canceled").
+    "authorization is used",
+)
+_SPENT_NONCE_STEMS = ("used", "spent", "consumed", "duplicate", "replay")
+#: Whole words that contain a spent stem without meaning it, removed before the
+#: substring match. The ONLY place this reads less than tarotof, each one
+#: measured: "refused" is in the facilitator's transient NonceOrMempool message,
+#: "unused" says the opposite.
+_NOT_SPENT_WORDS = re.compile(r"\b(?:refused|unused)\b")
 
 
 def _normalised_code(value: Any) -> str:
@@ -372,18 +394,26 @@ def _spent_nonce_code(data: Any) -> Optional[str]:
 
 
 def _mentions_spent_nonce(text: Optional[str]) -> bool:
-    """Free text saying the authorization was used, matched by WHOLE WORD.
+    """Free text saying the authorization was used.
 
-    tarotof matched substrings, and ``"refused"`` contains ``"used"``: the
-    facilitator's own "the node refused this transaction on nonce or mempool
-    grounds and never queued it" -- a transient failure, where retrying the SAME
-    credential is right -- read as a spent authorization. ``_`` and ``-`` count
-    as separators, so ``nonce_used`` is still two words.
+    tarotof's SUBSTRING match, kept on purpose: it reads ``NonceAlreadyUsed``,
+    ``NonceReused { .. }`` and ``nonce_used`` inside prose and structs. A
+    whole-word match (this function's first cut) missed all three -- the
+    expensive direction, a 402 over a payment that already moved -- so this
+    must read at least everything tarotof reads. The one change is subtractive
+    and named: ``_NOT_SPENT_WORDS`` go first, because "refused" contains "used"
+    and the facilitator's transient "the node refused this transaction on nonce
+    or mempool grounds and never queued it" read as a spent authorization.
+
+    Known false positives, kept because they cost a lookup and not a payment: a
+    node's own "nonce has already been used" (the facilitator's signer nonce),
+    negations ("no nonce consumed", "the nonce was not used") and a body that
+    echoes a ``nonce`` field next to ``gas_used``.
     """
-    lowered = re.sub(r"[_\-]+", " ", (text or "").lower())
+    lowered = _NOT_SPENT_WORDS.sub(" ", (text or "").lower())
     if any(phrase in lowered for phrase in _SPENT_NONCE_PHRASES):
         return True
-    return bool(_NONCE_WORD.search(lowered) and _SPENT_WORD.search(lowered))
+    return "nonce" in lowered and any(stem in lowered for stem in _SPENT_NONCE_STEMS)
 
 
 def spent_nonce_evidence(exc: Exception) -> Optional[str]:
