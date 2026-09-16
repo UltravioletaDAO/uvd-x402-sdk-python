@@ -55,7 +55,7 @@ src/uvd_x402_sdk/
 | Token | Ethereum/Avalanche | Base |
 |-------|-------------------|------|
 | EURC | `"Euro Coin"` | `"EURC"` |
-| USDC | `"USD Coin"` | `"USDC"` on (Celo/HyperEVM/Unichain/Monad) |
+| USDC | `"USD Coin"` | `"USDC"` on (Celo/HyperEVM/Unichain/Monad/Arc mainnet + testnet) |
 
 ### Token Configuration Structure
 
@@ -82,6 +82,7 @@ celo.usdc_domain_name = "USDC"
 hyperevm.usdc_domain_name = "USDC"
 unichain.usdc_domain_name = "USDC"
 monad.usdc_domain_name = "USDC"
+arc_testnet.usdc_domain_name = "USDC"   # name() medido on-chain
 ```
 
 ## Payment Processing with Custom Tokens
@@ -145,6 +146,12 @@ payment_requirements = {
 - EIP-712 domain name: `Bridged USDC (SKALE Bridge)` (NOT "USDC" or "USD Coin")
 - Gasless transactions (CREDIT gas token), legacy tx only (no EIP-1559)
 - No escrow support (blocked on Cancun EVM compatibility)
+
+### Arc mainnet and testnet (evm.py, v0.84.0)
+- `arc` / `eip155:5042` and `arc-testnet` / `eip155:5042002` are independently verified networks. See `docs/networks/arc.md`.
+- Both use USDC `0x3600000000000000000000000000000000000000`, 6 payment decimals and EIP-712 `USDC` / `2`. Native gas uses 18 decimals on the same balance; never use that precision for a signed payment.
+- `tests/test_arc_testnet.py` preserves the decimal regression; `tests/test_arc_networks.py` checks real signatures and cross-network domain isolation.
+- Support covers direct `exact` EOA USDC payments. EURC, Gateway, escrow, `upto`, ERC-8004 writes and EIP-6492 are not enabled for Arc.
 
 ### ERC-8004 Trustless Agents (erc8004.py)
 - Supports 20 networks: 18 EVM + Solana + Solana-devnet
