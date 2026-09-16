@@ -462,6 +462,7 @@ _NETWORK_TO_CAIP2 = {
     "skale-base-sepolia": "eip155:324705682",
     "robinhood": "eip155:4663",
     "robinhood-testnet": "eip155:46630",
+    "arc-testnet": "eip155:5042002",
     # SVM chains (solana:genesisHash first 32 chars)
     "solana": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
     "fogo": "solana:fogo",  # Placeholder - update when known

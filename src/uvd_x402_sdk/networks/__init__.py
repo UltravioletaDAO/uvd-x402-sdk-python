@@ -4,10 +4,10 @@ Network configurations for x402 payments.
 This module provides configuration for all supported blockchain networks,
 including USDC contract addresses, RPC URLs, and network-specific parameters.
 
-The SDK supports 25 blockchain networks across 7 network families:
-- 15 EVM networks: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
+The SDK supports 26 blockchain networks across 7 network families:
+- 16 EVM networks: Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche,
                    Celo, HyperEVM, Unichain, Monad, Scroll, SKALE Base,
-                   SKALE Base Sepolia, Robinhood, Robinhood Testnet
+                   SKALE Base Sepolia, Robinhood, Robinhood Testnet, Arc Testnet
 - 2 SVM networks: Solana, Fogo
 - 1 NEAR network: NEAR Protocol
 - 1 Stellar network: Stellar
@@ -15,10 +15,11 @@ The SDK supports 25 blockchain networks across 7 network families:
 - 2 Sui networks: Sui mainnet, Sui testnet
 - 2 XRPL networks: XRP Ledger mainnet, XRP Ledger testnet (native XRP)
 
-(13 EVM mainnets + 2 EVM testnets)
+(13 EVM mainnets + 3 EVM testnets)
 
 Multi-token support:
-- USDC: All EVM chains except Robinhood
+- USDC: All EVM chains except Robinhood. On Arc the SAME balance is exposed as
+        18-decimal native gas and 6-decimal ERC-20; payments use the 6.
 - EURC: Ethereum, Base, Avalanche
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui
 - PYUSD: Ethereum

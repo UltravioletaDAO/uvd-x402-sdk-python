@@ -1,0 +1,75 @@
+{
+  "_source": "https://rpc.testnet.arc.io, read-only eth_getBalance + USDC.balanceOf, pinned at one block",
+  "_why": "On Arc the SAME USDC balance is exposed at 18 decimals (native gas) and 6 (ERC-20). x402 amounts travel in the 6. This capture is the measurement the registry's `usdc_decimals = 6` rests on: erc20_units_6 == native_wei_18 // 10**12 on every row.",
+  "chain_id": 5042002,
+  "block_number": 62335533,
+  "usdc_address": "0x3600000000000000000000000000000000000000",
+  "erc20_view_divisor": "1000000000000",
+  "blocked_genesis_address": {
+    "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    "note": "index 1 of the public Foundry test mnemonic. isBlacklisted() -> true on Arc testnet, and it is FUNDED. An end-to-end test that reaches for a stock Anvil account can land here and read the revert as a facilitator bug. Index 0 (0xf39F...2266) is not blacklisted.",
+    "is_blacklisted": true
+  },
+  "balances": [
+    {
+      "address": "0xe1cfeebdf7b5a6a28a467ab236e667ea195ac08c",
+      "native_wei_18": "154569251101374926157640",
+      "erc20_units_6": "154569251101"
+    },
+    {
+      "address": "0xf066dce2877cd751308fac253c34b757e8372ff3",
+      "native_wei_18": "190379926356477511",
+      "erc20_units_6": "190379"
+    },
+    {
+      "address": "0x73742278c31a76dbb0d2587d03ef92e6e2141023",
+      "native_wei_18": "347012905000000000000",
+      "erc20_units_6": "347012905"
+    },
+    {
+      "address": "0xc5798c2e49111a7f2b4c3989b32d1f766fc3f34d",
+      "native_wei_18": "31088795608120514603",
+      "erc20_units_6": "31088795"
+    },
+    {
+      "address": "0x49f9636fe15883e16d5e356a4ea08c9fe6bc219b",
+      "native_wei_18": "388354560949000000000000",
+      "erc20_units_6": "388354560949"
+    },
+    {
+      "address": "0x3c3380cdfb94dfeeaa41cad9f58254ae380d752d",
+      "native_wei_18": "33117443672172637102815712",
+      "erc20_units_6": "33117443672172"
+    },
+    {
+      "address": "0x3600000000000000000000000000000000000000",
+      "native_wei_18": "189028000000000000000",
+      "erc20_units_6": "189028000"
+    },
+    {
+      "address": "0x80c90b222804a010f560ef75da0e6dd6664fe87c",
+      "native_wei_18": "9843999453337678753",
+      "erc20_units_6": "9843999"
+    },
+    {
+      "address": "0x0abeeb47ebea20ee61656c86e4803cc09f12662a",
+      "native_wei_18": "2752125229656127011",
+      "erc20_units_6": "2752125"
+    },
+    {
+      "address": "0xf8b5be7bdca18649ab86f47d5aa873a6ffa55738",
+      "native_wei_18": "22611358387575825076",
+      "erc20_units_6": "22611358"
+    },
+    {
+      "address": "0xa40886ef10627541f79c81848b97a03a01bab681",
+      "native_wei_18": "147048198456072204127",
+      "erc20_units_6": "147048198"
+    },
+    {
+      "address": "0x76880abf3f2eb1b70f5b2976104ec5c598baed61",
+      "native_wei_18": "1247672539644586936",
+      "erc20_units_6": "1247672"
+    }
+  ]
+}

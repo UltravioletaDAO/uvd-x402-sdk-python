@@ -6,14 +6,15 @@ Each chain uses ERC-3009 TransferWithAuthorization for USDC transfers.
 
 Important EIP-712 domain considerations:
 - Most chains use 'USD Coin' as the domain name
-- Celo, HyperEVM, Unichain, Monad use 'USDC' as the domain name
+- Celo, HyperEVM, Unichain, Monad and Arc Testnet use 'USDC' as the domain name
 - SKALE Base uses 'Bridged USDC (SKALE Bridge)' as the domain name
 - Robinhood Chain settles in Paxos USDG (domain 'Global Dollar', version '1').
   USDG's on-chain version() getter REVERTS, so this domain can never be
   resolved on-chain and MUST be sent in PaymentRequirements.extra.
 
 Multi-token support:
-- USDC: All chains except Robinhood (6 decimals)
+- USDC: All chains except Robinhood (6 decimals -- including Arc, whose NATIVE
+  gas asset is the same balance at 18 decimals; payments use the 6-decimal view)
 - EURC: Ethereum, Base, Avalanche (6 decimals)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
@@ -439,6 +440,66 @@ ROBINHOOD_TESTNET = NetworkConfig(
     },
 )
 
+# Arc Testnet (Circle Arc, EIP-1559, gas paid in USDC)
+# Circle's Arc pays gas in USDC itself, so the SAME balance is exposed twice:
+#
+#   native (eth_getBalance)  ->  18 decimals, gas only
+#   ERC-20 (balanceOf)       ->   6 decimals, payments
+#   balanceOf(a) == eth_getBalance(a) // 10**12   (measured live on 11
+#   addresses of block 62,334,983, every one an exact match)
+#
+# THE PAYMENT AMOUNT TRAVELS IN 6. Writing 18 here — the number Arc's own docs
+# print next to "native USDC" — multiplies every charge by 10**12: $0.01 becomes
+# $10,000,000,000. The native 18 lives in `extra_config` as a documented fact of
+# the chain and is read by NOTHING on the payment path; `tests/test_arc_testnet.py`
+# mounts that bad state on purpose and goes red for it.
+#
+# Verified live against https://rpc.testnet.arc.io on 2026-09-15:
+#   eth_chainId          -> 0x4cef52 (5042002)
+#   decimals()           -> 6
+#   name() / version()   -> "USDC" / "2"
+#   DOMAIN_SEPARATOR()   -> 0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0
+#   recomputed locally from {name:"USDC", version:"2", chainId:5042002,
+#   verifyingContract:0x3600...0000} -> identical.
+# The RPC answers 403 to a default User-Agent: a transport failure there is not
+# an absent chain.
+#
+# EURC (0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a, domain "EURC"/"2") exists on
+# this chain and is deliberately NOT registered: it prices in euros and has not
+# passed its own end-to-end test. Testnet only — Circle publishes no mainnet
+# addresses for Arc, so there is no `arc` mainnet entry to infer.
+ARC_TESTNET = NetworkConfig(
+    name="arc-testnet",
+    display_name="Arc Testnet",
+    network_type=NetworkType.EVM,
+    chain_id=5042002,
+    usdc_address="0x3600000000000000000000000000000000000000",
+    usdc_decimals=6,  # ERC-20 interface. NOT the native gas asset's 18.
+    usdc_domain_name="USDC",  # on-chain name() — not "USD Coin"
+    usdc_domain_version="2",
+    rpc_url="https://rpc.testnet.arc.io",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x3600000000000000000000000000000000000000",
+            decimals=6,
+            name="USDC",
+            version="2",
+        ),
+    },
+    extra_config={
+        # Documented facts of the chain, none of them on the payment path.
+        "native_gas_asset": "USDC",
+        "native_gas_decimals": 18,  # NEVER an amount: see the block comment above
+        "erc20_view_divisor": 10**12,  # balanceOf == eth_getBalance // this
+        "explorer": "https://testnet.arcscan.app",
+        "faucet": "https://faucet.circle.com",
+        "min_max_fee_per_gas_wei": 20_000_000_000,  # 20 Gwei documented minimum
+        "testnet": True,
+    },
+)
+
+
 # =============================================================================
 # Register all EVM networks
 # =============================================================================
@@ -459,6 +520,7 @@ _EVM_NETWORKS = [
     SKALE_TESTNET,
     ROBINHOOD,
     ROBINHOOD_TESTNET,
+    ARC_TESTNET,
 ]
 
 for network in _EVM_NETWORKS:
@@ -476,7 +538,8 @@ def get_usdc_domain_name(network_name: str) -> str:
         Domain name string ('USD Coin' or 'USDC')
     """
     # Networks that use 'USDC' instead of 'USD Coin'
-    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad"}
+    # (Arc's native USDC reports name() == "USDC" on-chain; verified 2026-09-15.)
+    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad", "arc-testnet"}
 
     # SKALE Base uses bridged USDC with a unique domain name
     skale_domain_networks = {"skale-base", "skale-base-sepolia"}
