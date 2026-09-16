@@ -2,13 +2,13 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **25 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **26 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.26.0**: Robinhood Chain support (`robinhood` / `robinhood-testnet`, chain IDs 4663 / 46630), settling in Paxos **USDG** (EIP-712 domain `Global Dollar` version `1`, sent via `extra` since `version()` reverts on-chain).
+**New in v0.84.0**: Circle **Arc testnet** (`arc-testnet`, chain ID 5042002, `eip155:5042002`), USDC `0x3600...0000` with EIP-712 domain `USDC` version `2`. Arc pays gas in USDC, so the same balance shows **18 decimals as native gas and 6 as ERC-20** — **payment amounts use the 6**.
 
 ## Features
 
-- **25 Networks**: EVM chains (15 including Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
+- **26 Networks**: EVM chains (16 including Circle Arc testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
 - **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
 - **x402 v1 & v2**: Full support for both protocol versions with auto-detection
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
@@ -180,6 +180,7 @@ def premium_endpoint(payment_result):
 | SKALE Testnet | EVM | 324705682 | `eip155:324705682` | Active |
 | Robinhood | EVM | 4663 | `eip155:4663` | Active |
 | Robinhood Testnet | EVM | 46630 | `eip155:46630` | Active |
+| Arc Testnet | EVM | 5042002 | `eip155:5042002` | Active (testnet only) |
 | Solana | SVM | - | `solana:5eykt...` | Active |
 | Fogo | SVM | - | `solana:fogo` | Active |
 | NEAR | NEAR | - | `near:mainnet` | Active |
@@ -201,6 +202,8 @@ def premium_endpoint(payment_result):
 | PYUSD | Ethereum | 6 |
 | USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |
 | USDG | Robinhood, Robinhood Testnet | 6 |
+
+> **Arc's USDC has two precisions and only one of them is money.** Circle's Arc pays gas in USDC, so a single balance is exposed as 18-decimal native gas (`eth_getBalance`) and as 6-decimal ERC-20 (`balanceOf`), with `balanceOf(a) == eth_getBalance(a) // 10**12`. **x402 amounts travel in the 6-decimal view.** Signing `$0.01` against 18 decimals authorizes `10000000000000000` base units instead of `10000` — a 10^12 overcharge. The SDK registers `arc-testnet` at 6 decimals and `tests/test_arc_testnet.py` turns red on 18. Arc is **testnet only**: Circle publishes no mainnet contract addresses, so there is no `arc` mainnet entry.
 
 > **Robinhood Chain settles in Paxos USDG, not USDC.** USDG's on-chain `version()` getter reverts, so clients MUST send the EIP-712 domain `{"name": "Global Dollar", "version": "1"}` in `PaymentRequirements.extra`. The SDK carries this automatically for the `robinhood` / `robinhood-testnet` networks.
 
@@ -2527,7 +2530,12 @@ MIT License - see LICENSE file.
 
 ## Changelog
 
-### Unreleased
+### v0.84.0 (2026-09-16)
+- **Added: Circle Arc testnet** (`arc-testnet`, chain ID **5042002**, CAIP-2 `eip155:5042002`), EVM family, in the client's default network list. USDC `0x3600000000000000000000000000000000000000`, **6 decimals**, EIP-712 domain `{name: "USDC", version: "2"}` — `name()` on Arc is `"USDC"`, not `"USD Coin"`, so `get_usdc_domain_name("arc-testnet")` returns `"USDC"`
+- **Arc's USDC is one balance at two precisions, and only one of them is money.** Arc pays gas in USDC, so `eth_getBalance` reports it at **18** decimals and `balanceOf` at **6**, with `balanceOf(a) == eth_getBalance(a) // 10**12`. Measured live on 11 addresses of block 62,334,983: exact on every one. **x402 amounts travel in the 6-decimal view.** Signing `$0.01` against 18 decimals authorizes `10000000000000000` base units instead of `10000` — the payer is charged 10^12 times the price. `tests/test_arc_testnet.py` mounts that bad state on purpose and goes red for it, through `get_token_amount()` and through a real `create_authorization()` signature
+- **Constants verified live** against `https://rpc.testnet.arc.io` on 2026-09-15: `eth_chainId` → `0x4cef52`; `decimals()` → `6`; `name()`/`version()` → `"USDC"`/`"2"`; `DOMAIN_SEPARATOR()` → `0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0`, byte-identical to the value recomputed locally from `{USDC, 2, 5042002, 0x3600…0000}`. The RPC answers **403** to a default `User-Agent`; that is a transport failure, not an absent chain
+- **Testnet only, and nothing else was turned on.** Circle publishes no mainnet contract addresses for Arc, so there is no `arc` mainnet entry to infer. EURC (`0x89B5…D72a`, domain `EURC`/`2`) exists on the chain and is deliberately **not** registered: it prices in euros and has not passed its own end-to-end test. Escrow, ERC-8004, `upto` and the non-EVM fee-payer table exclude Arc by construction — none were touched
+- **Counts:** 25 → **26** networks, 15 → **16** EVM (13 EVM mainnets + 3 EVM testnets), in the README, `pyproject.toml`, `uvd_x402_sdk/__init__.py` and `uvd_x402_sdk/networks/__init__.py`
 - **Changed: the scoped `Idempotency-Key` is domain-separated from the unscoped one.** With a scope, the sha256 now covers the JSON array `["x402-idempotency-scope/1", <signed block>, <scope>]` instead of the object `{"payload": ..., "scope": ...}`. A signed block is always a JSON object, so no block, whatever its shape, derives the key of a scoped call; in 0.83.1 the unscoped key of a block shaped like `{"payload", "scope"}` did. Unscoped keys are unchanged (the 0.83.0 vector still holds). Scoped keys from 0.83.1 differ from the new ones, so a retry that crosses the upgrade is not answered from the cache: its settle executes and stands on its own. Pinned vectors for the TypeScript twin, computed from the literal text: scoped ASCII and scoped non-ASCII
 - **Docs:** the scope is generated by the seller and stored with the purchase, never a value taken from the request (README and the `derive_idempotency_key` docstring)
 - **Tests:** `settle_payment(retry=True)` carries the scoped key on every attempt, `process_payment()` carries it on verify as well as on settle, and a non-ASCII scope is hashed as UTF-8 rather than as JSON escapes
