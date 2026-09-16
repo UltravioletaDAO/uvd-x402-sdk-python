@@ -466,8 +466,38 @@ ROBINHOOD_TESTNET = NetworkConfig(
 #
 # EURC (0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a, domain "EURC"/"2") exists on
 # this chain and is deliberately NOT registered: it prices in euros and has not
-# passed its own end-to-end test. Testnet only — Circle publishes no mainnet
-# addresses for Arc, so there is no `arc` mainnet entry to infer.
+# passed its own end-to-end test. Mainnet parameters were independently checked
+# against rpc.mainnet.arc.io on 2026-09-16 (chain ID 5042, USDC/2, 6 decimals).
+ARC = NetworkConfig(
+    name="arc",
+    display_name="Arc",
+    network_type=NetworkType.EVM,
+    chain_id=5042,
+    usdc_address="0x3600000000000000000000000000000000000000",
+    usdc_decimals=6,  # ERC-20 interface. NOT the native gas asset's 18.
+    usdc_domain_name="USDC",  # on-chain name() — not "USD Coin"
+    usdc_domain_version="2",
+    rpc_url="https://rpc.mainnet.arc.io",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x3600000000000000000000000000000000000000",
+            decimals=6,
+            name="USDC",
+            version="2",
+        ),
+    },
+    extra_config={
+        # Documented facts of the chain, none of them on the payment path.
+        "native_gas_asset": "USDC",
+        "native_gas_decimals": 18,  # NEVER an amount: see the block comment above
+        "erc20_view_divisor": 10**12,  # balanceOf == eth_getBalance // this
+        "explorer": "https://explorer.arc.io",
+        "min_max_fee_per_gas_wei": 20_000_000_000,  # 20 Gwei documented minimum
+        "testnet": False,
+    },
+)
+
 ARC_TESTNET = NetworkConfig(
     name="arc-testnet",
     display_name="Arc Testnet",
@@ -492,7 +522,7 @@ ARC_TESTNET = NetworkConfig(
         "native_gas_asset": "USDC",
         "native_gas_decimals": 18,  # NEVER an amount: see the block comment above
         "erc20_view_divisor": 10**12,  # balanceOf == eth_getBalance // this
-        "explorer": "https://testnet.arcscan.app",
+        "explorer": "https://explorer.testnet.arc.io",
         "faucet": "https://faucet.circle.com",
         "min_max_fee_per_gas_wei": 20_000_000_000,  # 20 Gwei documented minimum
         "testnet": True,
@@ -520,6 +550,7 @@ _EVM_NETWORKS = [
     SKALE_TESTNET,
     ROBINHOOD,
     ROBINHOOD_TESTNET,
+    ARC,
     ARC_TESTNET,
 ]
 
@@ -539,7 +570,7 @@ def get_usdc_domain_name(network_name: str) -> str:
     """
     # Networks that use 'USDC' instead of 'USD Coin'
     # (Arc's native USDC reports name() == "USDC" on-chain; verified 2026-09-15.)
-    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad", "arc-testnet"}
+    usdc_domain_networks = {"celo", "hyperevm", "unichain", "monad", "arc", "arc-testnet"}
 
     # SKALE Base uses bridged USDC with a unique domain name
     skale_domain_networks = {"skale-base", "skale-base-sepolia"}

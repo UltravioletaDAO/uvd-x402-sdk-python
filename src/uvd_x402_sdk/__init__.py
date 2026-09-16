@@ -36,10 +36,10 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (26 total):
-- EVM (16): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
+Supported Networks (27 total):
+- EVM (17): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
             HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia,
-            Robinhood, Robinhood Testnet, Arc Testnet
+            Robinhood, Robinhood Testnet, Arc, Arc Testnet
 - SVM (2): Solana, Fogo
 - NEAR (1): NEAR Protocol
 - Stellar (1): Stellar

@@ -110,13 +110,13 @@ class X402Config:
     verify_timeout: float = 30.0
     settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
 
-    # Network configuration - All 26 networks
+    # Network configuration - All 27 networks
     supported_networks: List[str] = field(default_factory=lambda: [
-        # EVM chains (16)
+        # EVM chains (17)
         "base", "ethereum", "polygon", "arbitrum", "optimism",
         "avalanche", "celo", "hyperevm", "unichain", "monad",
         "scroll", "skale-base", "skale-base-sepolia",
-        "robinhood", "robinhood-testnet", "arc-testnet",
+        "robinhood", "robinhood-testnet", "arc", "arc-testnet",
         # SVM chains (2)
         "solana", "fogo",
         # NEAR (1)

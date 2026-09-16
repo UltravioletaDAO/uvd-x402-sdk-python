@@ -310,12 +310,11 @@ def test_ninguna_red_parte_sus_decimales_entre_el_default_y_su_token_config() ->
 # =============================================================================
 
 
-def test_arc_es_testnet_y_no_hay_mainnet_inventada() -> None:
-    """Circle no publica direcciones de mainnet para Arc. Inferirlas de un
-    archivo de genesis seria inventar una red que cobra de verdad."""
-    assert get_network("arc") is None
+def test_arc_mainnet_y_testnet_tienen_identidades_distintas() -> None:
+    assert get_network("arc").chain_id == 5042
+    assert get_network(ARC).chain_id == 5042002
     assert get_network("arc-mainnet") is None
-    assert to_caip2_network("arc") is None
+    assert to_caip2_network("arc") == "eip155:5042"
 
 
 def test_arc_no_anuncia_eurc() -> None:

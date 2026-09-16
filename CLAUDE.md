@@ -55,7 +55,7 @@ src/uvd_x402_sdk/
 | Token | Ethereum/Avalanche | Base |
 |-------|-------------------|------|
 | EURC | `"Euro Coin"` | `"EURC"` |
-| USDC | `"USD Coin"` | `"USDC"` on (Celo/HyperEVM/Unichain/Monad/Arc Testnet) |
+| USDC | `"USD Coin"` | `"USDC"` on (Celo/HyperEVM/Unichain/Monad/Arc mainnet + testnet) |
 
 ### Token Configuration Structure
 
@@ -147,12 +147,11 @@ payment_requirements = {
 - Gasless transactions (CREDIT gas token), legacy tx only (no EIP-1559)
 - No escrow support (blocked on Cancun EVM compatibility)
 
-### Arc Testnet — un saldo, dos precisiones (evm.py, v0.84.0)
-- `arc-testnet`, chainId **5042002**, CAIP-2 `eip155:5042002`, familia EVM, en la lista por defecto del cliente. USDC `0x3600000000000000000000000000000000000000`, **6 decimales**, dominio EIP-712 `{"name": "USDC", "version": "2"}` — `name()` en Arc devuelve `"USDC"`, no `"USD Coin"`, asi que `arc-testnet` entra en `usdc_domain_networks` de `get_usdc_domain_name`
-- **LA TRAMPA.** Arc paga el gas en USDC, asi que **el mismo saldo** se publica dos veces: `eth_getBalance` a **18** decimales (gas) y `balanceOf` a **6** (pagos), con `balanceOf(a) == eth_getBalance(a) // 10**12`. Medido en vivo sobre 12 direcciones de un bloque real: exacto en todas (`tests/fixtures/arc-testnet-balances.json`). **El importe de un pago x402 viaja en 6.** Un 18 en el registro multiplica cada cobro por 10^12: `$0.01` se firma como `10000000000000000` en vez de `10000`. El 18 esta escrito en `extra_config["native_gas_decimals"]` como hecho de la cadena y **no lo lee nadie** que calcule un importe; `tests/test_arc_testnet.py` monta ese estado malo a proposito y se pone rojo (4 de sus 17 tests fallan con 18)
-- **Constantes verificadas en vivo** contra `https://rpc.testnet.arc.io` el 2026-09-15: `eth_chainId` -> `0x4cef52`; `decimals()` -> `6`; `name()`/`version()` -> `"USDC"`/`"2"`; `DOMAIN_SEPARATOR()` -> `0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0`, identico al recalculado localmente con los cuatro campos del registro (el test lo recalcula en cada corrida). **Ese RPC contesta `403` a un User-Agent por defecto**: un fallo de transporte ahi no es una red ausente
-- **Solo testnet, y nada mas se encendio.** Circle no publica direcciones de mainnet para Arc: no hay entrada `arc` que inferir. EURC (`0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`, dominio `EURC`/`2`) existe en la cadena y **no se registra** a proposito — cotiza en euros y no paso su propio E2E; no escribirlo lo deja afuera sin un condicional. Escrow, ERC-8004 y `upto` son listas de opt-in por nombre: Arc queda afuera sola. **La tabla de fee payers no se toca: las redes EVM no llevan**
-- **Arc bloquea en genesis la cuenta 1 del mnemonico publico de Foundry** (`0x70997970C51812dc3A010C7d01b50e0d17dc79C8`): `isBlacklisted()` -> `true` y esta FINANCIADA (medido). Un E2E que agarre una cuenta de Anvil puede caer justo ahi y leer el revert como un defecto del facilitador. El indice 0 (`0xf39F...2266`), que es el que firma en los tests, no esta bloqueado
+### Arc mainnet and testnet (evm.py, v0.84.0)
+- `arc` / `eip155:5042` and `arc-testnet` / `eip155:5042002` are independently verified networks. See `docs/networks/arc.md`.
+- Both use USDC `0x3600000000000000000000000000000000000000`, 6 payment decimals and EIP-712 `USDC` / `2`. Native gas uses 18 decimals on the same balance; never use that precision for a signed payment.
+- `tests/test_arc_testnet.py` preserves the decimal regression; `tests/test_arc_networks.py` checks real signatures and cross-network domain isolation.
+- Support covers direct `exact` EOA USDC payments. EURC, Gateway, escrow, `upto`, ERC-8004 writes and EIP-6492 are not enabled for Arc.
 
 ### ERC-8004 Trustless Agents (erc8004.py)
 - Supports 20 networks: 18 EVM + Solana + Solana-devnet
