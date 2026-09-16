@@ -66,6 +66,12 @@ ARC_DOMAIN_SEPARATOR = "0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f70
 # Arc (el indice 1 SI, y ademas tiene fondos — ver el fixture). Aca no se
 # transmite nada: solo se firma para leer el `value`.
 TEST_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+# Indice 1 del mismo mnemonico: esta es la cuenta que Arc siembra bloqueada.
+# No se firma nada con ella; solo se deriva su direccion para probar que la
+# comparacion de `test_la_direccion_bloqueada_de_genesis_esta_anotada` mide algo.
+_CLAVE_DEL_INDICE_1 = (
+    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+)
 RECIPIENT = "0x1234567890123456789012345678901234567890"
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "arc-testnet-balances.json"
@@ -260,12 +266,26 @@ def test_la_direccion_bloqueada_de_genesis_esta_anotada() -> None:
     """Arc siembra bloqueada la cuenta 1 del mnemonico publico de Foundry, y
     ademas la financia. Un E2E que agarre una cuenta de Anvil puede caer justo
     ahi y leer el revert como un defecto del facilitador."""
+    eth_account = pytest.importorskip("eth_account")
+
     doc = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     bloqueada = doc["blocked_genesis_address"]
     assert bloqueada["is_blacklisted"] is True
     assert bloqueada["address"] == "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-    # la clave con la que firman estas pruebas NO es esa
-    assert TEST_KEY.lower() != bloqueada["address"].lower()
+
+    # La clave con la que firman estas pruebas NO es la de esa cuenta. Se
+    # compara la DIRECCION DERIVADA de la clave (una clave de 64 hex nunca es
+    # igual a una direccion de 40 hex: esa comparacion no puede fallar).
+    firmante = eth_account.Account.from_key(TEST_KEY).address
+    assert firmante.lower() != bloqueada["address"].lower()
+
+    # y la derivacion es la que cierra el lazo: la clave del indice 1 del mismo
+    # mnemonico SI da la direccion bloqueada, asi que si TEST_KEY fuera esa,
+    # la asercion de arriba se pondria roja.
+    assert (
+        eth_account.Account.from_key(_CLAVE_DEL_INDICE_1).address.lower()
+        == bloqueada["address"].lower()
+    )
 
 
 def test_ninguna_red_parte_sus_decimales_entre_el_default_y_su_token_config() -> None:

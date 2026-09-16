@@ -445,8 +445,8 @@ ROBINHOOD_TESTNET = NetworkConfig(
 #
 #   native (eth_getBalance)  ->  18 decimals, gas only
 #   ERC-20 (balanceOf)       ->   6 decimals, payments
-#   balanceOf(a) == eth_getBalance(a) // 10**12   (measured live on 11
-#   addresses of block 62,334,983, every one an exact match)
+#   balanceOf(a) == eth_getBalance(a) // 10**12   (measured live on 12
+#   addresses of block 62,335,533, every one an exact match)
 #
 # THE PAYMENT AMOUNT TRAVELS IN 6. Writing 18 here — the number Arc's own docs
 # print next to "native USDC" — multiplies every charge by 10**12: $0.01 becomes
