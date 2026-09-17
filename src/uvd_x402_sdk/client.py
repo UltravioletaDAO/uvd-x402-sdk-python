@@ -1066,7 +1066,7 @@ class X402Client:
             if payload.x402Version != 2:
                 raise ValueError("Native Hedera supports only x402 v2")
             if asset not in (None, network_config.usdc_address) or token_decimals not in (None, 6) or eip712_domain:
-                raise ValueError("Use build_hedera_request with atomic requirements for HBAR; USD pricing supports native USDC only")
+                raise ValueError("Hedera payments support native USDC only; HBAR is for network fees")
             atomic = expected_amount_usd * Decimal(10**6)
             if not atomic.is_finite() or atomic != atomic.to_integral_value():
                 raise ValueError("USDC price must have at most 6 decimal places")
@@ -2263,10 +2263,9 @@ class X402Client:
             if x402_version != 2 or accepted is None or extensions:
                 raise ValueError("Hedera requires v2, accepted requirements and no extensions")
             r = validate_hedera_requirements(accepted)
-            # This legacy entry point names its amount in USD: use the atomic
-            # signer API (or fetch with token_type='hbar') for native HBAR.
+            # Native USDC is the only Hedera payment asset.
             if token_type != "usdc" or r["asset"] == "0.0.0":
-                raise ValueError("HBAR is not USD; use HederaSigner with an atomic amount")
+                raise ValueError("Hedera payments support native USDC only; HBAR is for network fees")
             if (r["payTo"] != pay_to or Decimal(r["amount"]) != Decimal(str(amount_usd)) * 10**6
                     or (chain_name and normalize_network(chain_name) != r["network"])):
                 raise ValueError("Hedera offer differs from the approved price, recipient or network")
@@ -2626,10 +2625,10 @@ class X402Client:
         if self._hedera_signer is not None:
             from uvd_x402_sdk.hedera import HEDERA_NETWORKS
             network = self._hedera_signer.network
-            asset_id = "0.0.0" if token_type == "hbar" else HEDERA_NETWORKS[network]["usdc"] if token_type == "usdc" else None
+            asset_id = HEDERA_NETWORKS[network]["usdc"] if token_type == "usdc" else None
             if chosen["network"] != network or chosen["asset"] != asset_id:
                 raise ValueError("Hedera offer differs from the connected ledger or selected asset")
-            token_decimals = 8 if token_type == "hbar" else 6
+            token_decimals = 6
         price = Decimal(chosen["amount"]) / (Decimal(10) ** token_decimals)
         if ceiling is not None and price > ceiling:
             raise PaymentExceedsMaxError(price, ceiling, resource=url)

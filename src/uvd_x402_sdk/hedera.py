@@ -17,6 +17,7 @@ HEDERA_NETWORKS = {
     "hedera:mainnet": {"usdc": "0.0.456858", "feePayer": "0.0.10868300"},
     "hedera:testnet": {"usdc": "0.0.429274", "feePayer": "0.0.10576385"},
 }
+# Historical identifier retained for import compatibility, not a payment asset.
 HBAR_ASSET = "0.0.0"
 MAX_ATOMIC_AMOUNT = (1 << 63) - 1
 
@@ -38,8 +39,8 @@ def validate_hedera_requirements(requirements: Dict[str, Any]) -> Dict[str, Any]
     network = r.get("network")
     if not isinstance(network, str) or network not in HEDERA_NETWORKS:
         raise ValueError("Expected hedera:mainnet or hedera:testnet")
-    if r["asset"] not in (HBAR_ASSET, HEDERA_NETWORKS[network]["usdc"]):
-        raise ValueError("Only native HBAR and this network's USDC are supported")
+    if r["asset"] != HEDERA_NETWORKS[network]["usdc"]:
+        raise ValueError("Hedera payments support native USDC only; HBAR is for network fees")
     amount = r["amount"]
     if not isinstance(amount, str) or not re.fullmatch(r"[1-9][0-9]*", amount):
         raise ValueError("amount must be a positive canonical atomic integer string")
@@ -62,7 +63,7 @@ def build_hedera_requirements(
     network: str, pay_to: str, amount_atomic: str, *, asset: str = "usdc",
     fee_payer: Optional[str] = None, max_timeout_seconds: int = 180,
 ) -> Dict[str, Any]:
-    """Build an offer; HBAR has 8 decimals and USDC has 6.
+    """Build a native USDC offer with 6 decimals. HBAR is for network fees.
 
     Defaults name the Ultravioleta facilitator. For another deployment pass
     its feePayer from a trusted ``GET /supported`` response.
@@ -72,7 +73,7 @@ def build_hedera_requirements(
     info = HEDERA_NETWORKS[network]
     return validate_hedera_requirements({
         "scheme": "exact", "network": network,
-        "asset": HBAR_ASSET if asset == "hbar" else info["usdc"] if asset == "usdc" else asset,
+        "asset": info["usdc"] if asset == "usdc" else asset,
         "amount": amount_atomic, "payTo": pay_to,
         "maxTimeoutSeconds": max_timeout_seconds,
         "extra": {"feePayer": fee_payer or info["feePayer"]},
@@ -141,11 +142,8 @@ class HederaSigner:
         # Hiero Python to_bytes serializes ONE Transaction; x402 needs a List.
         for node in ("0.0.3", "0.0.4", "0.0.7" if self.network == "hedera:mainnet" else "0.0.5"):
             tx = TransferTransaction()
-            if r["asset"] == HBAR_ASSET:
-                tx.add_hbar_transfer(buyer, -amount).add_hbar_transfer(merchant, amount)
-            else:
-                token = TokenId.from_string(r["asset"])
-                tx.add_token_transfer(token, buyer, -amount).add_token_transfer(token, merchant, amount)
+            token = TokenId.from_string(r["asset"])
+            tx.add_token_transfer(token, buyer, -amount).add_token_transfer(token, merchant, amount)
             tx.set_transaction_id(tx_id)
             tx.set_node_account_id(AccountId.from_string(node))
             tx.set_transaction_valid_duration(r["maxTimeoutSeconds"])

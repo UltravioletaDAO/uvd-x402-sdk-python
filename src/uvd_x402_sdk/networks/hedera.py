@@ -9,8 +9,7 @@ for _name, _info in HEDERA_NETWORKS.items():
         usdc_domain_name="USDC", usdc_domain_version="",  # label only; no EIP-712
         rpc_url=("https://testnet.mirrornode.hedera.com" if _name.endswith("testnet")
                  else "https://mainnet-public.mirrornode.hedera.com"),
-        tokens={"usdc": TokenConfig(_info["usdc"], 6, "USDC", ""),
-                "hbar": TokenConfig("0.0.0", 8, "HBAR", "", usd_pegged=False)},
+        tokens={"usdc": TokenConfig(_info["usdc"], 6, "USDC", "")},
         extra_config={"fee_payer": _info["feePayer"], "x402_versions": [2],
                       "schemes": ["exact"], "native_asset": "HBAR"},
     ))

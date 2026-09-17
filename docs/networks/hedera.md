@@ -1,12 +1,14 @@
 # Native Hedera: mainnet and testnet
 
+**Current payment policy (2026-09-17, facilitator 2.35.0): native USDC only on both Hedera ledgers. HBAR is retained exclusively for sponsor network fees. New HBAR and custom HTS payment offers are rejected. Historical HBAR receipts and transaction records remain valid evidence of earlier releases.**
+
 Native Hedera uses **x402 v2, scheme exact**, numeric `0.0.…` accounts and
 protobuf `TransactionList` buyer signatures. These are not EVM chains 295/296.
 
-| Ledger | Fee payer | USDC token (6 decimals) | HBAR (8 decimals) |
-| --- | --- | --- | --- |
-| `hedera:mainnet` | `0.0.10868300` | `0.0.456858` | `0.0.0` |
-| `hedera:testnet` | `0.0.10576385` | `0.0.429274` | `0.0.0` |
+| Ledger | Fee payer | USDC token (6 decimals) |
+| --- | --- | --- |
+| `hedera:mainnet` | `0.0.10868300` | `0.0.456858` |
+| `hedera:testnet` | `0.0.10576385` | `0.0.429274` |
 
 `hedera` and `hedera-testnet` are SDK input aliases. Wire offers use the canonical
 ledger IDs above. Bind the buyer signer to the intended ledger and trusted
@@ -15,8 +17,7 @@ ledger's native token. The facilitator pays consensus fees; the buyer signs
 only the payment principal. Signed transactions cap sponsor fees at 1 HBAR.
 
 Amounts in the native builders are integer strings in atomic units:
-`1000` = 0.001 USDC; `10000` = 0.0001 HBAR. HBAR is not USD pegged, so do not
-pass an HBAR amount through USD pricing APIs. Native signing supports DER
+`1000` = 0.001 USDC. HBAR is used for sponsor network fees only. Native signing supports DER
 Ed25519 or ECDSA keys and numeric account IDs. No v1, EVM authorization,
 escrow, upto, hooks or extensions are advertised for this native path.
 
@@ -38,7 +39,7 @@ result, recover/retry the **same request and transaction ID**; never sign a
 new payment to resolve an unknown outcome. The facilitator rejects replay
 at verification and returns the original successful result on settlement retry.
 
-## Production evidence
+## Historical production evidence
 
 The facilitator's [mainnet acceptance receipts](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/reports/2026-09-16-hedera-mainnet-public-canaries.json)
 and [transaction ledger](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/reports/2026-09-16-hedera-transaction-ledger.md)
@@ -48,12 +49,12 @@ The initial deployed admission budget is 10 HBAR of signed maximum fees per
 ledger per UTC day (10 default 1-HBAR requests, not 10 HBAR actually spent).
 Capacity must be raised deliberately before higher-volume production traffic.
 
-## Python buyer (0.85.0+)
+## Python buyer (0.87.0+)
 
 Signing requires Python 3.10+; base discovery/builders support Python 3.9.
 
 ```sh
-pip install 'uvd-x402-sdk[hedera]>=0.85.0'
+pip install 'uvd-x402-sdk[hedera]>=0.87.0'
 ```
 
 ```python
@@ -70,7 +71,7 @@ response = client.fetch("https://your-merchant.example/paid",
     token_type="usdc", max_amount="0.001")
 ```
 
-For HBAR, use `token_type="hbar"` and a ceiling expressed in HBAR.
+HBAR offers are rejected before signing, including explicit `0.0.0` requests.
 Keys belong in server-side secret storage, never in source files or browsers.
 
 ```python

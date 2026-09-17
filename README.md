@@ -6,13 +6,13 @@ Accept **gasless stablecoin payments** across **29 blockchain networks** with a 
 
 **New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Contract metadata and offline tests verified; funded EURC payments pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
 
-**New in v0.85.0**: Native Hedera mainnet and testnet, sponsored HBAR and USDC with x402 v2/exact. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
+**New in v0.87.0**: Hedera mainnet and testnet accept native USDC only with x402 v2/exact. HBAR funds sponsor network fees and is rejected as payment. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
 
 **New in v0.84.0**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
 
 ## Features
 
-- **29 Networks**: EVM chains (17 including Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native HBAR + USDC)
+- **29 Networks**: EVM chains (17 including Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
 - **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
 - **x402 v1 & v2**: Protocol auto-detection; native Hedera supports v2/exact only
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
