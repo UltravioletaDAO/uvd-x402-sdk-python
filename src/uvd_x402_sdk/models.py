@@ -14,6 +14,7 @@ Supports both x402 v1 and v2 protocols:
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
+from uvd_x402_sdk.receipts import FacilitatorReceipt
 
 
 # =============================================================================
@@ -427,6 +428,7 @@ class VerifyResponse(BaseModel):
     """
 
     isValid: bool = Field(..., description="Whether the payment signature is valid")
+    receipt: Optional[FacilitatorReceipt] = None
     payer: Optional[str] = Field(None, description="Verified payer address")
     message: Optional[str] = Field(None, description="Error message if invalid")
     invalidReason: Optional[str] = Field(None, description="Specific reason for invalidity")
@@ -449,6 +451,10 @@ class SettleResponse(BaseModel):
     """
 
     success: bool = Field(..., description="Whether settlement succeeded")
+    receipt: Optional[FacilitatorReceipt] = None
+    network: Optional[str] = None
+    paymentId: Optional[str] = None
+    errorReason: Optional[str] = None
     transaction: Optional[str] = Field(None, description="Transaction hash on-chain")
     tx_hash: Optional[str] = Field(None, description="Alternative field for tx hash")
     payer: Optional[str] = Field(None, description="Verified payer address")
@@ -468,6 +474,7 @@ class PaymentResult(BaseModel):
     """
 
     success: bool = Field(default=True)
+    receipt: Optional[FacilitatorReceipt] = None
     payer_address: str = Field(..., description="Verified wallet address that paid")
     transaction_hash: Optional[str] = Field(None, description="On-chain transaction hash")
     network: str = Field(..., description="Network where payment was settled")
