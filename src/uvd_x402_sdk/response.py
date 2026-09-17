@@ -108,6 +108,8 @@ def create_402_response(
     for network_name in config.supported_networks:
         network = get_network(network_name)
         if network and network.enabled and config.is_network_enabled(network_name):
+            if network.network_type == NetworkType.HEDERA:
+                continue  # Native Hedera is v2-only; never advertise in v1.
             if require_recipient and not config.get_recipient(network_name):
                 # Opt-in parity with v2: a chain nobody can pay the treasury
                 # on is not "supported", it is an advertisement of a dead end.
@@ -455,6 +457,16 @@ def create_402_response_v2(
             "payTo": recipient,
             "maxTimeoutSeconds": max_timeout_seconds,
         }
+
+        if network.network_type == NetworkType.HEDERA:
+            from uvd_x402_sdk.hedera import build_hedera_requirements
+            if extensions:
+                continue  # Native rail rejects extensions; other offers remain usable.
+            atomic = Decimal(str(amount)) * Decimal(10**6)
+            if not atomic.is_finite() or atomic != atomic.to_integral_value():
+                raise ValueError("Native USDC price must have at most 6 decimal places")
+            option = build_hedera_requirements(network.name, recipient, str(int(atomic)),
+                max_timeout_seconds=min(max_timeout_seconds, 180))
 
         # Add EIP-712 domain for EVM chains
         if network.network_type == NetworkType.EVM:

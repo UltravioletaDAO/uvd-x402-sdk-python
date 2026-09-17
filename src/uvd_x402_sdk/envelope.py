@@ -248,6 +248,9 @@ def resolve_envelope_version(
     Raises:
         ValueError: If ``requested`` is neither 1, 2 nor ``"auto"``.
     """
+    native = _read(requirements, "network") in ("hedera:mainnet", "hedera:testnet")
+    if native and requested == 1:
+        raise ValueError("Native Hedera supports only x402 v2")
     if requested != "auto":
         if requested not in (1, 2):
             raise ValueError(

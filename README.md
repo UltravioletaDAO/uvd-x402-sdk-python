@@ -2,15 +2,17 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **27 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **29 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+
+**New in v0.85.0**: Native Hedera mainnet and testnet, sponsored HBAR and USDC with x402 v2/exact. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
 
 **New in v0.84.0**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
 
 ## Features
 
-- **27 Networks**: EVM chains (17 including Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, and XRPL (native XRP)
+- **29 Networks**: EVM chains (17 including Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native HBAR + USDC)
 - **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
-- **x402 v1 & v2**: Full support for both protocol versions with auto-detection
+- **x402 v1 & v2**: Protocol auto-detection; native Hedera supports v2/exact only
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
 - **Simple API**: Decorators and middleware for quick integration
