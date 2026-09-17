@@ -1,0 +1,47 @@
+{
+  "sdk": "python",
+  "version": "0.86.0",
+  "source": "PyPI, fresh isolated venv",
+  "offline_signatures": [
+    {
+      "network": "arc",
+      "protocol": 1,
+      "atomic_amount": "1",
+      "signature_recovered": true,
+      "domain_matches_rpc": true
+    },
+    {
+      "network": "arc",
+      "protocol": 2,
+      "atomic_amount": "1",
+      "signature_recovered": true,
+      "domain_matches_rpc": true
+    },
+    {
+      "network": "arc-testnet",
+      "protocol": 1,
+      "atomic_amount": "1",
+      "signature_recovered": true,
+      "domain_matches_rpc": true
+    },
+    {
+      "network": "arc-testnet",
+      "protocol": 2,
+      "atomic_amount": "1",
+      "signature_recovered": true,
+      "domain_matches_rpc": true
+    }
+  ],
+  "funded_payments": "pending; none executed",
+  "checked_at": "2026-09-17T04:32:42.319629+00:00",
+  "tests_passed": 1222,
+  "cross_language_checks_passed": 430,
+  "publication_workflow": "https://github.com/UltravioletaDAO/uvd-x402-sdk-python/actions/runs/35181714208",
+  "release_commit": "c17417363313d89bccc2065bebabf0e6d0d15234",
+  "published_artifact": {
+    "version": "0.86.0",
+    "wheel_sha256": "131a6ce4d8da2907fc02109d16f4627ca55474aa5ce9896f2391cb37774c926f",
+    "modules_matching_tested_source_and_clean_install": 46,
+    "source": "https://files.pythonhosted.org/packages/6c/20/9ca05f0d7c9f93aad657c7050e9e959d8b22c744a94587f50cb7861c1d5b/uvd_x402_sdk-0.86.0-py3-none-any.whl"
+  }
+}
