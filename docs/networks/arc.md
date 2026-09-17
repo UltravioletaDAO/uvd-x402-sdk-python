@@ -1,6 +1,6 @@
 # Arc mainnet and testnet
 
-Direct USDC `exact` payments are supported by the Ultravioleta facilitator in both x402 v1 and v2. This release adds the network definitions to the SDK's normal signing and payment paths.
+Direct USDC and EURC `exact` payments are supported by the Ultravioleta facilitator in both x402 v1 and v2. USDC has funded payment receipts; EURC has contract and offline signing validation, with funded acceptance pending.
 
 | Setting | Mainnet | Testnet |
 |---|---|---|
@@ -14,7 +14,69 @@ Both networks use USDC `0x3600000000000000000000000000000000000000` with EIP-712
 
 The chain ID is part of the signature domain. An authorization signed on mainnet cannot be reused on testnet. The SDK preserves their distinct registry entries and CAIP-2 identifiers.
 
-The facilitator URL is `https://facilitator.ultravioletadao.xyz`. Check `/supported` at runtime when using another facilitator. EURC/USYC, Gateway, contract-wallet signatures/EIP-6492, `upto`, escrow and ERC-8004 writes are outside this Arc release.
+The facilitator URL is `https://facilitator.ultravioletadao.xyz`. Check `/supported` at runtime when using another facilitator. USYC, Gateway, contract-wallet signatures/EIP-6492, `upto`, escrow and ERC-8004 writes are outside this Arc release.
+
+## EURC: prices in euros
+
+EURC is registered for direct EOA `exact` payments in x402 v1/v2. Circle publishes
+different contracts for each network:
+
+| Network | EURC contract | Payment decimals | EIP-712 name / version |
+|---|---|---|---|
+| Arc mainnet | `0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1` | 6 | `EURC` / `2` |
+| Arc testnet | `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a` | 6 | `EURC` / `2` |
+
+**0.01 EURC is 10000 atomic units and is a euro price.** No USD/EUR exchange rate
+is applied. EURC has its own balance; the facilitator still pays gas in **USDC**.
+Select the EURC address explicitly and keep USDC as the default dollar asset.
+Do not pass a dollar quote into the EURC signing path.
+
+Contract metadata and EIP-712 domain separators were checked through both live
+RPCs on 2026-09-17. Offline signatures and network/token isolation are tested.
+**Funded EURC verify/settle acceptance remains pending on both networks**, as
+requested by the operator. Existing Arc payment receipts below are **USDC only**;
+they do not prove EURC settlement. No EURC payment hashes are claimed.
+[Assessment](../reports/2026-09-17-arc-eurc-assessment.json).
+[Official Circle contract list](https://developers.circle.com/stablecoins/eurc-contract-addresses).
+
+### EURC payer and merchant (Python)
+
+Install `pip install "uvd-x402-sdk[signer]>=0.86.0"`. A merchant publishes explicit
+atomic requirements; the USD-price convenience helpers are for dollar assets.
+
+```python
+from decimal import Decimal
+from uvd_x402_sdk.networks import get_network
+from uvd_x402_sdk.envelope_v2 import build_verify_request_v2, build_settle_request_v2
+
+network = get_network("arc-testnet")  # "arc" for mainnet
+eurc = network.tokens["eurc"]
+accepted = {
+    "scheme": "exact", "network": f"eip155:{network.chain_id}",
+    "asset": eurc.address, "amount": "10000",  # 0.01 EURC
+    "payTo": merchant_address, "maxTimeoutSeconds": 300,
+    "extra": {"name": eurc.name, "version": eurc.version},
+}
+resource = {"url": "https://your-service.example/paid"}
+# buyer is an X402Client connected to this chain's EVM signer.
+header = buyer.create_authorization(
+    accepted["payTo"], Decimal("0.01"), token_type="eurc",
+    x402_version=2, accepted=accepted, resource=resource, valid_duration=300,
+)
+# The positional amount means EURC units; amount_usd is a legacy parameter name.
+# Merchant: decode the header, but use YOUR stored accepted/resource, never a
+# buyer-supplied price. inner is the decoded header's ["payload"].
+verify_body = build_verify_request_v2(inner, resource, accepted)
+settle_body = build_settle_request_v2(inner, resource, accepted)
+# POST verify_body to /verify; require isValid. Then POST settle_body once to
+# /settle and require success before delivery. Preserve uncertain transaction IDs.
+```
+
+`verify_payment` / `settle_payment` / `process_payment` take
+`expected_amount_usd` and reject known EURC assets: use the atomic envelope
+builders above. For v1 use the same token/amount/domain in `PaymentRequirements`
+and `build_verify_request_for_version` / `build_settle_request_for_version`.
+
 
 ## Usage
 

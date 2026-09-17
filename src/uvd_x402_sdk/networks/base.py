@@ -107,7 +107,7 @@ class NetworkConfig:
             The usdc_* fields above hold this token's address/domain.
         tokens: Multi-token configurations (EVM chains only, maps token type to config)
         usd_pegged: Whether the DEFAULT settlement asset is worth one dollar per
-            whole unit. True for every stablecoin network (USDC, EURC, AUSD,
+            whole unit. True for dollar stablecoin networks (USDC, AUSD,
             PYUSD, USDT, USDG); False for a chain that settles in its own
             volatile native asset — XRPL settles in XRP. Only a pegged asset
             lets a price written in USD become base units, so
