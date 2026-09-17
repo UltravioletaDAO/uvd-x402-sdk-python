@@ -1,0 +1,115 @@
+{
+  "checked_at": "2026-09-17T04:01:16.590276+00:00",
+  "official_source": "https://developers.circle.com/stablecoins/eurc-contract-addresses",
+  "networks": [
+    {
+      "network": "arc",
+      "chain_id": 5042,
+      "address": "0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1",
+      "code_bytes": 1798,
+      "name": "EURC",
+      "symbol": "EURC",
+      "decimals": 6,
+      "version": "2",
+      "DOMAIN_SEPARATOR": "25fe3beaae16ef5c1cb9757c6efc1bf33f81ecd4c7dae191320372013b7d2175",
+      "balances": {
+        "0x103040545AC5031A11E8C03dd11324C7333a13C7": "0",
+        "0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8": "0"
+      },
+      "authorization_state_zero_nonce": false,
+      "domain_matches_computed": true
+    },
+    {
+      "network": "arc-testnet",
+      "chain_id": 5042002,
+      "address": "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a",
+      "code_bytes": 1798,
+      "name": "EURC",
+      "symbol": "EURC",
+      "decimals": 6,
+      "version": "2",
+      "DOMAIN_SEPARATOR": "649ec6b0634bd74f28684781d2c9ae49dff14ba3d5f9bb5d70c1e1f0e1ebf160",
+      "balances": {
+        "0x103040545AC5031A11E8C03dd11324C7333a13C7": "0",
+        "0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8": "0"
+      },
+      "authorization_state_zero_nonce": false,
+      "domain_matches_computed": true
+    }
+  ],
+  "facilitator_current_arc_tokens": [
+    {
+      "x402Version": 1,
+      "scheme": "exact",
+      "network": "arc",
+      "networkAliases": [
+        "arc",
+        "eip155:5042"
+      ],
+      "extra": {
+        "tokens": [
+          {
+            "token": "usdc",
+            "address": "0x3600000000000000000000000000000000000000",
+            "decimals": 6
+          }
+        ]
+      }
+    },
+    {
+      "x402Version": 1,
+      "scheme": "exact",
+      "network": "arc-testnet",
+      "networkAliases": [
+        "arc-testnet",
+        "eip155:5042002"
+      ],
+      "extra": {
+        "tokens": [
+          {
+            "token": "usdc",
+            "address": "0x3600000000000000000000000000000000000000",
+            "decimals": 6
+          }
+        ]
+      }
+    },
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:5042",
+      "networkAliases": [
+        "arc",
+        "eip155:5042"
+      ],
+      "extra": {
+        "tokens": [
+          {
+            "token": "usdc",
+            "address": "0x3600000000000000000000000000000000000000",
+            "decimals": 6
+          }
+        ]
+      }
+    },
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "networkAliases": [
+        "arc-testnet",
+        "eip155:5042002"
+      ],
+      "extra": {
+        "tokens": [
+          {
+            "token": "usdc",
+            "address": "0x3600000000000000000000000000000000000000",
+            "decimals": 6
+          }
+        ]
+      }
+    }
+  ],
+  "live_payments": "pending: user requested proceeding without EURC funding; no EURC payment hashes exist"
+}

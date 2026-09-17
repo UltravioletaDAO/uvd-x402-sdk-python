@@ -1083,6 +1083,15 @@ class X402Client:
         if not network_config.usd_pegged and asset is None:
             raise ValueError(network_config.usd_conversion_error())
 
+        if asset is not None and network_config.network_type == NetworkType.EVM:
+            for token in network_config.tokens.values():
+                if token.address.lower() == asset.lower() and not token.usd_pegged:
+                    raise ValueError(
+                        "This asset is not pegged to USD. EURC prices are euros; "
+                        "use explicit atomic requirements and the envelope builders, "
+                        "not expected_amount_usd. No FX conversion is performed."
+                    )
+
         # Convert USD to token amount. With an explicit decimals the conversion
         # stays in Decimal: float(Decimal("0.07")) is 0.070000000000000007, and
         # at 18 decimals that rounds into a different amount than the payer
@@ -2213,7 +2222,8 @@ class X402Client:
 
         Args:
             pay_to: Recipient address
-            amount_usd: Payment amount in USD
+            amount_usd: Whole units of the selected token (legacy parameter
+                name): euros for EURC, dollars for USDC. No FX conversion.
             chain_name: Network name (uses connected chain if not specified)
             valid_duration: Authorization validity in seconds (default: 1 hour)
             token_type: Token to pay with (default: 'usdc')
@@ -2304,7 +2314,12 @@ class X402Client:
             )
 
         # Convert amount to base units
-        amount_base = int(Decimal(str(amount_usd)) * (10 ** token_config.decimals))
+        atomic = Decimal(str(amount_usd)) * (10 ** token_config.decimals)
+        if token_type == "eurc" and (
+            not atomic.is_finite() or atomic <= 0 or atomic != atomic.to_integral_value()
+        ):
+            raise ValueError("EURC amount must be positive euros with at most 6 decimal places")
+        amount_base = int(atomic)
 
         # Build EIP-3009 TransferWithAuthorization
         now = int(time.time())

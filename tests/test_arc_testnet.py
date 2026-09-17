@@ -317,15 +317,11 @@ def test_arc_mainnet_y_testnet_tienen_identidades_distintas() -> None:
     assert to_caip2_network("arc") == "eip155:5042"
 
 
-def test_arc_no_anuncia_eurc() -> None:
-    """EURC existe en la cadena (0x89B5...D72a, dominio EURC/2) y queda fuera a
-    proposito: cotiza en euros y no paso su propio E2E. No registrarlo lo deja
-    afuera sin un solo condicional."""
+def test_arc_announces_eurc_in_euro_units() -> None:
     net = get_network(ARC)
     assert net is not None
-    assert "eurc" not in net.tokens
-    assert get_supported_tokens(ARC) == ["usdc"]
-    assert get_token_config(ARC, "eurc") is None
+    assert get_supported_tokens(ARC) == ["usdc", "eurc"]
+    assert get_token_config(ARC, "eurc").usd_pegged is False
 
 
 def test_arc_no_entra_en_la_tabla_de_fee_payers() -> None:

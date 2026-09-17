@@ -4,6 +4,8 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **29 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
+**New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Contract metadata and offline tests verified; funded EURC payments pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
+
 **New in v0.85.0**: Native Hedera mainnet and testnet, sponsored HBAR and USDC with x402 v2/exact. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
 
 **New in v0.84.0**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
@@ -200,7 +202,7 @@ def premium_endpoint(payment_result):
 | Token | Networks | Decimals |
 |-------|----------|----------|
 | USDC | All networks except Robinhood | 6 |
-| EURC | Ethereum, Base, Avalanche | 6 |
+| EURC | Ethereum, Base, Avalanche, Arc mainnet/testnet | 6 |
 | AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui | 6 |
 | PYUSD | Ethereum | 6 |
 | USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |

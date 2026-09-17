@@ -173,15 +173,16 @@ class TestUpgradesToV2:
     def test_the_eip712_domain_survives_the_conversion(self, monkeypatch):
         """`extra` carries the EIP-712 domain for tokens the facilitator does not
         know by address (EURC, the bridged USDCs). Dropping it makes them unpayable."""
-        client, fake = _client(monkeypatch, _VERIFY_OK)
-        client.verify_payment(
-            _payload("eip155:8453"),
-            Decimal("0.01"),
-            asset="0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
-            eip712_domain={"name": "EURC", "version": "2"},
-        )
-        assert fake.bodies[0]["accepted"]["extra"] == {"name": "EURC", "version": "2"}
-        assert fake.bodies[0]["accepted"]["asset"] == (
+        from uvd_x402_sdk.envelope_v2 import build_verify_request_v2
+        # EURC is a euro quote. Use atomic requirements, never expected_amount_usd.
+        body = build_verify_request_v2(_payload("eip155:8453").payload,
+            {"url": "https://example.com/eurc"},
+            {"scheme": "exact", "network": "eip155:8453", "amount": "10000",
+             "asset": "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42",
+             "payTo": "0x1111111111111111111111111111111111111111",
+             "maxTimeoutSeconds": 300, "extra": {"name": "EURC", "version": "2"}})
+        assert body["accepted"]["extra"] == {"name": "EURC", "version": "2"}
+        assert body["accepted"]["asset"] == (
             "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42"
         )
 

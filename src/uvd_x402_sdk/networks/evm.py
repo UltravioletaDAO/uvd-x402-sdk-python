@@ -15,7 +15,7 @@ Important EIP-712 domain considerations:
 Multi-token support:
 - USDC: All chains except Robinhood (6 decimals -- including Arc, whose NATIVE
   gas asset is the same balance at 18 decimals; payments use the 6-decimal view)
-- EURC: Ethereum, Base, Avalanche (6 decimals)
+- EURC: Ethereum, Base, Avalanche, Arc mainnet/testnet (6 decimals, euros)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad (6 decimals)
 - PYUSD: Ethereum (6 decimals)
 - USDT: Arbitrum, Optimism, Celo, Monad (6 decimals) - USDT0 omnichain via LayerZero
@@ -57,6 +57,7 @@ BASE = NetworkConfig(
             decimals=6,
             name="EURC",
             version="2",
+            usd_pegged=False,
         ),
     },
 )
@@ -86,6 +87,7 @@ ETHEREUM = NetworkConfig(
             decimals=6,
             name="Euro Coin",
             version="2",
+            usd_pegged=False,
         ),
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
@@ -216,6 +218,7 @@ AVALANCHE = NetworkConfig(
             decimals=6,
             name="Euro Coin",
             version="2",
+            usd_pegged=False,
         ),
         "ausd": TokenConfig(
             address="0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a",
@@ -464,10 +467,8 @@ ROBINHOOD_TESTNET = NetworkConfig(
 # The RPC answers 403 to a default User-Agent: a transport failure there is not
 # an absent chain.
 #
-# EURC (0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a, domain "EURC"/"2") exists on
-# this chain and is deliberately NOT registered: it prices in euros and has not
-# passed its own end-to-end test. Mainnet parameters were independently checked
-# against rpc.mainnet.arc.io on 2026-09-16 (chain ID 5042, USDC/2, 6 decimals).
+# EURC contracts and domains independently checked on both RPCs on 2026-09-17.
+# EURC uses euro units; sponsored gas remains USDC. Live EURC payments pending.
 ARC = NetworkConfig(
     name="arc",
     display_name="Arc",
@@ -485,6 +486,13 @@ ARC = NetworkConfig(
             decimals=6,
             name="USDC",
             version="2",
+        ),
+        "eurc": TokenConfig(
+            address="0xbEf5f6d51CB62b58e6A8f77868681825C6fe21c1",
+            decimals=6,
+            name="EURC",
+            version="2",
+            usd_pegged=False,
         ),
     },
     extra_config={
@@ -515,6 +523,13 @@ ARC_TESTNET = NetworkConfig(
             decimals=6,
             name="USDC",
             version="2",
+        ),
+        "eurc": TokenConfig(
+            address="0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a",
+            decimals=6,
+            name="EURC",
+            version="2",
+            usd_pegged=False,
         ),
     },
     extra_config={
