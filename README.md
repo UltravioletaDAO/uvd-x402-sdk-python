@@ -3055,3 +3055,12 @@ Not snippets — files, and CI runs them:
   that payment, so `signed: true` is the honest maximum.
 
 Full guide: [DX402.md](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/DX402.md)
+
+## Portable facilitator receipts
+
+Arc mainnet/testnet exact USDC/EURC and native Hedera USDC v2 support additive
+facilitator receipts: network, asset, atomic amount, payTo, request hash,
+settlement ID, status and refusal reason. Persist purchase context before sending
+the authorization and reuse it after uncertainty. Payment confirmation does not
+prove merchant delivery. See [the receipt guide](docs/facilitator-receipts.md).
+Live EURC acceptance remains pending.

@@ -12,7 +12,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, Union
 
 try:
-    from fastapi import FastAPI, Request, HTTPException, Depends
+    from fastapi import FastAPI, Request, Response, HTTPException, Depends
     from fastapi.responses import JSONResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,8 +27,31 @@ from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.receipts import payment_response_headers, validate_purchase_context
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+async def _receipt_context(request: Request) -> Optional[str]:
+    header = request.headers.get("X-UVD-Purchase")
+    if header is None:
+        return None
+    try:
+        return validate_purchase_context(header, request.method, str(request.url), await request.body())
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(status_code=400, detail="receipt_context_mismatch")
+
+
+def _receipt_error_headers(error: X402Error) -> dict[str, str]:
+    receipt = getattr(error, "receipt", None)
+    if receipt is None:
+        return create_402_headers()
+    return {**create_402_headers(), **payment_response_headers({"success": False, "receipt": receipt.model_dump()})}
+
+
+def _payment_error_status(error: X402Error) -> int:
+    receipt = getattr(error, "receipt", None)
+    return 503 if (receipt and receipt.status in ("unknown", "pending")) or getattr(error, "retryable", False) else 402
 
 
 class FastAPIX402:
@@ -116,8 +139,8 @@ class FastAPIX402:
         """
         required_amount = Decimal(str(amount_usd))
 
-        async def dependency(request: Request) -> PaymentResult:
-            payment_header = request.headers.get("X-PAYMENT")
+        async def dependency(request: Request, response: Response = None) -> PaymentResult:
+            payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
 
             if not payment_header:
                 response_body = create_402_response(
@@ -137,16 +160,20 @@ class FastAPIX402:
                 # async dependency it would freeze the whole event loop for
                 # every request on the server, /health included, while one
                 # payment settles.
-                return await run_in_threadpool(
+                result = await run_in_threadpool(
                     self._client.process_payment,
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
+                    receipt_context=await _receipt_context(request),
                 )
+                if response is not None and getattr(result, "receipt", None):
+                    response.headers.update(payment_response_headers(result))
+                return result
             except X402Error as e:
                 raise HTTPException(
-                    status_code=402,
+                    status_code=_payment_error_status(e),
                     detail=e.to_dict(),
-                    headers=create_402_headers(),
+                    headers=_receipt_error_headers(e),
                 )
 
         return dependency
@@ -180,9 +207,9 @@ class X402Depends:
         self._amount = Decimal(str(amount_usd))
         self._message = message
 
-    async def __call__(self, request: Request) -> PaymentResult:
+    async def __call__(self, request: Request, response: Response = None) -> PaymentResult:
         """Process payment when used as dependency."""
-        payment_header = request.headers.get("X-PAYMENT")
+        payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
 
         if not payment_header:
             response_body = create_402_response(
@@ -198,16 +225,20 @@ class X402Depends:
 
         try:
             # Blocking HTTP off the event loop; see require_payment above.
-            return await run_in_threadpool(
+            result = await run_in_threadpool(
                 self._client.process_payment,
                 x_payment_header=payment_header,
                 expected_amount_usd=self._amount,
+                    receipt_context=await _receipt_context(request),
             )
+            if response is not None and getattr(result, "receipt", None):
+                response.headers.update(payment_response_headers(result))
+            return result
         except X402Error as e:
             raise HTTPException(
-                status_code=402,
+                status_code=_payment_error_status(e),
                 detail=e.to_dict(),
-                headers=create_402_headers(),
+                headers=_receipt_error_headers(e),
             )
 
 
@@ -239,7 +270,7 @@ def fastapi_require_payment(
     def decorator(func: F) -> F:
         @wraps(func)
         async def wrapper(request: Request, *args: Any, **kwargs: Any) -> Any:
-            payment_header = request.headers.get("X-PAYMENT")
+            payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
 
             if not payment_header:
                 response_body = create_402_response(
@@ -259,16 +290,24 @@ def fastapi_require_payment(
                     client.process_payment,
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
+                    receipt_context=await _receipt_context(request),
                 )
                 # Store result in request state
                 request.state.payment_result = result
-                return await func(request, *args, **kwargs)
+                response = await func(request, *args, **kwargs)
+                if getattr(result, "receipt", None):
+                    headers = payment_response_headers(result)
+                    if isinstance(response, Response):
+                        response.headers.update(headers)
+                    else:
+                        response = JSONResponse(response, headers=headers)
+                return response
 
             except X402Error as e:
                 return JSONResponse(
-                    status_code=402,
+                    status_code=_payment_error_status(e),
                     content=e.to_dict(),
-                    headers=create_402_headers(),
+                    headers=_receipt_error_headers(e),
                 )
 
         return wrapper  # type: ignore
@@ -312,7 +351,7 @@ class X402Middleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         required_amount = self._protected_paths[path]
-        payment_header = request.headers.get("X-PAYMENT")
+        payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
 
         if not payment_header:
             response_body = create_402_response(
@@ -331,13 +370,17 @@ class X402Middleware(BaseHTTPMiddleware):
                 self._client.process_payment,
                 x_payment_header=payment_header,
                 expected_amount_usd=required_amount,
+                    receipt_context=await _receipt_context(request),
             )
             request.state.payment_result = result
-            return await call_next(request)
+            response = await call_next(request)
+            if getattr(result, "receipt", None):
+                response.headers.update(payment_response_headers(result))
+            return response
 
         except X402Error as e:
             return JSONResponse(
-                status_code=402,
+                status_code=_payment_error_status(e),
                 content=e.to_dict(),
-                headers=create_402_headers(),
+                headers=_receipt_error_headers(e),
             )

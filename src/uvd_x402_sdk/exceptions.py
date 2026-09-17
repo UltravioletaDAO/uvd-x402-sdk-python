@@ -81,7 +81,9 @@ class PaymentVerificationError(X402Error):
         message: str,
         reason: Optional[str] = None,
         errors: Optional[List[str]] = None,
+        receipt: Optional[Any] = None,
     ) -> None:
+        self.receipt = receipt
         details = {}
         if reason:
             details["reason"] = reason
@@ -114,7 +116,9 @@ class PaymentSettlementError(X402Error):
         network: Optional[str] = None,
         tx_hash: Optional[str] = None,
         reason: Optional[str] = None,
+        receipt: Optional[Any] = None,
     ) -> None:
+        self.receipt = receipt
         details = {}
         if network:
             details["network"] = network
@@ -444,6 +448,12 @@ class FacilitatorError(X402Error):
             details=details,
         )
         self.status_code = status_code
+        self.receipt = None
+        try:
+            from uvd_x402_sdk.receipts import parse_receipt
+            self.receipt = parse_receipt(json.loads(response_body or "{}").get("receipt"))
+        except (ValueError, TypeError, AttributeError):
+            pass
         self.response_body = response_body
         self.reason = reason
         self.retry_after = retry_after

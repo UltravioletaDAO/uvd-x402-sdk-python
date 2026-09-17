@@ -71,6 +71,12 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 __author__ = "Ultravioleta DAO"
 
+from uvd_x402_sdk.receipts import (
+    FacilitatorReceipt, PurchaseContext, FetchReceiptResult,
+    verify_receipt, payment_response_headers, get_receipt, fetch_with_receipt,
+    parse_receipt, validate_purchase_context,
+)
+
 from uvd_x402_sdk.client import (
     IDEMPOTENCY_KEY_HEADER,
     X402Client,
@@ -740,3 +746,6 @@ if not ADVANCED_ESCROW_AVAILABLE:
 
 from uvd_x402_sdk.hedera import HederaSigner, build_hedera_requirements, build_hedera_request
 __all__ += ["HederaSigner", "build_hedera_requirements", "build_hedera_request"]
+__all__ += ["FacilitatorReceipt", "PurchaseContext", "FetchReceiptResult",
+            "verify_receipt", "payment_response_headers", "get_receipt",
+            "fetch_with_receipt", "parse_receipt", "validate_purchase_context"]

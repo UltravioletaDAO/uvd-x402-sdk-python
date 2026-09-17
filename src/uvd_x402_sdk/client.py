@@ -1141,6 +1141,7 @@ class X402Client:
         payload: PaymentPayload,
         operation: str,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> Dict[str, str]:
         """JSON content type, plus the ``Idempotency-Key`` for ``operation``.
 
@@ -1152,6 +1153,8 @@ class X402Client:
         two purchases apart.
         """
         headers = {"Content-Type": "application/json"}
+        if receipt_context is not None:
+            headers["X-UVD-Purchase"] = receipt_context
         if not self.config.send_idempotency_key:
             return headers
         if idempotency_scope is None or (
@@ -1174,6 +1177,7 @@ class X402Client:
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -1211,6 +1215,10 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
+        if receipt_context is not None:
+            context_data = json.loads(base64.b64decode(receipt_context, validate=True))
+            requirements.resource = context_data["url"]
+
         envelope_version = resolve_envelope_version(
             payload, requirements, self.config.x402_version
         )
@@ -1229,7 +1237,7 @@ class X402Client:
             response = client.post(
                 f"{self.facilitator_url_for(payload.network)}/verify",
                 json=verify_request,
-                headers=self._facilitator_headers(payload, "verify", idempotency_scope),
+                headers=self._facilitator_headers(payload, "verify", idempotency_scope, receipt_context),
                 timeout=self.config.verify_timeout,
             )
 
@@ -1250,6 +1258,7 @@ class X402Client:
                     message=f"Payment verification failed: {verify_response.message}",
                     reason=verify_response.invalidReason,
                     errors=verify_response.errors,
+                    receipt=verify_response.receipt,
                 )
 
             logger.info(f"Payment verified! Payer: {verify_response.payer}")
@@ -1271,6 +1280,7 @@ class X402Client:
         token_decimals: Optional[int] = None,
         retry: bool = False,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -1314,7 +1324,7 @@ class X402Client:
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals,
-                idempotency_scope=idempotency_scope,
+                idempotency_scope=idempotency_scope, receipt_context=receipt_context,
             )
 
         for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
@@ -1323,7 +1333,7 @@ class X402Client:
                     payload, expected_amount_usd, pay_to=pay_to,
                     asset=asset, eip712_domain=eip712_domain,
                     token_decimals=token_decimals,
-                    idempotency_scope=idempotency_scope,
+                    idempotency_scope=idempotency_scope, receipt_context=receipt_context,
                 )
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
@@ -1361,6 +1371,7 @@ class X402Client:
         token_decimals: Optional[int] = None,
         retry: bool = False,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Settle payment without raising on payment-flow errors.
@@ -1396,7 +1407,7 @@ class X402Client:
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals, retry=retry,
-                idempotency_scope=idempotency_scope,
+                idempotency_scope=idempotency_scope, receipt_context=receipt_context,
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
@@ -1432,6 +1443,7 @@ class X402Client:
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> SettleResponse:
         """Single settle attempt — the pre-retry settle_payment body, unchanged."""
         normalized_network = self.validate_network(payload.network)
@@ -1444,6 +1456,10 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
+        if receipt_context is not None:
+            context_data = json.loads(base64.b64decode(receipt_context, validate=True))
+            requirements.resource = context_data["url"]
+
         envelope_version = resolve_envelope_version(
             payload, requirements, self.config.x402_version
         )
@@ -1454,7 +1470,7 @@ class X402Client:
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
-        headers = self._facilitator_headers(payload, "settle", idempotency_scope)
+        headers = self._facilitator_headers(payload, "settle", idempotency_scope, receipt_context)
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
             f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
@@ -1487,7 +1503,8 @@ class X402Client:
                 raise PaymentSettlementError(
                     message=f"Payment settlement failed: {settle_response.message}",
                     network=payload.network,
-                    reason=settle_response.message,
+                    reason=settle_response.errorReason or settle_response.message,
+                    receipt=settle_response.receipt,
                 )
 
             tx_hash = settle_response.get_transaction_hash()
@@ -1576,6 +1593,7 @@ class X402Client:
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
         idempotency_scope: Optional[str] = None,
+        receipt_context: Optional[str] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -1623,7 +1641,7 @@ class X402Client:
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
             token_decimals=token_decimals,
-            idempotency_scope=idempotency_scope,
+            idempotency_scope=idempotency_scope, receipt_context=receipt_context,
         )
 
         # Settle payment
@@ -1631,7 +1649,7 @@ class X402Client:
             payload, expected_amount_usd, pay_to=pay_to,
             asset=asset, eip712_domain=eip712_domain,
             token_decimals=token_decimals,
-            idempotency_scope=idempotency_scope,
+            idempotency_scope=idempotency_scope, receipt_context=receipt_context,
         )
 
         # Build result
@@ -1641,6 +1659,7 @@ class X402Client:
             transaction_hash=settle_response.get_transaction_hash(),
             network=payload.network,
             amount_usd=expected_amount_usd,
+            receipt=settle_response.receipt,
         )
 
     # =========================================================================
@@ -2499,6 +2518,11 @@ class X402Client:
             return None
         scale = Decimal(10) ** token_decimals
         return min(options, key=lambda opt: Decimal(opt["amount"]) / scale)
+
+    def fetch_with_receipt(self, url: str, *, context: Any, persist: Any, **kwargs: Any) -> Any:
+        """Fetch or resume one purchase, retaining its facilitator receipt."""
+        from uvd_x402_sdk.receipts import fetch_with_receipt
+        return fetch_with_receipt(self, url, context=context, persist=persist, **kwargs)
 
     def fetch(
         self,
