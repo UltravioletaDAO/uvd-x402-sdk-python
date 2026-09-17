@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-09-17T15:43:16.773225+00:00",
+  "package": "uvd-x402-sdk",
+  "version": "0.87.0",
+  "source": "fresh PyPI installation",
+  "offlineOnly": true,
+  "newTransactions": 0,
+  "ledgers": [
+    {
+      "network": "hedera:mainnet",
+      "asset": "0.0.456858",
+      "amountAtomic": "1000",
+      "variantsVerified": 3,
+      "noHbarPrincipal": true,
+      "unsupportedAssetsRejected": true
+    },
+    {
+      "network": "hedera:testnet",
+      "asset": "0.0.429274",
+      "amountAtomic": "1000",
+      "variantsVerified": 3,
+      "noHbarPrincipal": true,
+      "unsupportedAssetsRejected": true
+    }
+  ]
+}
