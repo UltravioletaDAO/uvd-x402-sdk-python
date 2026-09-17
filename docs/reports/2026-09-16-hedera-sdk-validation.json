@@ -70,5 +70,6 @@
     }
   ],
   "preverify_note": "Read-only verification; these checks do not broadcast or spend. Post-publication settlement receipts will be recorded separately.",
-  "signing_dependencies": "hiero-sdk-python 0.2.10"
+  "signing_dependencies": "hiero-sdk-python 0.2.10",
+  "published_package_acceptance": "2026-09-16-hedera-sdk-release-acceptance.json"
 }
