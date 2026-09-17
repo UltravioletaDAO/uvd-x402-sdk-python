@@ -31,12 +31,12 @@ def test_registry_network_asset_and_sponsor(network, usdc, sponsor):
     assert get_network(network).chain_id == 0
     assert get_network(network).usdc_address == usdc
     assert offer(network)["extra"] == {"feePayer": sponsor}
-    assert get_token_config(network, "hbar").decimals == 8
-    assert get_token_config(network, "hbar").usd_pegged is False
+    assert get_token_config(network, "hbar") is None
+    assert set(get_network(network).tokens) == {"usdc"}
 
 
 @pytest.mark.parametrize("network", ["hedera:mainnet", "hedera:testnet"])
-@pytest.mark.parametrize("asset", ["usdc", "hbar"])
+@pytest.mark.parametrize("asset", ["usdc"])
 def test_signed_transaction_list_exact_principal_and_all_variant_signatures(network, asset):
     r = offer(network, asset, "9007199254740993")  # beyond JS Number precision
     p = signer(network).create_payment_payload(r)
@@ -55,7 +55,8 @@ def test_signed_transaction_list_exact_principal_and_all_variant_signatures(netw
         assert body.transactionValidDuration.seconds == 180
         ids.add(body.transactionID.SerializeToString())
         transfer = body.cryptoTransfer
-        legs = transfer.transfers.accountAmounts if asset == "hbar" else transfer.tokenTransfers[0].transfers
+        assert not transfer.transfers.accountAmounts  # HBAR is sponsor fees only
+        legs = transfer.tokenTransfers[0].transfers
         assert {x.accountID.accountNum: x.amount for x in legs} == {111: -9007199254740993, 222: 9007199254740993}
         assert all(not x.is_approval for x in legs)
         if asset == "usdc":
@@ -105,7 +106,7 @@ def test_native_usdc_price_preserves_atomic_precision():
         create_402_response_v2(Decimal("0.0000001"),config)
 
 
-@pytest.mark.parametrize("asset,amount,ceiling", [("usdc","1000","0.001"),("hbar","10000","0.0001")])
+@pytest.mark.parametrize("asset,amount,ceiling", [("usdc","1000","0.001")])
 def test_native_buyer_loop_echoes_accepted_and_correct_units(asset,amount,ceiling):
     r=offer(asset=asset,amount=amount);seen=[]
     def handler(request):
@@ -124,6 +125,15 @@ def test_native_buyer_loop_echoes_accepted_and_correct_units(asset,amount,ceilin
 
 def test_usd_merchant_api_rejects_hbar():
     c=X402Client(config=X402Config(recipient_hedera="0.0.222",supported_networks=["hedera:testnet"]))
-    p=c.extract_payload(signer().create_payment_header(offer(asset="hbar")))
+    p=c.extract_payload(signer().create_payment_header(offer()))
     with pytest.raises(ValueError,match="HBAR"):
         c._build_payment_requirements(p,Decimal("1"),asset="0.0.0",token_decimals=8)
+
+
+@pytest.mark.parametrize("network", ["hedera:mainnet", "hedera:testnet"])
+@pytest.mark.parametrize("asset", ["hbar", "0.0.0", "0.0.1234"])
+def test_hbar_and_custom_tokens_rejected_before_signing(network, asset):
+    with pytest.raises(ValueError, match="native USDC only"):
+        offer(network, asset)
+    with pytest.raises(ValueError, match="native USDC only"):
+        signer(network).create_payment_payload({**offer(network), "asset": asset})
