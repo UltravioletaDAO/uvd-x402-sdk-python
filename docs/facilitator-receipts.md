@@ -52,3 +52,18 @@ matching the existing `fetch`; async FastAPI merchant propagation is supported.
 
 See the [full contract and operational limits](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/facilitator-receipts.md).
 EURC real-payment acceptance is pending; the signed fixture vectors are offline.
+
+This API is published in [0.88.0](https://pypi.org/project/uvd-x402-sdk/0.88.0/). The facilitator's
+[release snapshot](https://github.com/UltravioletaDAO/x402-rs/blob/main/docs/reports/2026-09-17-facilitator-receipts-release.md)
+documents eight confirmed USDC payments: both published SDKs on Arc and Hedera,
+mainnet and testnet. Each purchase resumed after a merchant HTTP 500 with the
+same authorization, receipt and transaction. The artifact includes all eight
+signed receipts, independent chain checks and an audited quota-blocked attempt.
+Both SDKs verified all nine exported signatures. Real EURC settlements remain
+deferred; those should not be inferred from offline fixtures.
+
+Facilitator 2.36.1 also makes private receipt lookup return HTTP 200 for any
+authorized stored receipt, including `unknown` after a failed settlement call.
+HTTP 200 means lookup succeeded; inspect and verify the receipt status before
+treating the payment as confirmed. This fix preserves the original signature
+and settlement POST result, and requires no SDK upgrade beyond this release.
