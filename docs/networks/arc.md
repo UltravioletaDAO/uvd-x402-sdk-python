@@ -57,7 +57,10 @@ accepted = {
     "payTo": merchant_address, "maxTimeoutSeconds": 300,
     "extra": {"name": eurc.name, "version": eurc.version},
 }
-resource = {"url": "https://your-service.example/paid"}
+resource = {
+    "url": "https://your-service.example/paid",
+    "description": "Resource priced in EURC", "mimeType": "application/json",
+}
 # buyer is an X402Client connected to this chain's EVM signer.
 header = buyer.create_authorization(
     accepted["payTo"], Decimal("0.01"), token_type="eurc",
