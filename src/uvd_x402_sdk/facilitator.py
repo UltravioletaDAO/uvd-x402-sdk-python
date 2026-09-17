@@ -82,7 +82,14 @@ EVM_FACILITATOR_TESTNET = "0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8"
 
 # Maps network names to their fee payer addresses
 # EVM networks don't have fee payers (they use EIP-3009 transferWithAuthorization)
+HEDERA_FEE_PAYER_MAINNET = "0.0.10868300"
+HEDERA_FEE_PAYER_TESTNET = "0.0.10576385"
+
 _FEE_PAYER_BY_NETWORK: Dict[str, str] = {
+    "hedera:mainnet": HEDERA_FEE_PAYER_MAINNET,
+    "hedera:testnet": HEDERA_FEE_PAYER_TESTNET,
+    "hedera": HEDERA_FEE_PAYER_MAINNET,
+    "hedera-testnet": HEDERA_FEE_PAYER_TESTNET,
     # Algorand
     "algorand": ALGORAND_FEE_PAYER_MAINNET,
     "algorand-mainnet": ALGORAND_FEE_PAYER_MAINNET,
@@ -115,6 +122,8 @@ _FEE_PAYER_BY_NETWORK: Dict[str, str] = {
 
 # CAIP-2 format mappings (x402 v2)
 _FEE_PAYER_BY_CAIP2: Dict[str, str] = {
+    "hedera:mainnet": HEDERA_FEE_PAYER_MAINNET,
+    "hedera:testnet": HEDERA_FEE_PAYER_TESTNET,
     # Algorand
     "algorand:mainnet": ALGORAND_FEE_PAYER_MAINNET,
     "algorand:testnet": ALGORAND_FEE_PAYER_TESTNET,
@@ -232,6 +241,10 @@ def get_network_type_from_fee_payer(address: str) -> Optional[NetworkType]:
     """
     if not address:
         return None
+
+    import re
+    if re.fullmatch(r"0\.0\.[1-9][0-9]*", address):
+        return NetworkType.HEDERA
 
     # Algorand: 58 characters, base32 (A-Z2-7)
     if len(address) == 58 and address.isalnum():

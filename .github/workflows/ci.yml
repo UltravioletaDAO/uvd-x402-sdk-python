@@ -22,7 +22,7 @@ jobs:
         # `cryptography`) and advanced_escrow imports web3 at module level. A
         # module with no installable deps here is a module with no tests, and
         # the failure looks like ModuleNotFoundError rather than a gap.
-        run: pip install -e '.[signer,dev,dx402,escrow]'
+        run: pip install -e '.[signer,dev,dx402,escrow,hedera]'
 
       - name: Test
         run: python -m pytest -q

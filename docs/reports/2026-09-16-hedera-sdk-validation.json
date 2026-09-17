@@ -1,0 +1,74 @@
+{
+  "checked_at": "2026-09-17T03:28:18.969607+00:00",
+  "version": "0.85.0",
+  "unit_tests_passed": 1218,
+  "cross_language_checks_passed": 430,
+  "native_facilitator_preverify": [
+    {
+      "event": "preverify",
+      "at": "2026-09-17T03:25:10.945567+00:00",
+      "sdk": "python",
+      "version": "0.85.0",
+      "network": "hedera:mainnet",
+      "asset": "0.0.0",
+      "amount": "10000",
+      "payer": "0.0.10868301",
+      "payTo": "0.0.10868302",
+      "feePayer": "0.0.10868300",
+      "verdict": {
+        "isValid": true,
+        "payer": "0.0.10868301"
+      }
+    },
+    {
+      "event": "preverify",
+      "at": "2026-09-17T03:25:13.314961+00:00",
+      "sdk": "python",
+      "version": "0.85.0",
+      "network": "hedera:mainnet",
+      "asset": "0.0.456858",
+      "amount": "1000",
+      "payer": "0.0.10868301",
+      "payTo": "0.0.10868302",
+      "feePayer": "0.0.10868300",
+      "verdict": {
+        "isValid": true,
+        "payer": "0.0.10868301"
+      }
+    },
+    {
+      "event": "preverify",
+      "at": "2026-09-17T03:25:05.856947+00:00",
+      "sdk": "python",
+      "version": "0.85.0",
+      "network": "hedera:testnet",
+      "asset": "0.0.0",
+      "amount": "10000",
+      "payer": "0.0.10576386",
+      "payTo": "0.0.10576387",
+      "feePayer": "0.0.10576385",
+      "verdict": {
+        "isValid": true,
+        "payer": "0.0.10576386"
+      }
+    },
+    {
+      "event": "preverify",
+      "at": "2026-09-17T03:25:08.167006+00:00",
+      "sdk": "python",
+      "version": "0.85.0",
+      "network": "hedera:testnet",
+      "asset": "0.0.429274",
+      "amount": "1000",
+      "payer": "0.0.10576386",
+      "payTo": "0.0.10576387",
+      "feePayer": "0.0.10576385",
+      "verdict": {
+        "isValid": true,
+        "payer": "0.0.10576386"
+      }
+    }
+  ],
+  "preverify_note": "Read-only verification; these checks do not broadcast or spend. Post-publication settlement receipts will be recorded separately.",
+  "signing_dependencies": "hiero-sdk-python 0.2.10"
+}

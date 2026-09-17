@@ -691,6 +691,7 @@ class X402Client:
         self._http_client: Optional[httpx.Client] = None
 
         # Client-side signer (set via connect_with_private_key)
+        self._hedera_signer: Any = None
         self._signer: Any = None  # eth_account.Account when connected
         self._signer_address: Optional[str] = None
         # Normalised signing seam. BOTH connect_* methods populate this with a
@@ -1059,6 +1060,20 @@ class X402Client:
                 network=payload.network,
                 supported_networks=get_supported_network_names(),
             )
+
+        if network_config.network_type == NetworkType.HEDERA:
+            from uvd_x402_sdk.hedera import build_hedera_requirements
+            if payload.x402Version != 2:
+                raise ValueError("Native Hedera supports only x402 v2")
+            if asset not in (None, network_config.usdc_address) or token_decimals not in (None, 6) or eip712_domain:
+                raise ValueError("Use build_hedera_request with atomic requirements for HBAR; USD pricing supports native USDC only")
+            atomic = expected_amount_usd * Decimal(10**6)
+            if not atomic.is_finite() or atomic != atomic.to_integral_value():
+                raise ValueError("USDC price must have at most 6 decimal places")
+            r = build_hedera_requirements(normalized_network, pay_to or self.config.get_recipient(normalized_network), str(int(atomic)))
+            return PaymentRequirements(scheme="exact", network=r["network"], maxAmountRequired=r["amount"],
+                payTo=r["payTo"], asset=r["asset"], extra=r["extra"], maxTimeoutSeconds=180,
+                resource=self.config.resource_url or "https://api.example.com/payment", description=self.config.description, mimeType="application/json")
 
         # A price in USD only becomes base units when the settlement asset is
         # worth a dollar per whole unit. Without an explicit `asset` the network
@@ -1966,6 +1981,18 @@ class X402Client:
     # Client-Side Signing (Server-side signer without browser wallet)
     # =========================================================================
 
+    def connect_with_hedera(self, account_id: str, private_key: str, *, network: str,
+                            fee_payer: Optional[str] = None) -> str:
+        """Connect an offline native Hedera buyer (Python 3.10+, [hedera] extra)."""
+        from uvd_x402_sdk.hedera import HederaSigner
+        signer = HederaSigner(account_id, private_key, network=network, fee_payer=fee_payer)
+        self._hedera_signer = signer
+        self._signer = None
+        self._sign_typed_data = None
+        self._signer_address = account_id
+        self._connected_chain = network
+        return account_id
+
     def connect_with_private_key(
         self,
         private_key: str,
@@ -2055,6 +2082,7 @@ class X402Client:
             # fixes that case.
             return sig if sig.startswith("0x") else "0x" + sig
 
+        self._hedera_signer = None
         self._sign_typed_data = _sign_local
 
         logger.info(f"Connected wallet {self._signer_address}"
@@ -2139,6 +2167,7 @@ class X402Client:
                 )
             return sig if sig.startswith("0x") else "0x" + sig
 
+        self._hedera_signer = None
         self._sign_typed_data = _sign_remote
 
         logger.info(
@@ -2150,7 +2179,7 @@ class X402Client:
     @property
     def is_connected(self) -> bool:
         """Check if a signer is connected (private key OR external)."""
-        return self._sign_typed_data is not None
+        return self._sign_typed_data is not None or self._hedera_signer is not None
 
     @property
     def address(self) -> Optional[str]:
@@ -2213,11 +2242,26 @@ class X402Client:
             ...     headers={"X-PAYMENT": header}
             ... )
         """
-        if not self._sign_typed_data:
+        if not self._sign_typed_data and self._hedera_signer is None:
             raise RuntimeError(
                 "No signer connected. Call connect_with_private_key() or "
                 "connect_with_signer() first."
             )
+
+        if self._hedera_signer is not None:
+            from uvd_x402_sdk.hedera import validate_hedera_requirements
+            if x402_version != 2 or accepted is None or extensions:
+                raise ValueError("Hedera requires v2, accepted requirements and no extensions")
+            r = validate_hedera_requirements(accepted)
+            # This legacy entry point names its amount in USD: use the atomic
+            # signer API (or fetch with token_type='hbar') for native HBAR.
+            if token_type != "usdc" or r["asset"] == "0.0.0":
+                raise ValueError("HBAR is not USD; use HederaSigner with an atomic amount")
+            if (r["payTo"] != pay_to or Decimal(r["amount"]) != Decimal(str(amount_usd)) * 10**6
+                    or (chain_name and normalize_network(chain_name) != r["network"])):
+                raise ValueError("Hedera offer differs from the approved price, recipient or network")
+            info = resource if isinstance(resource, dict) else {"url": resource or ""}
+            return self._hedera_signer.create_payment_header(r, resource=info)
 
         # NOTE: eth-account is NOT imported here any more. It is only needed by the
         # local-key path, which imports it inside its own closure — so an external
@@ -2520,7 +2564,7 @@ class X402Client:
             ... )
             >>> resp.json()
         """
-        if not self._sign_typed_data:
+        if not self._sign_typed_data and self._hedera_signer is None:
             raise RuntimeError(
                 "No signer connected. Call connect_with_private_key() or "
                 "connect_with_signer() first."
@@ -2564,6 +2608,13 @@ class X402Client:
                 "no payment option within max_amount", resource=url
             )
 
+        if self._hedera_signer is not None:
+            from uvd_x402_sdk.hedera import HEDERA_NETWORKS
+            network = self._hedera_signer.network
+            asset_id = "0.0.0" if token_type == "hbar" else HEDERA_NETWORKS[network]["usdc"] if token_type == "usdc" else None
+            if chosen["network"] != network or chosen["asset"] != asset_id:
+                raise ValueError("Hedera offer differs from the connected ledger or selected asset")
+            token_decimals = 8 if token_type == "hbar" else 6
         price = Decimal(chosen["amount"]) / (Decimal(10) ** token_decimals)
         if ceiling is not None and price > ceiling:
             raise PaymentExceedsMaxError(price, ceiling, resource=url)
@@ -2594,18 +2645,25 @@ class X402Client:
             decision.versus_quote.code,
         )
 
-        header = self.create_authorization(
-            pay_to=chosen["payTo"],
-            amount_usd=price,
-            chain_name=chosen["network"],
-            token_type=token_type,
-            x402_version=version,
-            accepted=(chosen["raw"] if version >= 2 else None),
-            resource=url,
-            valid_duration=valid_duration,
-            eip712_domain=eip712_domain or chosen.get("eip712_domain"),
-        )
+        if self._hedera_signer is not None:
+            if version != 2 or parsed.extensions:
+                raise ValueError("Hedera supports x402 v2 without extensions")
+            header = self._hedera_signer.create_payment_header(chosen["raw"], resource={"url": url})
+        else:
+            header = self.create_authorization(
+                pay_to=chosen["payTo"],
+                amount_usd=price,
+                chain_name=chosen["network"],
+                token_type=token_type,
+                x402_version=version,
+                accepted=(chosen["raw"] if version >= 2 else None),
+                resource=url,
+                valid_duration=valid_duration,
+                eip712_domain=eip712_domain or chosen.get("eip712_domain"),
+            )
 
         paid_headers = dict(request_kwargs.pop("headers", None) or {})
         paid_headers["X-PAYMENT"] = header
+        if version == 2:
+            paid_headers["PAYMENT-SIGNATURE"] = header
         return client.request(method, url, headers=paid_headers, **request_kwargs)

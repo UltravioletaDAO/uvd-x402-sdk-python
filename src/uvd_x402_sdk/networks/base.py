@@ -24,10 +24,10 @@ from typing import Dict, List, Literal, Optional, Any
 # - pyusd: PayPal USD (PayPal/Paxos) - 6 decimals
 # - usdt: Tether USD (USDT0 omnichain via LayerZero) - 6 decimals
 # - usdg: Global Dollar (Paxos USDG) - 6 decimals - default asset on Robinhood Chain
-TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg"]
+TokenType = Literal["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg", "hbar"]
 
 # All supported token types
-ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg"]
+ALL_TOKEN_TYPES: List[TokenType] = ["usdc", "eurc", "ausd", "pyusd", "usdt", "usdg", "hbar"]
 
 
 @dataclass
@@ -46,6 +46,7 @@ class TokenConfig:
     decimals: int
     name: str
     version: str
+    usd_pegged: bool = True
 
 
 class NetworkType(Enum):
@@ -71,6 +72,7 @@ class NetworkType(Enum):
     STELLAR = "stellar"
     ALGORAND = "algorand"  # Algorand ASA transfers
     SUI = "sui"  # Sui Move VM chains (sponsored transactions)
+    HEDERA = "hedera"
     XRPL = "xrpl"  # XRP Ledger (native XRP, pre-signed Payment tx blobs)
 
     @classmethod
@@ -197,6 +199,8 @@ _NETWORK_REGISTRY: Dict[str, NetworkConfig] = {}
 # keeps the same distinction - its FromStr takes `xrpl-mainnet` while
 # everything it publishes says `xrpl` (x402-rs/src/network.rs:251,189).
 _NETWORK_ALIASES: dict[str, str] = {
+    "hedera": "hedera:mainnet",
+    "hedera-testnet": "hedera:testnet",
     "skale": "skale-base",
     "skale-testnet": "skale-base-sepolia",
     # Renamed in 0.77.0: the facilitator advertises the mainnet as `xrpl`.
@@ -436,6 +440,7 @@ def get_networks_by_token(token_type: TokenType) -> List[NetworkConfig]:
 
 # CAIP-2 namespace to network mapping
 _CAIP2_NAMESPACE_MAP = {
+    "hedera": NetworkType.HEDERA,
     "eip155": NetworkType.EVM,
     "solana": NetworkType.SVM,
     "near": NetworkType.NEAR,
@@ -446,6 +451,8 @@ _CAIP2_NAMESPACE_MAP = {
 
 # Network name to CAIP-2 format
 _NETWORK_TO_CAIP2 = {
+    "hedera:mainnet": "hedera:mainnet",
+    "hedera:testnet": "hedera:testnet",
     # EVM chains (eip155:chainId)
     "base": "eip155:8453",
     "ethereum": "eip155:1",

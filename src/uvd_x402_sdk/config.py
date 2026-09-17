@@ -101,6 +101,7 @@ class X402Config:
     recipient_solana: str = ""  # Also used for Fogo and other SVM chains
     recipient_near: str = ""
     recipient_stellar: str = ""
+    recipient_hedera: str = ""  # Numeric ID; prefer per-ledger network_configs
     recipient_xrpl: str = ""  # XRP Ledger recipient (classic r... address)
 
     # Solana/SVM facilitator (fee payer) - same for all SVM chains
@@ -110,7 +111,7 @@ class X402Config:
     verify_timeout: float = 30.0
     settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
 
-    # Network configuration - All 27 networks
+    # Network configuration - All 29 networks
     supported_networks: List[str] = field(default_factory=lambda: [
         # EVM chains (17)
         "base", "ethereum", "polygon", "arbitrum", "optimism",
@@ -129,6 +130,7 @@ class X402Config:
         "sui", "sui-testnet",
         # XRPL (2) - native XRP
         "xrpl", "xrpl-testnet",
+        "hedera:mainnet", "hedera:testnet",
     ])
 
     # Per-network recipient overrides
@@ -166,6 +168,7 @@ class X402Config:
             self.recipient_near,
             self.recipient_stellar,
             self.recipient_xrpl,
+            self.recipient_hedera,
         ]):
             raise ValueError("At least one recipient address is required")
 
@@ -360,6 +363,7 @@ class X402Config:
             recipient_near=os.environ.get("X402_RECIPIENT_NEAR", ""),
             recipient_stellar=os.environ.get("X402_RECIPIENT_STELLAR", ""),
             recipient_xrpl=os.environ.get("X402_RECIPIENT_XRPL", ""),
+            recipient_hedera=os.environ.get("X402_RECIPIENT_HEDERA", ""),
             facilitator_solana=os.environ.get(
                 "X402_FACILITATOR_SOLANA",
                 "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
@@ -423,6 +427,8 @@ class X402Config:
             return self.recipient_near
         elif network_config.network_type == NetworkType.STELLAR:
             return self.recipient_stellar
+        elif network_config.network_type == NetworkType.HEDERA:
+            return self.recipient_hedera
         elif network_config.network_type == NetworkType.XRPL:
             return self.recipient_xrpl
         else:
@@ -475,6 +481,7 @@ class X402Config:
             "recipient_near": self.recipient_near,
             "recipient_stellar": self.recipient_stellar,
             "recipient_xrpl": self.recipient_xrpl,
+            "recipient_hedera": self.recipient_hedera,
             "facilitator_solana": self.facilitator_solana,
             "verify_timeout": self.verify_timeout,
             "settle_timeout": self.settle_timeout,

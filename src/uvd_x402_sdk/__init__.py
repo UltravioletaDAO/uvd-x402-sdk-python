@@ -3,7 +3,7 @@ uvd-x402-sdk: Python SDK for x402 payments via Ultravioleta DAO facilitator.
 
 This SDK enables developers to easily integrate x402 cryptocurrency payments
 into their Python applications with support for 23 blockchain networks across
-7 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui, XRPL).
+8 network types (EVM, SVM, NEAR, Stellar, Algorand, Sui, XRPL, Hedera).
 
 The SDK automatically handles facilitator configuration - users don't need to
 configure fee payer addresses or other facilitator details manually.
@@ -36,7 +36,7 @@ Example usage:
     def protected_endpoint():
         return {"message": "Payment verified!"}
 
-Supported Networks (27 total):
+Supported Networks (29 total):
 - EVM (17): Base, Ethereum, Polygon, Arbitrum, Optimism, Avalanche, Celo,
             HyperEVM, Unichain, Monad, Scroll, SKALE Base, SKALE Base Sepolia,
             Robinhood, Robinhood Testnet, Arc, Arc Testnet
@@ -737,3 +737,6 @@ if not ADVANCED_ESCROW_AVAILABLE:
         "is_escrow_supported",
     }
     __all__ = [n for n in __all__ if n not in _advanced_names]
+
+from uvd_x402_sdk.hedera import HederaSigner, build_hedera_requirements, build_hedera_request
+__all__ += ["HederaSigner", "build_hedera_requirements", "build_hedera_request"]
