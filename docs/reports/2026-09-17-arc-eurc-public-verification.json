@@ -1,0 +1,57 @@
+{
+  "checked_at": "2026-09-17T05:01:58.997809+00:00",
+  "facilitator_version": "2.34.0",
+  "published_python_sdk": "0.86.0",
+  "read_only_verification": [
+    {
+      "network": "arc",
+      "protocol": 1,
+      "http": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "insufficient_funds",
+        "payer": "0xBBf6eD3df440aC9Ae49CD57EEa24De03EbDd9557"
+      },
+      "outcome": "expected rejection of unfunded signer",
+      "settle_called": false
+    },
+    {
+      "network": "arc",
+      "protocol": 2,
+      "http": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "insufficient_funds",
+        "payer": "0xF1b1eBCC98c6FC5308fd13D4A24AD307Bb7a6a84"
+      },
+      "outcome": "expected rejection of unfunded signer",
+      "settle_called": false
+    },
+    {
+      "network": "arc-testnet",
+      "protocol": 1,
+      "http": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "insufficient_funds",
+        "payer": "0x8E5B7bE3C917e8Bc91951a451663d0c37301e883"
+      },
+      "outcome": "expected rejection of unfunded signer",
+      "settle_called": false
+    },
+    {
+      "network": "arc-testnet",
+      "protocol": 2,
+      "http": 200,
+      "response": {
+        "isValid": false,
+        "invalidReason": "insufficient_funds",
+        "payer": "0x5cf6A03D54ed8fCb6eC9A5483623822E8CcC0020"
+      },
+      "outcome": "expected rejection of unfunded signer",
+      "settle_called": false
+    }
+  ],
+  "funded_payments": "pending",
+  "payments_executed": 0
+}
