@@ -4,7 +4,7 @@ Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta
 
 Accept **gasless stablecoin payments** across **29 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Contract metadata and offline tests verified; funded EURC payments pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
+**New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Funded EURC payments confirmed on Arc mainnet (x402 v1 and v2, 2026-09-22); Arc testnet funded acceptance pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
 
 **New in v0.87.0**: Hedera mainnet and testnet accept native USDC only with x402 v2/exact. HBAR funds sponsor network fees and is rejected as payment. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
 
@@ -1104,7 +1104,7 @@ if config:
 networks = get_networks_by_token("eurc")
 for network in networks:
     print(f"EURC available on: {network.display_name}")
-# Output: EURC available on: Ethereum, Base, Avalanche C-Chain
+# Output: EURC available on: Base, Ethereum, Avalanche C-Chain, Arc, Arc Testnet
 ```
 
 ### Token Configuration
@@ -3063,4 +3063,4 @@ facilitator receipts: network, asset, atomic amount, payTo, request hash,
 settlement ID, status and refusal reason. Persist purchase context before sending
 the authorization and reuse it after uncertainty. Payment confirmation does not
 prove merchant delivery. See [the receipt guide](docs/facilitator-receipts.md).
-Live EURC acceptance remains pending.
+Funded EURC payments settled on Arc mainnet (x402 v1/v2, 2026-09-22); Arc testnet funded acceptance is pending.

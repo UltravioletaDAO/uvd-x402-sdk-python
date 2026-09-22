@@ -151,7 +151,7 @@ payment_requirements = {
 - `arc` / `eip155:5042` and `arc-testnet` / `eip155:5042002` are independently verified networks. See `docs/networks/arc.md`.
 - Both use USDC `0x3600000000000000000000000000000000000000`, 6 payment decimals and EIP-712 `USDC` / `2`. Native gas uses 18 decimals on the same balance; never use that precision for a signed payment.
 - `tests/test_arc_testnet.py` preserves the decimal regression; `tests/test_arc_networks.py` checks real signatures and cross-network domain isolation.
-- Support covers direct `exact` EOA USDC payments. EURC, Gateway, escrow, `upto`, ERC-8004 writes and EIP-6492 are not enabled for Arc.
+- Support covers direct `exact` EOA USDC and EURC payments (EURC since v0.86.0: `0xbEf5…21c1` mainnet, `0x89B5…D72a` testnet, domain `EURC` / `2`, `usd_pegged=False` — prices are euros; `tests/test_arc_eurc.py`). Gateway, escrow, `upto`, ERC-8004 writes and EIP-6492 are not enabled for Arc.
 
 ### ERC-8004 Trustless Agents (erc8004.py)
 - Supports 20 networks: 18 EVM + Solana + Solana-devnet

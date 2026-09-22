@@ -20,7 +20,7 @@ The SDK supports 29 blockchain networks across 8 network families:
 Multi-token support:
 - USDC: All EVM chains except Robinhood. On Arc the SAME balance is exposed as
         18-decimal native gas and 6-decimal ERC-20; payments use the 6.
-- EURC: Ethereum, Base, Avalanche
+- EURC: Ethereum, Base, Avalanche, Arc, Arc Testnet (euros: usd_pegged=False)
 - AUSD: Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui
 - PYUSD: Ethereum
 - USDG: Robinhood, Robinhood Testnet (Paxos Global Dollar)
