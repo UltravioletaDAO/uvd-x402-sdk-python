@@ -174,5 +174,5 @@ merchant path in this guide was used as written: explicit `accepted` with
 `build_verify_request_v2` / `build_settle_request_v2` (v1: `PaymentRequirements` +
 `build_*_request_for_version`). The same run confirmed that `verify_payment` with a
 dollar price and `asset=EURC` raises before any request. Replaying each settle body
-returned the original settlement and did not debit the payer again. Arc testnet
-remains pending.
+did not debit the payer again (measured by payer balance); in v1 the replay
+returned the original transaction hash. Arc testnet remains pending.
