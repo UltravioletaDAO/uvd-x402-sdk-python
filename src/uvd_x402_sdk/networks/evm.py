@@ -468,7 +468,8 @@ ROBINHOOD_TESTNET = NetworkConfig(
 # an absent chain.
 #
 # EURC contracts and domains independently checked on both RPCs on 2026-09-17.
-# EURC uses euro units; sponsored gas remains USDC. Live EURC payments pending.
+# EURC uses euro units; sponsored gas remains USDC. Funded EURC payments settled on
+# Arc mainnet on 2026-09-22 (x402 v1/v2, docs/networks/arc.md); testnet pending.
 ARC = NetworkConfig(
     name="arc",
     display_name="Arc",

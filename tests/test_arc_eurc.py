@@ -1,4 +1,4 @@
-"""Offline cryptographic acceptance; no funded EURC settlement is claimed."""
+"""Offline cryptographic acceptance. Funded settlements live in docs/networks/arc.md."""
 import base64
 import json
 from decimal import Decimal

@@ -1,6 +1,6 @@
 # Arc mainnet and testnet
 
-Direct USDC and EURC `exact` payments are supported by the Ultravioleta facilitator in both x402 v1 and v2. USDC has funded payment receipts; EURC has contract and offline signing validation, with funded acceptance pending.
+Direct USDC and EURC `exact` payments are supported by the Ultravioleta facilitator in both x402 v1 and v2. Both have funded payment receipts on Arc mainnet (EURC since 2026-09-22, x402 v1 and v2); EURC funded acceptance on Arc testnet is pending.
 
 | Setting | Mainnet | Testnet |
 |---|---|---|
@@ -33,9 +33,12 @@ Do not pass a dollar quote into the EURC signing path.
 
 Contract metadata and EIP-712 domain separators were checked through both live
 RPCs on 2026-09-17. Offline signatures and network/token isolation are tested.
-**Funded EURC verify/settle acceptance remains pending on both networks**, as
-requested by the operator. Existing Arc payment receipts below are **USDC only**;
-they do not prove EURC settlement. No EURC payment hashes are claimed.
+**Funded EURC payments settled on Arc mainnet on 2026-09-22** through the public
+facilitator (2.36.1), signed by this SDK as published (0.88.0) from a fresh EOA,
+10000 atomic units (0.01 EURC) each — see [Confirmed EURC payments](#confirmed-eurc-payments-2026-09-22).
+**Arc testnet funded EURC settlement is still pending** (Circle's faucet needs a
+human); unfunded testnet signatures reach the facilitator's balance check
+(`insufficient_funds`). The USDC receipts further below keep their original scope.
 [Assessment](../reports/2026-09-17-arc-eurc-assessment.json).
 [Official Circle contract list](https://developers.circle.com/stablecoins/eurc-contract-addresses).
 
@@ -151,5 +154,25 @@ both Arc networks and both protocol versions; recovered signers and domains
 match the independently measured contracts. Package integrity was checked against
 the registry. [Release evidence](../reports/2026-09-17-arc-eurc-release-acceptance.json).
 
-Funded EURC payments remain pending by operator instruction. These signature and
-installation checks are not settlement receipts.
+At that release funded EURC payments were deferred by operator instruction; these
+signature and installation checks are not settlement receipts. The funded receipts
+came on 2026-09-22 and are listed below.
+
+## Confirmed EURC payments (2026-09-22)
+
+| Network | Protocol | Receipt | Block |
+|---|---|---|---|
+| arc | v2 | [0xd9de3864e11698cf730664147ac383acb763279056ac091bab57cfd3bf536128](https://explorer.arc.io/tx/0xd9de3864e11698cf730664147ac383acb763279056ac091bab57cfd3bf536128) | 22114558 |
+| arc | v1 | [0x3f966c6e634380b8c741019d66c2395b670ce5755105721d7cbe1e74e3f76d1d](https://explorer.arc.io/tx/0x3f966c6e634380b8c741019d66c2395b670ce5755105721d7cbe1e74e3f76d1d) | 22114670 |
+
+Payer `0x649E4BAf56230ae09EE62Fe47bd98C3e50772869` (a fresh EOA holding only EURC, no
+USDC), payee `0x103040545AC5031A11E8C03dd11324C7333a13C7`. Each receipt holds one EURC
+`Transfer` of exactly 10000 units, gas was paid by the facilitator in USDC, and the
+settle response carried a signed facilitator receipt with status `confirmed`. The
+merchant path in this guide was used as written: explicit `accepted` with
+`amount: "10000"`, `create_authorization(..., Decimal("0.01"), token_type="eurc")`,
+`build_verify_request_v2` / `build_settle_request_v2` (v1: `PaymentRequirements` +
+`build_*_request_for_version`). The same run confirmed that `verify_payment` with a
+dollar price and `asset=EURC` raises before any request. Replaying each settle body
+returned the original settlement and did not debit the payer again. Arc testnet
+remains pending.
