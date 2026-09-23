@@ -38,7 +38,8 @@ from uvd_x402_sdk.erc8004 import (
 
 # The eight mainnets Execution Market deployed a FeedbackDelegate on, each read
 # off its own chain on two independent RPCs before it was written down
-# (2026-08-23), plus the testnet the rail was first proven against.
+# (2026-08-23), plus the testnet the rail was first proven against. Arc joined
+# on 2026-09-23 (v4 delegate, facilitator 2.38.0).
 DELEGATE_NETWORKS = {
     "base",
     "ethereum",
@@ -48,6 +49,7 @@ DELEGATE_NETWORKS = {
     "celo",
     "bsc",
     "monad",
+    "arc",
     "base-sepolia",
 }
 
@@ -72,6 +74,13 @@ def test_scroll_and_skale_have_no_delegate_either():
     # predates Shanghai so 7702 cannot land there at all.
     assert not supports_relayed_feedback("scroll")
     assert not supports_relayed_feedback("skale-base")
+
+
+def test_arc_testnet_is_out_although_arc_is_in():
+    # The facilitator serves ERC-8004 reads on arc-testnet and refuses the
+    # relay there with a 400. A delegate on one Arc says nothing about the other.
+    assert supports_relayed_feedback("arc")
+    assert not supports_relayed_feedback("arc-testnet")
 
 
 def test_the_deprecated_base_alias_still_routes():

@@ -20,7 +20,7 @@ Accept **gasless stablecoin payments** across **29 blockchain networks** with a 
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
-- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (21 networks: 19 EVM + Solana + Solana-devnet)
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (23 networks: 21 EVM + Solana + Solana-devnet)
 - **Escrow & Refunds**: Hold payments in escrow with dispute resolution (11 EVM chains + SKALE via CREATE3)
 - **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
@@ -1596,7 +1596,10 @@ except X402Error as e:
 
 ## ERC-8004 Trustless Agents
 
-Build verifiable on-chain reputation for AI agents and services. Supports **21 networks** (19 EVM + Solana + Solana devnet).
+Build verifiable on-chain reputation for AI agents and services. Supports **23 networks** (21 EVM + Solana + Solana devnet).
+
+Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; see
+[ERC-8004 on Arc](docs/networks/arc.md#erc-8004-on-arc-0900).
 
 > Name Base as `"base"`. The old `"base-mainnet"` spelling is rejected by the facilitator
 > (`400 Invalid network`); the SDK now rewrites it for you, but new code should use `"base"`.
@@ -1710,14 +1713,16 @@ Pass the **same** feedback parameters, `deadline` and `nonce` back to
 the registry calldata from them and refuses to relay anything the rater's
 signature does not cover.
 
-Available on the nine networks in `RELAYED_FEEDBACK_NETWORKS` -- the eight
+Available on the ten networks in `RELAYED_FEEDBACK_NETWORKS` -- the nine
 mainnets with a deployed `FeedbackDelegate` (base, ethereum, polygon, arbitrum,
-optimism, celo, bsc, monad) plus base-sepolia. **Avalanche is not one of them
+optimism, celo, bsc, monad, arc) plus base-sepolia. **Avalanche is not one of them
 and is not waiting to become one**: its C-Chain rejects the transaction type
 itself (`-32000 transaction type not supported`), so anchor the rating on a
 chain that supports EIP-7702 -- the payment stays where it was made.
+`arc-testnet` serves ERC-8004 reads but not this rail: no delegate is deployed
+there, and `prepare` answers 400.
 
-Requires facilitator v1.93.0+ for the mainnets; base-sepolia since v1.74.0.
+Requires facilitator v1.93.0+ for the mainnets (2.38.0+ for arc); base-sepolia since v1.74.0.
 
 ### The same thing on Solana, and it needs no delegate
 

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.90.0] - 2026-09-23
+
+- **Added: ERC-8004 on Arc.** `arc` and `arc-testnet` are now `Erc8004Network`s, and `ERC8004_CONTRACTS` carries the canonical identity, reputation and validation registries for both. On `arc` these are `0x8004A169…a432`, `0x8004BAa1…9b63` and `0x8004Cc84…AB58`; on `arc-testnet`, `0x8004A818…BD9e`, `0x8004B663…8713` and `0x8004Cb1B…4272`. These are the addresses the facilitator names in `ARC_MAINNET_CONTRACTS` / `ARC_TESTNET_CONTRACTS`. Each was read on-chain on 2026-09-23: an EIP-1967 proxy with the same implementation as Base / Base Sepolia, and `getVersion()` = 2.0.0.
+- **Added: `arc` on the relayed feedback rail.** `arc` joins `RELAYED_FEEDBACK_NETWORKS`, so `supports_relayed_feedback("arc")` is `True`. Its v4 `FeedbackDelegate` is `0x955Cc9fB9aB95FC0821ae74197D273dde5dA84f1` (facilitator 2.38.0+), and the registry records the rating under the rater's address. `arc-testnet` stays out and `supports_relayed_feedback("arc-testnet")` is `False`: the facilitator serves ERC-8004 reads there, but `POST /feedback/evm/prepare` answers 400 because no delegate is deployed.
+- No other network changed. `tests/test_erc8004_arc.py` pins the lists as 0.89.0 built them: every 0.89.0 table entry is unchanged, the table and `Erc8004Network` add only `arc` / `arc-testnet`, the relayed rail adds only `arc`, and the Solana rail is untouched.
+- **Added: a parity check against the TypeScript SDK.** `tests/test_erc8004_ts_parity.py` compares `Erc8004Network`, `ERC8004_CONTRACTS`, `RELAYED_FEEDBACK_NETWORKS`, `SOLANA_FEEDBACK_NETWORKS` and the answers of `supports_relayed_feedback()`, `supports_solana_feedback()` and the wire-name rewrite against `uvd-x402-sdk` 2.98.0 as published on npm. The reference is `tests/fixtures/erc8004-ts.json`, generated from the npm package by `node scripts/erc8004_ts_snapshot.mjs --version 2.98.0`; `--check` exits 1 when the committed fixture no longer matches the release it names.
+- Docs: the README's ERC-8004 counts are 23 networks (21 EVM + 2 Solana) and the relayed rail lists ten networks. `docs/networks/arc.md` gains an ERC-8004 section with the measurements.
+
 ## [0.89.0] - 2026-09-23
 
 Changes what a seller sends and answers. Read before upgrading.

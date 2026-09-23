@@ -1,0 +1,248 @@
+{
+  "generatedBy": "node scripts/erc8004_ts_snapshot.mjs --version 2.98.0",
+  "source": {
+    "package": "uvd-x402-sdk",
+    "version": "2.98.0",
+    "resolved": "https://registry.npmjs.org/uvd-x402-sdk/-/uvd-x402-sdk-2.98.0.tgz",
+    "integrity": "sha512-WemGymo2rk+L2DuRz6D3W5vqdbwrRnBvEyq7VbrURxe7gShjJXKsUtjUshWOluyrktttITR3AMarPtKRKIRyMw=="
+  },
+  "erc8004Network": [
+    "ethereum",
+    "base",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "celo",
+    "bsc",
+    "monad",
+    "avalanche",
+    "scroll",
+    "skale-base",
+    "arc",
+    "base-mainnet",
+    "ethereum-sepolia",
+    "base-sepolia",
+    "polygon-amoy",
+    "arbitrum-sepolia",
+    "optimism-sepolia",
+    "celo-sepolia",
+    "avalanche-fuji",
+    "skale-base-sepolia",
+    "arc-testnet",
+    "solana",
+    "solana-devnet"
+  ],
+  "erc8004Contracts": {
+    "ethereum": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "base": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "polygon": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "arbitrum": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "optimism": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "celo": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "bsc": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "monad": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "avalanche": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "scroll": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "skale-base": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63"
+    },
+    "arc": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "base-mainnet": {
+      "identityRegistry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+      "reputationRegistry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+      "validationRegistry": "0x8004Cc8439f36fd5F9F049D9fF86523Df6dAAB58"
+    },
+    "ethereum-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "base-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "polygon-amoy": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "arbitrum-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "optimism-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "celo-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "avalanche-fuji": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "skale-base-sepolia": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "arc-testnet": {
+      "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+      "reputationRegistry": "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+      "validationRegistry": "0x8004Cb1BF31DAf7788923b405b754f57acEB4272"
+    },
+    "solana": {
+      "agentRegistryProgram": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+      "atomEngineProgram": "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb"
+    },
+    "solana-devnet": {
+      "agentRegistryProgram": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+      "atomEngineProgram": "AToMw53aiPQ8j7iHVb4fGt6nzUNxUhcPc3tbPBZuzVVb"
+    }
+  },
+  "relayedFeedbackNetworks": [
+    "base",
+    "ethereum",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "celo",
+    "bsc",
+    "monad",
+    "arc",
+    "base-sepolia"
+  ],
+  "solanaFeedbackNetworks": [
+    "solana",
+    "solana-devnet"
+  ],
+  "wireNetwork": {
+    "ethereum": "ethereum",
+    "base": "base",
+    "polygon": "polygon",
+    "arbitrum": "arbitrum",
+    "optimism": "optimism",
+    "celo": "celo",
+    "bsc": "bsc",
+    "monad": "monad",
+    "avalanche": "avalanche",
+    "scroll": "scroll",
+    "skale-base": "skale-base",
+    "arc": "arc",
+    "base-mainnet": "base",
+    "ethereum-sepolia": "ethereum-sepolia",
+    "base-sepolia": "base-sepolia",
+    "polygon-amoy": "polygon-amoy",
+    "arbitrum-sepolia": "arbitrum-sepolia",
+    "optimism-sepolia": "optimism-sepolia",
+    "celo-sepolia": "celo-sepolia",
+    "avalanche-fuji": "avalanche-fuji",
+    "skale-base-sepolia": "skale-base-sepolia",
+    "arc-testnet": "arc-testnet",
+    "solana": "solana",
+    "solana-devnet": "solana-devnet"
+  },
+  "supportsRelayedFeedback": {
+    "ethereum": true,
+    "base": true,
+    "polygon": true,
+    "arbitrum": true,
+    "optimism": true,
+    "celo": true,
+    "bsc": true,
+    "monad": true,
+    "avalanche": false,
+    "scroll": false,
+    "skale-base": false,
+    "arc": true,
+    "base-mainnet": true,
+    "ethereum-sepolia": false,
+    "base-sepolia": true,
+    "polygon-amoy": false,
+    "arbitrum-sepolia": false,
+    "optimism-sepolia": false,
+    "celo-sepolia": false,
+    "avalanche-fuji": false,
+    "skale-base-sepolia": false,
+    "arc-testnet": false,
+    "solana": false,
+    "solana-devnet": false
+  },
+  "supportsSolanaFeedback": {
+    "ethereum": false,
+    "base": false,
+    "polygon": false,
+    "arbitrum": false,
+    "optimism": false,
+    "celo": false,
+    "bsc": false,
+    "monad": false,
+    "avalanche": false,
+    "scroll": false,
+    "skale-base": false,
+    "arc": false,
+    "base-mainnet": false,
+    "ethereum-sepolia": false,
+    "base-sepolia": false,
+    "polygon-amoy": false,
+    "arbitrum-sepolia": false,
+    "optimism-sepolia": false,
+    "celo-sepolia": false,
+    "avalanche-fuji": false,
+    "skale-base-sepolia": false,
+    "arc-testnet": false,
+    "solana": true,
+    "solana-devnet": true
+  }
+}

@@ -151,10 +151,12 @@ payment_requirements = {
 - `arc` / `eip155:5042` and `arc-testnet` / `eip155:5042002` are independently verified networks. See `docs/networks/arc.md`.
 - Both use USDC `0x3600000000000000000000000000000000000000`, 6 payment decimals and EIP-712 `USDC` / `2`. Native gas uses 18 decimals on the same balance; never use that precision for a signed payment.
 - `tests/test_arc_testnet.py` preserves the decimal regression; `tests/test_arc_networks.py` checks real signatures and cross-network domain isolation.
-- Support covers direct `exact` EOA USDC and EURC payments (EURC since v0.86.0: `0xbEf5…21c1` mainnet, `0x89B5…D72a` testnet, domain `EURC` / `2`, `usd_pegged=False` — prices are euros; `tests/test_arc_eurc.py`). Gateway, escrow, `upto`, ERC-8004 writes and EIP-6492 are not enabled for Arc.
+- Support covers direct `exact` EOA USDC and EURC payments (EURC since v0.86.0: `0xbEf5…21c1` mainnet, `0x89B5…D72a` testnet, domain `EURC` / `2`, `usd_pegged=False` — prices are euros; `tests/test_arc_eurc.py`). Gateway, escrow, `upto` and EIP-6492 are not enabled for Arc. ERC-8004 is (v0.90.0): registries on both networks, relayed feedback on `arc` only.
 
 ### ERC-8004 Trustless Agents (erc8004.py)
-- Supports 20 networks: 18 EVM + Solana + Solana-devnet
+- Supports 23 networks: 21 EVM + Solana + Solana-devnet (the 23 of the facilitator's `GET /feedback` -> `supportedNetworks`; `base-mainnet` is only a deprecated alias)
+- Arc since v0.90.0: `arc` / `arc-testnet` carry the canonical mainnet / testnet registries (identity, reputation, validation). **Only `arc` is in `RELAYED_FEEDBACK_NETWORKS`** (v4 delegate `0x955Cc9fB…84f1`); `arc-testnet` has no delegate and `prepare` answers 400 there. `tests/test_erc8004_arc.py` pins that nothing else moved since 0.89.0
+- **Parity with the TypeScript SDK is PINNED**: `tests/test_erc8004_ts_parity.py` compares the four lists and the answers of `supports_*` / `_wire` against `tests/fixtures/erc8004-ts.json`, generated from the PUBLISHED npm package (never edit by hand): `node scripts/erc8004_ts_snapshot.mjs --version <ts-release>` rewrites it, `--check` exits 1 when it drifted. When TS changes a list, regenerate against its release and bump `TS_RELEASE` in the test
 - `AgentId = Union[int, str]` - EVM uses int, Solana uses base58 pubkey string
 - `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
 - Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
