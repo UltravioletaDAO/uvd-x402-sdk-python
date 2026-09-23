@@ -21,8 +21,10 @@ jobs:
         # are for a consumer: durable-evidence seals and unseals (needs
         # `cryptography`) and advanced_escrow imports web3 at module level. A
         # module with no installable deps here is a module with no tests, and
-        # the failure looks like ModuleNotFoundError rather than a gap.
-        run: pip install -e '.[signer,dev,dx402,escrow,hedera]'
+        # the failure looks like ModuleNotFoundError rather than a gap. The same
+        # for `fastapi`, `flask` and `django`: without them every middleware test
+        # is skipped, and the ones that import a framework directly fail.
+        run: pip install -e '.[signer,dev,dx402,escrow,hedera,fastapi,flask,django]'
 
       - name: Test
         run: python -m pytest -q

@@ -1,4 +1,10 @@
-"""The ``Idempotency-Key`` is opt-in, and bound to the purchase the caller names.
+"""The ``Idempotency-Key``: on by default, one random key per handling, or bound
+to the purchase the caller names.
+
+Opt-in from 0.83.1 to 0.88.0 (hence the file name); on by default since 0.89.0,
+when a key stopped being derived from the payment unless the caller names the
+purchase. A random key per handling cannot tell two purchases apart either, but
+it never joins them: the second one gets its own key.
 
 ``_Facilitator`` is the ``/verify`` + ``/settle`` idempotency contract of
 x402-rs ``post_settle`` over a real socket, the same contract
@@ -25,15 +31,23 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import threading
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-import uvd_x402_sdk.client as client_module
-from uvd_x402_sdk import X402Client, is_transient_error, spent_nonce_evidence
+from uvd_x402_sdk import (
+    X402Client,
+    derive_idempotency_key,
+    is_transient_error,
+    spent_nonce_evidence,
+    transient_503_response,
+)
 from uvd_x402_sdk.exceptions import FacilitatorError
+
+RANDOM_KEY = re.compile(r"x402-[0-9a-f]{64}")
 
 RECIPIENT = "0x1234567890123456789012345678901234567890"
 PAYER = "0xSender"
@@ -155,14 +169,22 @@ def _seller(facilitator: _Facilitator, **config) -> X402Client:
     return X402Client(recipient_address=RECIPIENT, facilitator_url=facilitator.url, **config)
 
 
-# -- (a) off by default
+# -- (a) on by default: one random key per handling
 
 
-def test_by_default_neither_verify_nor_settle_carries_the_key(facilitator):
+def test_by_default_verify_and_settle_carry_one_random_key(facilitator):
     seller = _seller(facilitator)
-    assert seller.config.send_idempotency_key is False
+    assert seller.config.send_idempotency_key is True
 
     seller.process_payment(X_PAYMENT, PRICE)
+
+    (verify,), (settle,) = facilitator.keys("/verify"), facilitator.keys("/settle")
+    assert RANDOM_KEY.fullmatch(settle) and verify == settle
+    assert settle != derive_idempotency_key(seller.extract_payload(X_PAYMENT), "settle")
+
+
+def test_switched_off_neither_verify_nor_settle_carries_the_key(facilitator):
+    _seller(facilitator, send_idempotency_key=False).process_payment(X_PAYMENT, PRICE)
 
     assert facilitator.keys("/verify") == [None]
     assert facilitator.keys("/settle") == [None]
@@ -170,13 +192,16 @@ def test_by_default_neither_verify_nor_settle_carries_the_key(facilitator):
 
 def test_by_default_a_second_purchase_is_not_answered_from_the_first_ones_cache(facilitator):
     """A key derived from the payment alone does not tell two purchases of the
-    same price apart: their settle requests are byte-identical. Without a key,
-    the second purchase's settle executes and stands or falls on its own."""
+    same price apart: their settle requests are byte-identical. A random key
+    per handling never joins them: the second purchase's settle executes and
+    stands or falls on its own."""
     _seller(facilitator).process_payment(X_PAYMENT, PRICE)
 
     with pytest.raises(FacilitatorError) as caught:
         _seller(facilitator).process_payment(X_PAYMENT, PRICE)
 
+    first, second = facilitator.keys("/settle")
+    assert first != second
     assert caught.value.status_code == 400
     assert facilitator.replayed == 0
     assert facilitator.moved == 1
@@ -224,29 +249,26 @@ def test_with_the_key_on_the_same_scope_replays_the_settle_that_completed(facili
     assert len(set(facilitator.keys("/settle"))) == 1
 
 
-# -- (d) key on, no scope: fail-safe
+# -- (d) no scope: a fresh key, nothing to warn about
 
 
-def test_with_the_key_on_and_no_scope_no_key_goes_out_and_it_warns_once(
-    facilitator, monkeypatch, caplog
+def test_with_no_scope_each_handling_gets_a_fresh_key_and_nothing_is_logged(
+    facilitator, caplog
 ):
-    """The config asks for the key but the call names no purchase. The requests
-    go out exactly as with the key off, and the SDK says so once per process."""
-    monkeypatch.setattr(
-        client_module, "_missing_idempotency_scope_warned", False, raising=False
-    )
-    seller = _seller(facilitator, send_idempotency_key=True)
+    """0.83.1 to 0.88.0 sent no key here and warned once per process. A fresh
+    key binds this handling (its settle, retries and fallback) and nothing
+    else, so there is nothing to warn about."""
+    seller = _seller(facilitator)
 
     with caplog.at_level(logging.WARNING, logger="uvd_x402_sdk.client"):
         seller.process_payment(X_PAYMENT, PRICE)
-        _seller(facilitator, send_idempotency_key=True).try_settle_payment(
-            seller.extract_payload(X_PAYMENT), PRICE
-        )
+        _seller(facilitator).try_settle_payment(seller.extract_payload(X_PAYMENT), PRICE)
 
-    assert facilitator.keys("/verify") == [None]
-    assert facilitator.keys("/settle") == [None, None]
-    warned = [r for r in caplog.records if "idempotency_scope" in r.getMessage()]
-    assert len(warned) == 1
+    verify, = facilitator.keys("/verify")
+    first, second = facilitator.keys("/settle")
+    assert verify == first and first != second
+    assert all(RANDOM_KEY.fullmatch(key) for key in (first, second))
+    assert not [r for r in caplog.records if "idempotency" in r.getMessage().lower()]
 
 
 # -- (e) the two idempotency answers, classified
@@ -286,6 +308,31 @@ def test_an_unreadable_store_is_transient_and_the_same_credential_settles_later(
 
     facilitator.store_down = False
     assert seller.settle_payment(payload, PRICE, idempotency_scope="order-a").success
+    assert facilitator.moved == 1
+
+
+def test_by_default_an_unreadable_store_is_no_verdict_and_the_same_credential_settles_later(
+    facilitator,
+):
+    """The cost of the key being on by default, on a network without receipts:
+    a store the facilitator cannot read refuses the settle (503, nothing moves)
+    where a call without a key used to settle. No verdict: the paywall answers
+    503 + Retry-After and the buyer presents the SAME credential again."""
+    seller = _seller(facilitator)
+    payload = seller.extract_payload(X_PAYMENT)
+    facilitator.store_down = True
+
+    with pytest.raises(FacilitatorError) as caught:
+        seller.settle_payment(payload, PRICE)
+
+    assert caught.value.status_code == 503
+    assert is_transient_error(caught.value)
+    _, headers = transient_503_response(caught.value)
+    assert headers["Retry-After"]
+    assert facilitator.moved == 0
+
+    facilitator.store_down = False
+    assert seller.settle_payment(payload, PRICE).success
     assert facilitator.moved == 1
 
 

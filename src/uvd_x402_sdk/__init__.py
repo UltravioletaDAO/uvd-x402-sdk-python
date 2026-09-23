@@ -79,11 +79,16 @@ from uvd_x402_sdk.receipts import (
 
 from uvd_x402_sdk.client import (
     IDEMPOTENCY_KEY_HEADER,
+    IDEMPOTENT_REPLAYED_HEADER,
     X402Client,
+    admitted_authorization_code,
     derive_idempotency_key,
     is_spent_nonce_error,
     is_transient_error,
+    new_idempotency_key,
+    payment_conflict_response,
     spent_nonce_evidence,
+    transient_503_response,
 )
 from uvd_x402_sdk.config import (
     X402Config,
@@ -93,6 +98,10 @@ from uvd_x402_sdk.config import (
 )
 from uvd_x402_sdk.decorators import require_payment, x402_required, configure_x402
 from uvd_x402_sdk.exceptions import (
+    ADMITTED_AUTHORIZATION_CODES,
+    AUTHORIZATION_ALREADY_SETTLED,
+    AUTHORIZATION_IN_FLIGHT,
+    RECEIPT_REQUEST_CONFLICT,
     X402Error,
     PaymentRequiredError,
     PaymentVerificationError,
@@ -484,6 +493,15 @@ __all__ = [
     "spent_nonce_evidence",
     "derive_idempotency_key",
     "IDEMPOTENCY_KEY_HEADER",
+    "IDEMPOTENT_REPLAYED_HEADER",
+    "new_idempotency_key",
+    "admitted_authorization_code",
+    "payment_conflict_response",
+    "transient_503_response",
+    "ADMITTED_AUTHORIZATION_CODES",
+    "AUTHORIZATION_ALREADY_SETTLED",
+    "AUTHORIZATION_IN_FLIGHT",
+    "RECEIPT_REQUEST_CONFLICT",
     "build_uvd_feedback_params",
     "UVD_FEEDBACK_ROLES",
     "UVD_PRODUCTS",

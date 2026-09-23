@@ -235,6 +235,38 @@ WRITE_NOT_ATTEMPTED_REASONS = frozenset(
 #: produced five duplicate agents.
 WRITE_AMBIGUOUS_REASONS = frozenset({"forward_failed"})
 
+#: What the facilitator's receipt rail answers (x402-rs 2.39.0,
+#: ``docs/facilitator-receipts.md``, "Replays of an admitted authorization") when
+#: an authorization it already admitted comes back WITHOUT the purchase binding
+#: that admitted it -- the same ``Idempotency-Key`` or the same
+#: ``X-UVD-Purchase`` capability. ``/settle`` answers ``409`` with the code in
+#: ``error``; ``/verify`` answers ``isValid: false`` with it in
+#: ``invalidReason``. The original answer goes back only to the binding.
+#:
+#: * ``authorization_already_settled``: the payment is confirmed.
+#: * ``authorization_in_flight``: admitted, outcome not final yet. A resend
+#:   WITH the binding gets the original answer (``202 settlement_in_progress``,
+#:   then the settle); without it, only the final outcome, by resending later.
+#:   Transient: 503 + ``Retry-After``.
+#: * ``receipt_request_conflict``: admitted for another purchase context, or
+#:   under other terms.
+#:
+#: For a seller none of them is delivered on: the ``X-PAYMENT`` was already
+#: used by another request. And none is a 402 -- a 402 tells the buyer to sign
+#: again, and the first payment moved or may still move. 409 for the settled
+#: and the conflicting one, 503 while in flight.
+AUTHORIZATION_ALREADY_SETTLED = "authorization_already_settled"
+AUTHORIZATION_IN_FLIGHT = "authorization_in_flight"
+RECEIPT_REQUEST_CONFLICT = "receipt_request_conflict"
+ADMITTED_AUTHORIZATION_CODES = frozenset(
+    {AUTHORIZATION_ALREADY_SETTLED, AUTHORIZATION_IN_FLIGHT, RECEIPT_REQUEST_CONFLICT}
+)
+
+#: The ``error`` of the ``202`` the receipt rail answers a resend that carries
+#: the admitting binding while the payment is still in flight. Not a verdict:
+#: present the same request, with the same binding, again.
+SETTLEMENT_IN_PROGRESS = "settlement_in_progress"
+
 #: Hard ceiling, in seconds, on any ``Retry-After`` the SDK will honour by
 #: sleeping or by echoing to a caller. A misconfigured facilitator answering
 #: ``Retry-After: 3600`` must not be able to hang a request for an hour; the
@@ -399,7 +431,23 @@ class FacilitatorError(X402Error):
            as BROADCASTING, so re-sending risks a double-settle. This is the
            general form of the rule and covers codes that do not exist yet;
         3. nothing else. An unreadable body leaves the status verdict standing.
+
+        Two answers below 500 are transient by name: ``202
+        settlement_in_progress``, the receipt rail's answer to a resend that
+        carries the binding that admitted the payment (re-sending it with that
+        binding replays the admitted settle and never executes another one,
+        the recovery the facilitator documents for a pending payment), and
+        ``409 authorization_in_flight``, the same state for a resend without
+        the binding (the same request later learns the outcome).
         """
+        if status_code == 202 and fields.get("error_code") == SETTLEMENT_IN_PROGRESS:
+            return fields.get("retryable") is not False
+        if status_code == 409 and fields.get("error_code") == AUTHORIZATION_IN_FLIGHT:
+            # Named, not read from the body: its `retryable: false` means "this
+            # request never gets the success back", not "no verdict will come".
+            # The same request later learns the outcome (the TypeScript SDK
+            # reads it the same way).
+            return True
         by_status = status_code is None or status_code == 429 or status_code >= 500
         if not by_status:
             return False
@@ -430,10 +478,11 @@ class FacilitatorError(X402Error):
             details["reason"] = reason
         if retry_after is not None:
             details["retryAfter"] = retry_after
-        if status_code is None or status_code == 429 or status_code >= 500:
+        if status_code is None or status_code == 429 or status_code >= 500 or retryable:
             # The set that used to always read True. It now reads the real
             # verdict — which is the correction — and a 4xx keeps carrying no
-            # key at all, exactly as before.
+            # key at all, exactly as before. ``or retryable`` adds the one
+            # transient 2xx (``202 settlement_in_progress``).
             details["retryable"] = retryable
         for key, detail_key in (
             ("transaction", "transaction"),

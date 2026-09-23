@@ -85,9 +85,9 @@ class X402Config:
         description: Description sent to facilitator
         x402_version: Protocol version to use (1, 2, or "auto")
         send_idempotency_key: Send an ``Idempotency-Key`` on ``/verify`` and
-            ``/settle`` (default False: opt-in). Only calls that also pass
-            ``idempotency_scope`` carry it, derived from the signed payload and
-            that scope; see ``client.derive_idempotency_key``
+            ``/settle`` (default True since 0.89.0): one key per payment
+            handling, random unless the call brings ``idempotency_key`` or
+            ``idempotency_scope``; see ``client.new_idempotency_key``
         multi_payment: Multi-payment configuration for accepting multiple networks
     """
 
@@ -143,15 +143,19 @@ class X402Config:
     # x402 protocol version: 1, 2, or "auto" (detect from payload)
     x402_version: Literal[1, 2, "auto"] = "auto"
 
-    # Opt-in since 0.83.1. When on, /verify and /settle carry an Idempotency-Key
-    # derived from the signed payload AND the caller's idempotency_scope
-    # (client.derive_idempotency_key); a call without a scope sends none and
-    # logs one warning per process. Off by default because a key derived from
-    # the payment alone does not tell two purchases of the same price apart,
-    # and only the caller knows which purchase a payment is for. With it on,
-    # the facilitator also refuses a keyed settle it cannot check against its
-    # store (503 idempotency_store_unavailable, fail-closed on purpose).
-    send_idempotency_key: bool = False
+    # On by default since 0.89.0 (opt-in from 0.83.1 to 0.88.0). Every payment
+    # handling carries ONE key on /verify, /settle and the timeout fallback:
+    # random (client.new_idempotency_key) unless the call brings its own
+    # idempotency_key, or an idempotency_scope the key is derived from
+    # (client.derive_idempotency_key, a binding only while the scope is a
+    # secret of the seller). The facilitator's receipt rail returns an admitted
+    # payment's answer only to the binding that admitted it, so without a key
+    # a seller cannot recover its own lost settle answer there. The cost, on
+    # networks without receipts: a keyed settle the facilitator cannot check
+    # against its store is refused (503 idempotency_store_unavailable, nothing
+    # settles), which the SDK reads as no verdict (503, the same credential
+    # later). False sends no key at all, as 0.83.1 to 0.88.0 did by default.
+    send_idempotency_key: bool = True
 
     # Multi-payment configuration
     multi_payment: Optional[MultiPaymentConfig] = None

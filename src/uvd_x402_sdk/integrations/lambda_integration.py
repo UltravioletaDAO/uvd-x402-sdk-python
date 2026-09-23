@@ -12,7 +12,7 @@ from decimal import Decimal
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -197,7 +197,13 @@ class LambdaX402:
             PaymentResult on success
 
         Raises:
-            X402Error: If payment verification/settlement fails
+            X402Error: If payment verification/settlement fails. An
+                authorization the facilitator already admitted for another
+                request is one of them:
+                :func:`~uvd_x402_sdk.client.payment_conflict_response` builds
+                its 409 (503 while in flight), and it is not delivered on;
+                ``process_or_require`` answers it, and any failure without a
+                verdict, without a 402.
         """
         payment_header = self.get_payment_header(event)
         if not payment_header:
@@ -245,6 +251,14 @@ class LambdaX402:
             return result
 
         except X402Error as e:
+            conflict = _undelivered_response(e)
+            if conflict is not None:
+                # Already admitted for another request (409), or no verdict yet
+                # (503 + Retry-After): not delivered, and not a 402, which
+                # would ask for a second payment.
+                logger.warning(f"Payment not delivered: {e.message}")
+                status, body, headers = conflict
+                return _create_lambda_response(status, body, headers)
             logger.warning(f"Payment failed: {e.message}")
             body = create_402_response(
                 amount_usd=Decimal(str(amount_usd)),

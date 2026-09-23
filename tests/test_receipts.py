@@ -115,6 +115,7 @@ def test_merchant_checks_method_url_and_exact_body():
 
 
 def test_fastapi_propagates_receipt_and_validates_context(monkeypatch):
+    pytest.importorskip('fastapi')
     import asyncio
     from decimal import Decimal
     from fastapi import FastAPI, Depends, Response

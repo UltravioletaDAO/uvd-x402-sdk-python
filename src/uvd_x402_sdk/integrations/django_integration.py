@@ -20,13 +20,29 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[django]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.response import create_402_response, create_402_headers
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _conflict_response(error: X402Error) -> Optional[HttpResponse]:
+    """409 for an ``X-PAYMENT`` the facilitator already admitted for another
+    request, 503 + Retry-After while in flight or without a verdict (a timeout,
+    a store the facilitator could not read); ``None`` for a rejection. Never
+    delivered, and never a 402, which would ask the buyer for a second
+    payment."""
+    conflict = _undelivered_response(error)
+    if conflict is None:
+        return None
+    status, body, headers = conflict
+    response = JsonResponse(body, status=status)
+    for key, value in headers.items():
+        response[key] = value
+    return response
 
 
 def _get_config_from_settings() -> X402Config:
@@ -119,6 +135,9 @@ class DjangoX402Middleware:
             return self.get_response(request)
 
         except X402Error as e:
+            conflict = _conflict_response(e)
+            if conflict is not None:
+                return conflict
             response = JsonResponse(e.to_dict(), status=402)
             for key, value in create_402_headers().items():
                 response[key] = value
@@ -177,6 +196,9 @@ def django_require_payment(
                 return func(request, *args, **kwargs)
 
             except X402Error as e:
+                conflict = _conflict_response(e)
+                if conflict is not None:
+                    return conflict
                 response = JsonResponse(e.to_dict(), status=402)
                 for key, value in create_402_headers().items():
                     response[key] = value
@@ -232,6 +254,9 @@ class X402PaymentView:
             return super().dispatch(request, *args, **kwargs)  # type: ignore
 
         except X402Error as e:
+            conflict = _conflict_response(e)
+            if conflict is not None:
+                return conflict
             response = JsonResponse(e.to_dict(), status=402)
             for key, value in create_402_headers().items():
                 response[key] = value

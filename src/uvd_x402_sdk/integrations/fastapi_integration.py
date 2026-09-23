@@ -22,7 +22,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[fastapi]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -52,6 +52,44 @@ def _receipt_error_headers(error: X402Error) -> dict[str, str]:
 def _payment_error_status(error: X402Error) -> int:
     receipt = getattr(error, "receipt", None)
     return 503 if (receipt and receipt.status in ("unknown", "pending")) or getattr(error, "retryable", False) else 402
+
+
+def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
+    """Status, body and headers for a payment that was not delivered on.
+
+    An authorization the facilitator already admitted for another request is
+    409, or 503 + Retry-After while it is still in flight; a failure without a
+    verdict (a timeout, a settle still in flight, a store the facilitator could
+    not read) is 503 + Retry-After. Never a 402 for either, which would ask the
+    buyer for a second payment. Every rejection keeps the answer it had.
+    """
+    answer = _undelivered_response(error)
+    if answer is not None:
+        return answer
+    return _payment_error_status(error), error.to_dict(), _receipt_error_headers(error)
+
+
+async def _process_payment(
+    client: X402Client, request: Request, payment_header: str, amount: Decimal
+) -> PaymentResult:
+    """``process_payment`` off the event loop.
+
+    process_payment does blocking HTTP (sync httpx: verify up to 30s + settle
+    up to 90s on L2s). Called directly inside an async entry point it would
+    freeze the whole event loop for every request on the server, /health
+    included, while one payment settles.
+
+    Each request is one handling with a fresh key, so its only purchase
+    binding from outside is the buyer's ``X-UVD-Purchase``. A replayed settle
+    that reaches it without one is another request's purchase, and
+    process_payment raises instead of returning it.
+    """
+    return await run_in_threadpool(
+        client.process_payment,
+        x_payment_header=payment_header,
+        expected_amount_usd=amount,
+        receipt_context=await _receipt_context(request),
+    )
 
 
 class FastAPIX402:
@@ -155,26 +193,15 @@ class FastAPIX402:
                 )
 
             try:
-                # process_payment does blocking HTTP (sync httpx: verify up to
-                # 30s + settle up to 90s on L2s). Called directly inside this
-                # async dependency it would freeze the whole event loop for
-                # every request on the server, /health included, while one
-                # payment settles.
-                result = await run_in_threadpool(
-                    self._client.process_payment,
-                    x_payment_header=payment_header,
-                    expected_amount_usd=required_amount,
-                    receipt_context=await _receipt_context(request),
+                result = await _process_payment(
+                    self._client, request, payment_header, required_amount
                 )
                 if response is not None and getattr(result, "receipt", None):
                     response.headers.update(payment_response_headers(result))
                 return result
             except X402Error as e:
-                raise HTTPException(
-                    status_code=_payment_error_status(e),
-                    detail=e.to_dict(),
-                    headers=_receipt_error_headers(e),
-                )
+                status, detail, headers = _payment_error(e)
+                raise HTTPException(status_code=status, detail=detail, headers=headers)
 
         return dependency
 
@@ -224,22 +251,13 @@ class X402Depends:
             )
 
         try:
-            # Blocking HTTP off the event loop; see require_payment above.
-            result = await run_in_threadpool(
-                self._client.process_payment,
-                x_payment_header=payment_header,
-                expected_amount_usd=self._amount,
-                    receipt_context=await _receipt_context(request),
-            )
+            result = await _process_payment(self._client, request, payment_header, self._amount)
             if response is not None and getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
             return result
         except X402Error as e:
-            raise HTTPException(
-                status_code=_payment_error_status(e),
-                detail=e.to_dict(),
-                headers=_receipt_error_headers(e),
-            )
+            status, detail, headers = _payment_error(e)
+            raise HTTPException(status_code=status, detail=detail, headers=headers)
 
 
 def fastapi_require_payment(
@@ -285,13 +303,7 @@ def fastapi_require_payment(
                 )
 
             try:
-                # Blocking HTTP off the event loop; see require_payment above.
-                result = await run_in_threadpool(
-                    client.process_payment,
-                    x_payment_header=payment_header,
-                    expected_amount_usd=required_amount,
-                    receipt_context=await _receipt_context(request),
-                )
+                result = await _process_payment(client, request, payment_header, required_amount)
                 # Store result in request state
                 request.state.payment_result = result
                 response = await func(request, *args, **kwargs)
@@ -304,11 +316,8 @@ def fastapi_require_payment(
                 return response
 
             except X402Error as e:
-                return JSONResponse(
-                    status_code=_payment_error_status(e),
-                    content=e.to_dict(),
-                    headers=_receipt_error_headers(e),
-                )
+                status, content, headers = _payment_error(e)
+                return JSONResponse(status_code=status, content=content, headers=headers)
 
         return wrapper  # type: ignore
 
@@ -365,13 +374,7 @@ class X402Middleware(BaseHTTPMiddleware):
             )
 
         try:
-            # Blocking HTTP off the event loop; see require_payment above.
-            result = await run_in_threadpool(
-                self._client.process_payment,
-                x_payment_header=payment_header,
-                expected_amount_usd=required_amount,
-                    receipt_context=await _receipt_context(request),
-            )
+            result = await _process_payment(self._client, request, payment_header, required_amount)
             request.state.payment_result = result
             response = await call_next(request)
             if getattr(result, "receipt", None):
@@ -379,8 +382,5 @@ class X402Middleware(BaseHTTPMiddleware):
             return response
 
         except X402Error as e:
-            return JSONResponse(
-                status_code=_payment_error_status(e),
-                content=e.to_dict(),
-                headers=_receipt_error_headers(e),
-            )
+            status, content, headers = _payment_error(e)
+            return JSONResponse(status_code=status, content=content, headers=headers)
