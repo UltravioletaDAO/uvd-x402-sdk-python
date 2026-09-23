@@ -294,9 +294,10 @@ def _create_error_response(
     config: X402Config,
 ) -> Any:
     """Create an error response for x402 errors."""
-    # Already admitted for another request (409, or 503 + Retry-After while in
-    # flight), or no verdict yet (503 + Retry-After): not delivered, and not a
-    # 402, which would ask for a second payment.
+    # Already admitted for another request or already used (409, or 503 +
+    # Retry-After while in flight), may have moved (500, with the transaction),
+    # or no verdict yet (503 + Retry-After): not delivered, and not a 402, which
+    # would ask for a second payment.
     conflict = _undelivered_response(error)
     if conflict is not None:
         status, body, headers = conflict

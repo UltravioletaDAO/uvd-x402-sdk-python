@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.90.1] - 2026-09-23
+
+- **Fixed: the middlewares and decorators answered `402` over a payment that may have moved.** A `402` tells the buyer to sign a new payment. The integrations (FastAPI `FastAPIX402`, `X402Depends`, `fastapi_require_payment`, `X402Middleware`; Flask `FlaskX402`, `flask_require_payment`; Django `DjangoX402Middleware`, `django_require_payment`, `X402PaymentView`; Lambda `LambdaX402.process_or_require`, `lambda_handler`; `require_payment`) sent one, or `400` in `require_payment`, for every failure that was neither a receipt-rail conflict nor transient. That included `502 settlement_unconfirmed`, where the facilitator broadcast the transaction and got no receipt, so it may be mined. They now answer:
+  - **`500`** for a failure that names a transaction and is not transient (`502 settlement_unconfirmed`, any other `5xx` with a hash) and for any other `5xx` with `retryable: false`. The body adds `transaction` and `paymentId` at the top level when the facilitator sent them, its `reason`, `retryable: false`, `safeToReplay: false`, and a `message` telling the buyer not to sign another payment and to check the transaction first. No `Retry-After`. This is the TypeScript SDK's answer to `settlement_unconfirmed`.
+  - **`409`** for an authorization the facilitator says was already used (`is_spent_nonce_error`), with `spentNonceEvidence` (`"structured"` or `"wording"`), the code as `reason` when a code said so, and `retryable: false`. This includes one answer that was `503`: a transient failure that also reads as spent, such as `503 idempotency_cache_corrupt`. A resend of it in a new handling carries a new key.
+  - The receipt, when the facilitator sent one, travels in `PAYMENT-RESPONSE` on both.
+- Unchanged: the order starts with the receipt rail's conflicts (`409`, or `503` in flight), and a `202 settlement_in_progress` stays `503` + `Retry-After` even when it names a transaction. `is_transient_error()`, its anti-double-settle guard and the settle retry policy are unchanged: the SDK re-sends none of these. A rejection keeps its answer: an invalid signature or insufficient funds is still `402` (`400` in `require_payment`). So is the opaque `400 contract_call_failed (ref: …)`: on EVM the facilitator reports a used authorization and an invalid signature the same way.
+- Tests: `tests/test_integrations_undelivered.py` runs every middleware and decorator against a facilitator over a real socket for each case, plus mutations: without each new branch, its case gets the old answer.
+- Docs: the README's seller section and "check in this order" example follow the integrations' order.
+
 ## [0.90.0] - 2026-09-23
 
 - **Added: ERC-8004 on Arc.** `arc` and `arc-testnet` are now `Erc8004Network`s, and `ERC8004_CONTRACTS` carries the canonical identity, reputation and validation registries for both. On `arc` these are `0x8004A169…a432`, `0x8004BAa1…9b63` and `0x8004Cc84…AB58`; on `arc-testnet`, `0x8004A818…BD9e`, `0x8004B663…8713` and `0x8004Cb1B…4272`. These are the addresses the facilitator names in `ARC_MAINNET_CONTRACTS` / `ARC_TESTNET_CONTRACTS`. Each was read on-chain on 2026-09-23: an EIP-1967 proxy with the same implementation as Base / Base Sepolia, and `getVersion()` = 2.0.0.

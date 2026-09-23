@@ -1331,6 +1331,24 @@ facilitator's `reason`: a timeout, a settle still in flight (`settlement_in_prog
 idempotency_store_unavailable` or `receipt_store_unavailable`, another retryable `5xx`, a `429`. The
 buyer presents the same `X-PAYMENT` later and never signs another one.
 
+Two more answers are never a `402` either, because the payment may have moved:
+
+| Facilitator answer | Answer | Body |
+|---|---|---|
+| `502 settlement_unconfirmed`, or any other failure whose body names a `transaction` | `500` | `transaction`, `paymentId`, `reason`, `retryable: false` |
+| another `5xx` with `retryable: false` | `500` | `reason`, `retryable: false` |
+| an authorization already used (`is_spent_nonce_error`), transient or not | `409` | `spentNonceEvidence`, the code as `reason` when there is one, `retryable: false` |
+
+`500` is the TypeScript SDK's answer to `settlement_unconfirmed`: the transaction was broadcast and
+may be mined, so the buyer must not sign again, and a `503` + `Retry-After` would invite a resend.
+The body tells the buyer not to sign another payment and to check the transaction first. The
+receipt, when there is one, travels in `PAYMENT-RESPONSE`. The SDK still re-sends none of these.
+A `202 settlement_in_progress` stays `503`: re-sending it under its binding is the recovery.
+
+One case still reaches `402`: on EVM the facilitator reports a used authorization as an opaque `400
+contract_call_failed (ref: …)`, the same answer as an invalid signature, so nothing tells the two
+apart. On networks with receipts the facilitator names it (`authorization_already_settled`, `409`).
+
 The receipt travels in `PAYMENT-RESPONSE` when the facilitator sent one. Only the FastAPI
 integration forwards the buyer's `X-UVD-Purchase`; with it, a resumed purchase gets its original
 answer and is delivered.
@@ -1344,7 +1362,8 @@ the details or the facilitator's JSON body) or `"wording"` for free text. The wo
 tarotof's substring match (it reads `NonceAlreadyUsed` and `NonceReused { .. }` inside prose and
 structs) minus two measured words that contain "used" without meaning it: `refused` and `unused`.
 It leans to the false positive on purpose: "check, you may have paid already" costs a lookup.
-A 402 tells the buyer to sign again, so check in this order:
+A 402 tells the buyer to sign again, so check in this order (the SDK's middlewares and
+decorators do exactly this):
 
 ```python
 from uvd_x402_sdk import (is_spent_nonce_error, is_transient_error,
@@ -1353,12 +1372,15 @@ from uvd_x402_sdk import (is_spent_nonce_error, is_transient_error,
 def answer(exc):
     if (conflict := payment_conflict_response(exc)) is not None:
         return conflict                       # 409, or 503 in flight: used by another request
-    if getattr(exc, "transaction", None) or getattr(exc, "tx_hash", None):
-        return may_have_settled(exc)          # broadcast: check the chain
+    transient = is_transient_error(exc)
+    if (getattr(exc, "transaction", None) or getattr(exc, "tx_hash", None)) and not transient:
+        return may_have_settled(exc)          # 500, broadcast: check the chain
     if is_spent_nonce_error(exc):
-        return may_have_settled(exc)          # already used: do NOT sign again
-    if is_transient_error(exc):
-        return transient_503_response(exc)    # no verdict: same credential, later
+        return already_used(exc)              # 409, already used: do NOT sign again
+    if transient:
+        return transient_503_response(exc)    # 503, no verdict: same credential, later
+    if (getattr(exc, "status_code", None) or 0) >= 500:
+        return may_have_settled(exc)          # 500, the facilitator said not to retry
     return payment_rejected(exc)              # 402
 ```
 

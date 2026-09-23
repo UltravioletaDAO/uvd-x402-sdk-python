@@ -59,7 +59,10 @@ never sends one.
 `payment_conflict_response(exc)` builds those answers, and every SDK middleware
 and decorator uses it; none of them is a `402`. They also answer every failure
 without a verdict (a timeout, a store the facilitator could not read, a settle
-still in flight) with `503` + `Retry-After`. When a settle times out while the
+still in flight) with `503` + `Retry-After`, a payment that may have moved (`502
+settlement_unconfirmed`, any failure naming a `transaction`, another `5xx` with
+`retryable: false`) with `500`, and an authorization already used with `409`
+(0.90.1). When a settle times out while the
 payment is in flight, the fallback's resend under the same key gets `202
 settlement_in_progress` and asks again for up to `SETTLE_IN_FLIGHT_POLL_SECONDS`,
 so the same request usually ends in its settle. Facilitators before 2.39.0 did

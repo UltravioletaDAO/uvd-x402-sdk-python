@@ -704,18 +704,24 @@ def spent_nonce_evidence(exc: Exception) -> Optional[str]:
     """
     if not isinstance(exc, X402Error):
         return None
-    body_text = getattr(exc, "response_body", None)
-    try:
-        body = json.loads(body_text) if body_text else None
-    except (ValueError, TypeError):
-        body = None
-    if _spent_nonce_code(exc.details) is not None or _spent_nonce_code(body) is not None:
+    if _spent_nonce_code_of(exc) is not None:
         return "structured"
+    body_text = getattr(exc, "response_body", None)
     reason = getattr(exc, "reason", None)
     text = " ".join(
         part for part in (exc.message, reason, body_text) if isinstance(part, str) and part
     )
     return "wording" if _mentions_spent_nonce(text) else None
+
+
+def _spent_nonce_code_of(exc: X402Error) -> Optional[str]:
+    """The spent-nonce code in ``exc``'s details or facilitator JSON body, verbatim."""
+    body_text = getattr(exc, "response_body", None)
+    try:
+        body = json.loads(body_text) if body_text else None
+    except (ValueError, TypeError):
+        body = None
+    return _spent_nonce_code(exc.details) or _spent_nonce_code(body)
 
 
 def is_spent_nonce_error(exc: Exception) -> bool:
@@ -887,31 +893,131 @@ def payment_conflict_response(
     return status, body, headers
 
 
-def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any], Dict[str, str]]]:
-    """What the SDK's middlewares and decorators answer for a payment that is
-    neither delivered nor rejected, or ``None`` for a rejection (each keeps its
-    own 402 or 400).
+#: What a buyer is told when its payment may have moved. The body's
+#: ``transaction`` / ``paymentId``, when present, are what to check.
+_MAY_HAVE_SETTLED_MESSAGE = (
+    "The payment may have settled: do not sign another one. "
+    "Check the transaction before paying again."
+)
+#: The same, when the facilitator named no transaction.
+_MAY_HAVE_SETTLED_NO_TRANSACTION_MESSAGE = (
+    "The payment may have settled: do not sign another one. "
+    "The facilitator reported no transaction; check with the seller before paying again."
+)
+#: What a buyer is told when its authorization was already used.
+_AUTHORIZATION_ALREADY_USED_MESSAGE = (
+    "This payment authorization was already used and the payment may have settled: "
+    "do not sign another one. Check the payment before paying again."
+)
 
-    :func:`payment_conflict_response` first (409, or 503 while in flight), then
-    any failure :func:`is_transient_error` calls transient -- a timeout, a
-    ``202 settlement_in_progress``, a ``5xx`` such as ``503
-    idempotency_store_unavailable`` or ``receipt_store_unavailable``, a 429 --
-    as 503 + ``Retry-After`` (:func:`transient_503_response`): present the same
-    ``X-PAYMENT`` later, never sign another. The receipt, when there is one,
-    travels in ``PAYMENT-RESPONSE``.
-    """
-    conflict = payment_conflict_response(exc)
-    if conflict is not None:
-        return conflict
-    if not is_transient_error(exc):
-        return None
-    body, headers = transient_503_response(exc)
+
+def _with_receipt(headers: Dict[str, str], exc: X402Error) -> Dict[str, str]:
+    """``headers`` plus ``PAYMENT-RESPONSE`` when ``exc`` carries a receipt."""
     receipt = getattr(exc, "receipt", None)
     if receipt is not None:
         headers.update(
             payment_response_headers({"success": False, "receipt": receipt.model_dump()})
         )
-    return 503, body, headers
+    return headers
+
+
+def _broadcast_transaction(exc: X402Error) -> Optional[str]:
+    """The transaction a failure says was broadcast, if it names one."""
+    if isinstance(exc, FacilitatorError):
+        return _facilitator_error_tx_hash(exc)
+    if isinstance(exc, PaymentSettlementError):
+        return exc.tx_hash
+    return None
+
+
+def _may_have_settled_response(
+    exc: X402Error, transaction: Optional[str]
+) -> Tuple[int, Dict[str, Any], Dict[str, str]]:
+    """``500`` for a failure after which the payment may have moved.
+
+    The answer the TypeScript SDK gives ``settlement_unconfirmed``: not ``402``,
+    which asks for a new signature, and not ``503`` + ``Retry-After``, which
+    invites a resend. The body is the exception's ``to_dict()`` plus
+    ``retryable`` / ``safeToReplay`` false, the facilitator's ``reason``, and
+    ``transaction`` / ``paymentId`` at the top level when it sent them.
+    """
+    body: Dict[str, Any] = dict(exc.to_dict())
+    body["message"] = (
+        _MAY_HAVE_SETTLED_MESSAGE if transaction is not None
+        else _MAY_HAVE_SETTLED_NO_TRANSACTION_MESSAGE
+    )
+    body["retryable"] = False
+    body["safeToReplay"] = False
+    reason = getattr(exc, "error_code", None) or facilitator_reason(exc)
+    if reason is not None:
+        body["reason"] = reason
+    if transaction is not None:
+        body["transaction"] = transaction
+    payment_id = getattr(exc, "payment_id", None)
+    if payment_id is not None:
+        body["paymentId"] = payment_id
+    return 500, body, _with_receipt({"Content-Type": "application/json"}, exc)
+
+
+def _spent_authorization_response(
+    exc: X402Error, evidence: str
+) -> Tuple[int, Dict[str, Any], Dict[str, str]]:
+    """``409`` for an authorization the facilitator says was already used.
+
+    The body is the exception's ``to_dict()`` plus ``retryable`` /
+    ``safeToReplay`` false, ``spentNonceEvidence`` (what
+    :func:`spent_nonce_evidence` returned) and, when a code said so, that code
+    as ``reason``.
+    """
+    body: Dict[str, Any] = dict(exc.to_dict())
+    body["message"] = _AUTHORIZATION_ALREADY_USED_MESSAGE
+    body["retryable"] = False
+    body["safeToReplay"] = False
+    body["spentNonceEvidence"] = evidence
+    code = _spent_nonce_code_of(exc)
+    if code is not None:
+        body["reason"] = code
+    return 409, body, _with_receipt({"Content-Type": "application/json"}, exc)
+
+
+def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any], Dict[str, str]]]:
+    """What the SDK's middlewares and decorators answer for a payment that is
+    neither delivered nor rejected, or ``None`` for a rejection (each keeps its
+    own 402 or 400). First match wins:
+
+    1. :func:`payment_conflict_response`: 409, or 503 while in flight.
+    2. A transaction on a failure that is not transient (``502
+       settlement_unconfirmed``, any other ``5xx`` with a hash): 500, with
+       ``transaction`` and ``paymentId``. It was broadcast and may be mined.
+    3. :func:`spent_nonce_evidence`: 409. The authorization was already used,
+       so the payment may have moved.
+    4. :func:`is_transient_error` (a timeout, a ``202 settlement_in_progress``,
+       ``503 idempotency_store_unavailable`` or ``receipt_store_unavailable``,
+       another retryable ``5xx``, a 429): 503 + ``Retry-After``
+       (:func:`transient_503_response`). Present the same ``X-PAYMENT`` later.
+    5. Any other ``5xx`` (the facilitator said ``retryable: false``): 500.
+
+    None of them is a 402: each tells the buyer not to sign another payment.
+    The anti-double-settle guard in :func:`is_transient_error` is unchanged:
+    the SDK still does not re-send any of them. The receipt, when there is one,
+    travels in ``PAYMENT-RESPONSE``.
+    """
+    conflict = payment_conflict_response(exc)
+    if conflict is not None:
+        return conflict
+    transient = is_transient_error(exc)
+    transaction = _broadcast_transaction(exc)
+    if transaction is not None and not transient:
+        return _may_have_settled_response(exc, transaction)
+    evidence = spent_nonce_evidence(exc)
+    if evidence is not None:
+        return _spent_authorization_response(exc, evidence)
+    if transient:
+        body, headers = transient_503_response(exc)
+        return 503, body, _with_receipt(headers, exc)
+    if isinstance(exc, FacilitatorError) and (exc.status_code or 0) >= 500:
+        return _may_have_settled_response(exc, None)
+    return None
 
 
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:

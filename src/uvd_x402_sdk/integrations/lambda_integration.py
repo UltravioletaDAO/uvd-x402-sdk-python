@@ -202,7 +202,8 @@ class LambdaX402:
                 request is one of them:
                 :func:`~uvd_x402_sdk.client.payment_conflict_response` builds
                 its 409 (503 while in flight), and it is not delivered on;
-                ``process_or_require`` answers it, and any failure without a
+                ``process_or_require`` answers it, a payment that may have
+                moved, an authorization already used and any failure without a
                 verdict, without a 402.
         """
         payment_header = self.get_payment_header(event)
@@ -253,7 +254,8 @@ class LambdaX402:
         except X402Error as e:
             conflict = _undelivered_response(e)
             if conflict is not None:
-                # Already admitted for another request (409), or no verdict yet
+                # Already admitted for another request or already used (409),
+                # may have moved (500, with the transaction), or no verdict yet
                 # (503 + Retry-After): not delivered, and not a 402, which
                 # would ask for a second payment.
                 logger.warning(f"Payment not delivered: {e.message}")
