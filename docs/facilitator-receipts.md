@@ -37,6 +37,36 @@ public URL and body bytes, pass `receipt_context=header` to verify/settle, and u
 `payment_response_headers(result)` on their response. Configure CORS/proxies to
 forward those headers. Other frameworks can use these same helpers explicitly.
 
+## A payment the facilitator already admitted (0.89.0)
+
+Facilitator 2.39.0 returns an admitted payment's original answer only to the
+binding that admitted it: the same `X-UVD-Purchase` capability or the same
+`Idempotency-Key`. Holding the signed payment is not a binding. Since 0.89.0 each
+payment handling (a `process_payment()` call, or a `settle_payment()` call with its
+retries and timeout fallback) sends ONE key on `/verify`, `/settle` and the
+fallback's resend. The key is random (`new_idempotency_key()`) unless the call brings
+`idempotency_key` or a secret `idempotency_scope`. A key derived from the
+`X-PAYMENT` alone would be recomputed by whoever holds the payment, so the SDK
+never sends one.
+
+| Facilitator answer | `admitted_authorization_code` | Merchant answer |
+| --- | --- | --- |
+| `409 authorization_already_settled` / `/verify` `isValid: false` | `authorization_already_settled` | `409`, not delivered |
+| `409 receipt_request_conflict` | `receipt_request_conflict` | `409`, not delivered |
+| `409 authorization_in_flight` / `/verify` `isValid: false` | `authorization_in_flight` | `503` + `Retry-After`, not delivered |
+| `202 settlement_in_progress` under the handling's binding | none (transient) | retry the same request |
+
+`payment_conflict_response(exc)` builds those answers, and every SDK middleware
+and decorator uses it; none of them is a `402`. Facilitators 2.36.0 to 2.38.0
+replay an admitted settle to any resend. A handling with no binding of its own (a
+fresh key, no `X-UVD-Purchase`) that receives such a replay before any of its own
+attempts could have admitted the payment raises `PaymentSettlementError` with the
+same codes and the receipt. The replay a handling's own fallback or retry receives
+is returned, with `idempotent_replayed=True`. With `send_idempotency_key=False`, a
+timed-out settle that was admitted gets `409 authorization_already_settled` on its
+fallback: probably the merchant's own payment, but unproven. Reconcile the
+receipt's `settlement` before delivering anything.
+
 `get_receipt(http_client, receipt_id, context)` privately queries the latest
 receipt. `verify_receipt(receipt, trusted_keys)` validates issuer, request hash
 and JWS. Obtain keys from your configured facilitator's

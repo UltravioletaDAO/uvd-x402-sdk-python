@@ -18,12 +18,27 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[flask]"
     )
 
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, payment_conflict_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.response import create_402_response, create_402_headers
 
 F = TypeVar("F", bound=Callable[..., Any])
+
+
+def _conflict_response(error: X402Error) -> Any:
+    """409, or 503 + Retry-After while in flight, for an ``X-PAYMENT`` the
+    facilitator already admitted for another request; ``None`` for any other
+    failure. Never delivered again, and never a 402, which would ask the buyer
+    for a second payment."""
+    conflict = payment_conflict_response(error)
+    if conflict is None:
+        return None
+    status, body, headers = conflict
+    response = make_response(jsonify(body), status)
+    for key, value in headers.items():
+        response.headers[key] = value
+    return response
 
 
 class FlaskX402:
@@ -178,6 +193,9 @@ class FlaskX402:
                     return func(*args, **kwargs)
 
                 except X402Error as e:
+                    conflict = _conflict_response(e)
+                    if conflict is not None:
+                        return conflict
                     response_body = create_402_response(
                         amount_usd=required_amount,
                         config=self.config,
@@ -251,6 +269,9 @@ def flask_require_payment(
                 return func(*args, **kwargs)
 
             except X402Error as e:
+                conflict = _conflict_response(e)
+                if conflict is not None:
+                    return conflict
                 response_body = e.to_dict()
                 response = make_response(jsonify(response_body), 402)
                 return response

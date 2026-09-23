@@ -10,7 +10,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, Union, Dict
 
 from uvd_x402_sdk.config import X402Config
-from uvd_x402_sdk.client import X402Client
+from uvd_x402_sdk.client import X402Client, payment_conflict_response
 from uvd_x402_sdk.exceptions import (
     X402Error,
     PaymentRequiredError,
@@ -294,6 +294,14 @@ def _create_error_response(
     config: X402Config,
 ) -> Any:
     """Create an error response for x402 errors."""
+    # Already admitted for another request: 409, or 503 + Retry-After while in
+    # flight. Not delivered again, and not a 402, which would ask for a second
+    # payment.
+    conflict = payment_conflict_response(error)
+    if conflict is not None:
+        status, body, headers = conflict
+        return _create_json_response(status, body, headers)
+
     # Payment verification/settlement failed - return 402
     if isinstance(error, (PaymentRequiredError, InvalidPayloadError)):
         body = create_402_response(amount_usd=amount, config=config)
@@ -323,3 +331,32 @@ def _create_error_response(
         pass
 
     return {"statusCode": 400, "body": body}
+
+
+def _create_json_response(status: int, body: Dict[str, Any], headers: Dict[str, str]) -> Any:
+    """A JSON response for the current framework, like ``_create_402_response``."""
+    try:
+        from flask import jsonify, make_response
+        response = make_response(jsonify(body), status)
+        for key, value in headers.items():
+            response.headers[key] = value
+        return response
+    except ImportError:
+        pass
+
+    try:
+        from starlette.responses import JSONResponse
+        return JSONResponse(status_code=status, content=body, headers=headers)
+    except ImportError:
+        pass
+
+    try:
+        from django.http import JsonResponse
+        response = JsonResponse(body, status=status)
+        for key, value in headers.items():
+            response[key] = value
+        return response
+    except ImportError:
+        pass
+
+    return {"statusCode": status, "headers": headers, "body": body}

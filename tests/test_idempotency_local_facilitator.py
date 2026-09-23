@@ -21,9 +21,9 @@ It is NOT the facilitator binary. Running x402-rs locally needs chain RPC and a
 funded signer, and its own handoff (``docs/handoffs/2026-09-02-mcp-listo.md``)
 records ``POST /settle`` hanging locally without AWS credentials.
 
-The key is opt-in since 0.83.1 and bound to a purchase the caller names, so
-every seller below that wants it asks for it (``send_idempotency_key=True``)
-and names the purchase (``idempotency_scope``).
+Every seller below that wants a restarted process to land on the same key
+names the purchase (``idempotency_scope``): the key it sends by default is
+random per handling since 0.89.0, and a new process would make a new one.
 """
 from __future__ import annotations
 
@@ -169,7 +169,8 @@ ORDER = "order-1"
 
 
 def _keyed_seller(facilitator: _LocalFacilitator) -> X402Client:
-    """The same, asking for the key: it is opt-in since 0.83.1."""
+    """The same, asking for the key outright (on by default since 0.89.0,
+    opt-in from 0.83.1 to 0.88.0)."""
     return _seller(facilitator, send_idempotency_key=True)
 
 
@@ -209,18 +210,22 @@ def test_the_same_authorization_under_other_terms_is_refused_not_executed(facili
     assert caught.value.error_code == "idempotency_key_conflict"
 
 
-def test_verify_and_settle_carry_different_keys_for_the_same_authorization(facilitator):
-    """The store is one namespace; a verify cache must never answer a settle."""
+def test_verify_and_settle_carry_one_key_and_the_settle_still_executes_once(facilitator):
+    """One key per payment since 0.89.0, as the receipt rail requires. A
+    network without receipts ignores the key on /verify and caches nothing
+    there, so the settle under the same key executes once and is cached."""
     client = _keyed_seller(facilitator)
     try:
         client.verify_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
     except FacilitatorError:
         pass  # the local facilitator has no /verify; only the key it saw matters
-    client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
+    first = client.try_settle_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
+    again = client.try_settle_payment(_payload(), Decimal("0.01"), idempotency_scope=ORDER)
 
     keys = dict(facilitator.keys)
-    assert keys["/verify"] and keys["/settle"]
-    assert keys["/verify"] != keys["/settle"]
+    assert keys["/verify"] and keys["/verify"] == keys["/settle"]
+    assert first["success"] and again["success"]
+    assert facilitator.executed == 1 and facilitator.replayed == 1
 
 
 def test_with_the_key_switched_off_the_retry_reaches_the_chain(facilitator):

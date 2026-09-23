@@ -433,6 +433,15 @@ class VerifyResponse(BaseModel):
     message: Optional[str] = Field(None, description="Error message if invalid")
     invalidReason: Optional[str] = Field(None, description="Specific reason for invalidity")
     errors: List[str] = Field(default_factory=list, description="List of validation errors")
+    idempotency_key: Optional[str] = Field(
+        None,
+        exclude=True,
+        description=(
+            "The Idempotency-Key this call carried: the payment's purchase "
+            "binding. Merchant-private, left out of model_dump() so it never "
+            "reaches the buyer in PAYMENT-RESPONSE."
+        ),
+    )
 
 
 class SettleRequest(BaseModel):
@@ -460,6 +469,24 @@ class SettleResponse(BaseModel):
     payer: Optional[str] = Field(None, description="Verified payer address")
     message: Optional[str] = Field(None, description="Error message if failed")
     errors: List[str] = Field(default_factory=list, description="List of errors")
+    idempotent_replayed: bool = Field(
+        False,
+        description=(
+            "The facilitator answered from a payment it had already admitted "
+            "(Idempotent-Replayed: true) instead of executing one. Set by the "
+            "client from the response header, never from the body. Only a "
+            "replay of this call's own binding is ever returned as a success."
+        ),
+    )
+    idempotency_key: Optional[str] = Field(
+        None,
+        exclude=True,
+        description=(
+            "The Idempotency-Key this call carried: the payment's purchase "
+            "binding. Merchant-private, left out of model_dump() so it never "
+            "reaches the buyer in PAYMENT-RESPONSE."
+        ),
+    )
 
     def get_transaction_hash(self) -> Optional[str]:
         """Get transaction hash from either field."""
@@ -479,6 +506,23 @@ class PaymentResult(BaseModel):
     transaction_hash: Optional[str] = Field(None, description="On-chain transaction hash")
     network: str = Field(..., description="Network where payment was settled")
     amount_usd: Decimal = Field(..., description="Amount paid in USD")
+    idempotent_replayed: bool = Field(
+        False,
+        description=(
+            "The settle was the facilitator's replay of this purchase's own "
+            "admitted payment (the key or context the caller brought, or the "
+            "call's own timed-out settle): its answer, recovered."
+        ),
+    )
+    idempotency_key: Optional[str] = Field(
+        None,
+        exclude=True,
+        description=(
+            "The Idempotency-Key this call carried: the payment's purchase "
+            "binding. Merchant-private, left out of model_dump() so it never "
+            "reaches the buyer in PAYMENT-RESPONSE."
+        ),
+    )
 
     class Config:
         json_encoders = {Decimal: str}

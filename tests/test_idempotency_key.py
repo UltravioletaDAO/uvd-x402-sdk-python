@@ -1,8 +1,10 @@
-"""``derive_idempotency_key`` and the header on the wire.
+"""The ``Idempotency-Key``: how it is made, and the header on the wire.
 
 What the facilitator does with the key is exercised in
-``tests/test_idempotency_local_facilitator.py``; why the key is built the way it
-is, in the docstring of :func:`uvd_x402_sdk.client.derive_idempotency_key`.
+``tests/test_idempotency_local_facilitator.py`` and
+``tests/test_receipt_rail_binding.py``; why a key is made the way it is, in the
+docstrings of :func:`uvd_x402_sdk.client.new_idempotency_key` and
+:func:`uvd_x402_sdk.client.derive_idempotency_key`.
 """
 from __future__ import annotations
 
@@ -14,8 +16,18 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from uvd_x402_sdk import IDEMPOTENCY_KEY_HEADER, X402Client, derive_idempotency_key
+from uvd_x402_sdk import (
+    IDEMPOTENCY_KEY_HEADER,
+    X402Client,
+    derive_idempotency_key,
+    new_idempotency_key,
+    payment_response_headers,
+)
 from uvd_x402_sdk.models import PaymentPayload
+
+#: The shape of a key the SDK made itself, the one ``createIdempotencyKey()``
+#: makes in the TypeScript SDK.
+RANDOM_KEY = re.compile(r"x402-[0-9a-f]{64}")
 
 RECIPIENT = "0x1234567890123456789012345678901234567890"
 
@@ -66,6 +78,17 @@ class _RecordingClient:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+def _header() -> str:
+    """The X-PAYMENT of ``_payload()``, as a buyer presents it."""
+    envelope = {
+        "x402Version": 1,
+        "scheme": "exact",
+        "network": "base",
+        "payload": _payload().payload,
+    }
+    return base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
 
 
 _SETTLE_OK = {"success": True, "transaction": "0xf00d", "payer": "0xSender", "network": "base"}
@@ -127,12 +150,17 @@ class TestDerive:
             derive_idempotency_key(_payload(network="base"), "settle")
         )
 
-    def test_verify_and_settle_are_namespaced(self):
+    def test_verify_and_settle_derive_one_key(self):
+        """One key per payment since 0.89.0: the receipt rail binds only the
+        key that admitted the payment, on /verify as on /settle. The value is
+        the settle key 0.83.0 to 0.88.0 derived, so a purchase settled before
+        an upgrade keeps its key."""
         verify = derive_idempotency_key(_payload(), "verify")
         settle = derive_idempotency_key(_payload(), "settle")
-        assert verify.startswith("x402-verify-")
-        assert settle.startswith("x402-settle-")
-        assert verify != settle
+        assert verify == settle
+        assert settle == (
+            "x402-settle-6b62041bcbd7d49d05741f8bcd646f73ab239a76582b119c49e9679dc1cf6c1d"
+        )
 
     def test_an_empty_block_gets_no_key(self):
         empty = PaymentPayload(x402Version=1, scheme="exact", network="base", payload={})
@@ -207,8 +235,8 @@ class TestDerive:
             derive_idempotency_key(_payload(), "settle", scope="order-1")
         )
 
-    def test_verify_and_settle_stay_namespaced_under_a_scope(self):
-        assert derive_idempotency_key(_payload(), "verify", scope="order-1") != (
+    def test_verify_and_settle_derive_one_key_under_a_scope(self):
+        assert derive_idempotency_key(_payload(), "verify", scope="order-1") == (
             derive_idempotency_key(_payload(), "settle", scope="order-1")
         )
 
@@ -222,6 +250,19 @@ class TestDerive:
             derive_idempotency_key(_payload(), "settle", scope=42)
 
 
+class TestNewKey:
+    def test_the_shape(self):
+        assert RANDOM_KEY.fullmatch(new_idempotency_key())
+
+    def test_every_key_is_new(self):
+        assert len({new_idempotency_key() for _ in range(50)}) == 50
+
+    def test_it_is_not_derived_from_the_payment(self):
+        key = new_idempotency_key()
+        assert key != derive_idempotency_key(_payload(), "settle")
+        assert not key.startswith("x402-settle-")
+
+
 class TestOnTheWire:
     def test_settle_sends_the_scoped_key(self, monkeypatch):
         client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
@@ -233,13 +274,85 @@ class TestOnTheWire:
         )
         assert headers["Content-Type"] == "application/json"
 
-    def test_verify_sends_its_own_scoped_key(self, monkeypatch):
+    def test_verify_sends_the_same_scoped_key_as_settle(self, monkeypatch):
         client, fake = _wire(monkeypatch, [_Response(_VERIFY_OK)], send_idempotency_key=True)
         client.verify_payment(_payload(), Decimal("0.01"), idempotency_scope="order-1")
 
         assert fake.calls[0]["headers"][IDEMPOTENCY_KEY_HEADER] == derive_idempotency_key(
-            _payload(), "verify", scope="order-1"
+            _payload(), "settle", scope="order-1"
         )
+
+    def test_by_default_a_settle_sends_a_fresh_random_key(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK), _Response(_SETTLE_OK)])
+        assert client.config.send_idempotency_key is True
+        first = client.settle_payment(_payload(), Decimal("0.01"))
+        again = client.settle_payment(_payload(), Decimal("0.01"))
+
+        sent = [call["headers"][IDEMPOTENCY_KEY_HEADER] for call in fake.calls]
+        assert all(RANDOM_KEY.fullmatch(key) for key in sent)
+        assert sent[0] != sent[1]
+        assert [first.idempotency_key, again.idempotency_key] == sent
+
+    def test_two_handlings_of_the_same_x_payment_send_different_keys(self, monkeypatch):
+        client, fake = _wire(
+            monkeypatch,
+            [_Response(_VERIFY_OK), _Response(_SETTLE_OK)] * 2,
+        )
+        header = _header()
+        first = client.process_payment(header, Decimal("0.01"))
+        again = client.process_payment(header, Decimal("0.01"))
+
+        keys = [call["headers"][IDEMPOTENCY_KEY_HEADER] for call in fake.calls]
+        assert keys[0] == keys[1] and keys[2] == keys[3]
+        assert keys[0] != keys[2]
+        assert first.idempotency_key == keys[0] and again.idempotency_key == keys[2]
+
+    def test_a_key_the_caller_brings_goes_out_verbatim_on_verify_and_settle(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_VERIFY_OK), _Response(_SETTLE_OK)])
+        key = new_idempotency_key()
+        result = client.process_payment(_header(), Decimal("0.01"), idempotency_key=key)
+
+        assert [call["headers"][IDEMPOTENCY_KEY_HEADER] for call in fake.calls] == [key, key]
+        assert result.idempotency_key == key
+
+    def test_the_key_never_reaches_the_buyer(self, monkeypatch):
+        """Merchant-private: out of ``model_dump()``, so out of PAYMENT-RESPONSE."""
+        client, fake = _wire(monkeypatch, [_Response(_VERIFY_OK), _Response(_SETTLE_OK)])
+        result = client.process_payment(_header(), Decimal("0.01"))
+
+        assert result.idempotency_key
+        assert "idempotency_key" not in result.model_dump()
+        encoded = payment_response_headers(result)["PAYMENT-RESPONSE"]
+        assert result.idempotency_key not in base64.b64decode(encoded).decode()
+
+    @pytest.mark.parametrize(
+        "key, error",
+        [
+            ("receipt:mine", ValueError),
+            ("", ValueError),
+            ("with space", ValueError),
+            ("x" * 256, ValueError),
+            ("clé", ValueError),
+            (42, TypeError),
+        ],
+        ids=["reserved", "empty", "space", "too-long", "non-ascii", "not-a-string"],
+    )
+    def test_a_key_the_facilitator_cannot_carry_is_refused_before_anything_is_sent(
+        self, monkeypatch, key, error
+    ):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)])
+        with pytest.raises(error):
+            client.settle_payment(_payload(), Decimal("0.01"), idempotency_key=key)
+        assert fake.calls == []
+
+    def test_a_key_and_a_scope_at_once_are_refused(self, monkeypatch):
+        client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)])
+        with pytest.raises(ValueError):
+            client.settle_payment(
+                _payload(), Decimal("0.01"),
+                idempotency_key=new_idempotency_key(), idempotency_scope="order-1",
+            )
+        assert fake.calls == []
 
     def test_the_switch_sends_no_key(self, monkeypatch):
         client, fake = _wire(
@@ -255,10 +368,12 @@ class TestOnTheWire:
 
     @pytest.mark.parametrize("scope", ["", "   "], ids=["empty", "blank"])
     def test_a_blank_scope_is_no_scope(self, monkeypatch, scope):
+        """No purchase named: the handling gets a fresh key, never one derived
+        from the payment alone."""
         client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
         client.settle_payment(_payload(), Decimal("0.01"), idempotency_scope=scope)
 
-        assert IDEMPOTENCY_KEY_HEADER not in fake.calls[0]["headers"]
+        assert RANDOM_KEY.fullmatch(fake.calls[0]["headers"][IDEMPOTENCY_KEY_HEADER])
 
     def test_a_scope_that_is_not_a_string_is_refused_before_anything_is_sent(self, monkeypatch):
         client, fake = _wire(monkeypatch, [_Response(_SETTLE_OK)], send_idempotency_key=True)
@@ -283,6 +398,16 @@ class TestOnTheWire:
         assert first is not None
         assert fallback == first
 
+    def test_the_timeout_fallback_resends_the_fresh_key_of_its_own_handling(self, monkeypatch):
+        client, fake = _wire(
+            monkeypatch, [httpx.TimeoutException("too slow"), _Response(_SETTLE_OK)]
+        )
+        settled = client.settle_payment(_payload(), Decimal("0.01"))
+
+        first, fallback = (call["headers"][IDEMPOTENCY_KEY_HEADER] for call in fake.calls)
+        assert RANDOM_KEY.fullmatch(first)
+        assert fallback == first == settled.idempotency_key
+
     def test_a_settle_with_retry_sends_the_scoped_key_on_every_attempt(self, monkeypatch):
         monkeypatch.setattr("uvd_x402_sdk.client.time.sleep", lambda seconds: None)
         client, fake = _wire(
@@ -301,21 +426,27 @@ class TestOnTheWire:
         sent = [call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls]
         assert sent == [expected, expected]
 
+    def test_a_settle_with_retry_sends_one_fresh_key_on_every_attempt(self, monkeypatch):
+        monkeypatch.setattr("uvd_x402_sdk.client.time.sleep", lambda seconds: None)
+        client, fake = _wire(
+            monkeypatch,
+            [
+                _Response({"error": "upstream unavailable"}, status_code=502),
+                _Response(_SETTLE_OK),
+            ],
+        )
+        client.settle_payment(_payload(), Decimal("0.01"), retry=True)
+
+        first, second = (call["headers"][IDEMPOTENCY_KEY_HEADER] for call in fake.calls)
+        assert RANDOM_KEY.fullmatch(first) and second == first
+
     def test_process_payment_sends_the_scoped_key_on_verify_and_on_settle(self, monkeypatch):
         client, fake = _wire(
             monkeypatch,
             [_Response(_VERIFY_OK), _Response(_SETTLE_OK)],
             send_idempotency_key=True,
         )
-        envelope = {
-            "x402Version": 1,
-            "scheme": "exact",
-            "network": "base",
-            "payload": _payload().payload,
-        }
-        header = base64.b64encode(json.dumps(envelope).encode("utf-8")).decode("ascii")
-        client.process_payment(header, Decimal("0.01"), idempotency_scope="order-1")
+        client.process_payment(_header(), Decimal("0.01"), idempotency_scope="order-1")
 
         verify, settle = (call["headers"].get(IDEMPOTENCY_KEY_HEADER) for call in fake.calls)
-        assert verify == derive_idempotency_key(_payload(), "verify", scope="order-1")
-        assert settle == derive_idempotency_key(_payload(), "settle", scope="order-1")
+        assert verify == settle == derive_idempotency_key(_payload(), "settle", scope="order-1")

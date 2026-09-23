@@ -14,7 +14,9 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Tuple, List, Dict, Any, Union
 
@@ -27,6 +29,9 @@ from uvd_x402_sdk.envelope import (
     resolve_envelope_version,
 )
 from uvd_x402_sdk.exceptions import (
+    ADMITTED_AUTHORIZATION_CODES,
+    AUTHORIZATION_ALREADY_SETTLED,
+    AUTHORIZATION_IN_FLIGHT,
     X402Error,
     InvalidPayloadError,
     PaymentVerificationError,
@@ -50,6 +55,7 @@ from uvd_x402_sdk.models import (
     VerifyResponse,
     SettleResponse,
 )
+from uvd_x402_sdk.receipts import payment_response_headers
 from uvd_x402_sdk.policy import (
     AdvertisedQuote,
     ParsedAccepts,
@@ -92,16 +98,28 @@ _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 
 
 # =============================================================================
-# Idempotency-Key (opt-in: X402Config.send_idempotency_key + idempotency_scope)
+# Idempotency-Key: the purchase binding (X402Config.send_idempotency_key)
 # =============================================================================
 #
-# Off by default since 0.83.1. With the config on, a call carries the key only
-# when the caller also names the purchase with `idempotency_scope`: a key
-# derived from the payment alone does not tell two purchases of the same price
-# apart, because their requests are byte-identical.
+# On by default since 0.89.0. Every payment handling carries ONE key: the same
+# value on `/verify`, on `/settle`, on the settle's retries and on the timeout
+# fallback's resend. The facilitator's receipt rail gives an admitted payment's
+# answer back only to the binding that admitted it, so this key is what lets a
+# seller recover its own lost settle answer.
 #
-# What the facilitator does with the header, measured on x402-rs 2.28.0
-# (`src/handlers.rs`, `post_settle`, and its `settle_idempotency_tests`):
+# The key is RANDOM (`new_idempotency_key()`) unless the caller brings one:
+# `idempotency_key` (a key the caller created and stored with the order, to
+# resume after a restart) or `idempotency_scope` (derived with
+# `derive_idempotency_key`, a binding only while the scope is a secret of the
+# seller). A key derived from the X-PAYMENT alone is not a binding: whoever
+# holds the payment recomputes it, and a buyer resending their own X-PAYMENT in
+# a NEW request would make the seller send the same key and get the original
+# settle back, the replay x402-rs 2.39.0 closes. 0.83.1 to 0.88.0 sent a key
+# only with a scope; 0.83.0 sent the unscoped derived key.
+#
+# What the facilitator does with the header on networks WITHOUT receipts,
+# measured on x402-rs 2.28.0 (`src/handlers.rs`, `post_settle`, and its
+# `settle_idempotency_tests`):
 #
 #   * it hashes the RAW request body (sha256, no JSON re-encoding);
 #   * same key + same hash -> the cached response, 200 with
@@ -109,8 +127,27 @@ _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 #   * same key + different hash -> 409 `idempotency_key_conflict`;
 #   * only a SUCCESSFUL settle is cached, so a failure never locks a retry out;
 #   * a store it cannot read -> 503 `idempotency_store_unavailable`, and it does
-#     NOT settle (fail-closed); a call without the key does not depend on it;
-#   * `/verify` ignores the header today.
+#     NOT settle (fail-closed). That is no verdict: present the same credential
+#     later. `send_idempotency_key=False` removes the dependency;
+#   * `/verify` ignores the header.
+#
+# On networks WITH receipts (x402-rs 2.39.0, `docs/facilitator-receipts.md`,
+# "Replays of an admitted authorization"; Arc and native Hedera today) an
+# admitted authorization gets its original answer back only with the binding
+# that admitted it, this key or the same `X-UVD-Purchase`:
+#
+#   * `/settle` with the binding -> the original status and body with
+#     `Idempotent-Replayed: true`, or `202 settlement_in_progress` in flight;
+#   * `/verify` with the binding -> the stored verdict and receipt;
+#   * without it -> `409 authorization_already_settled` (confirmed) or
+#     `409 authorization_in_flight`, and `/verify` answers `isValid: false`
+#     with the same reason. Another purchase context: `409
+#     receipt_request_conflict`. A rejected payment replays its rejection.
+#
+# Facilitators 2.36.0 to 2.38.0 replayed an admitted settle to ANY resend of
+# the same request. A handling that brought no binding of its own (a fresh key,
+# no `X-UVD-Purchase`) refuses a replay that reaches it before any attempt of
+# its own could have admitted the payment (see `_Binding`).
 
 #: The header the facilitator deduplicates a settle on.
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
@@ -122,27 +159,71 @@ _IDEMPOTENCY_OPERATIONS = ("verify", "settle")
 #: tag, so the two can never serialise to the same text.
 _SCOPED_KEY_TAG = "x402-idempotency-scope/1"
 
+#: Leads every derived key. The name of the operation that has always admitted
+#: the payment, kept verbatim so keys derived before 0.89.0 still bind their
+#: purchase.
+_PAYMENT_KEY_PREFIX = "x402-settle-"
+
+#: What the facilitator refuses as a caller key (``400
+#: reserved_idempotency_key``), and the shape a header and its store can carry.
+_RESERVED_KEY_PREFIX = "receipt:"
+_KEY_SHAPE = re.compile(r"[\x21-\x7e]{1,255}")
+
+
+def new_idempotency_key() -> str:
+    """A new, unguessable ``Idempotency-Key`` for ONE payment: ``x402-<64 hex>``.
+
+    Send it on that payment's ``/verify`` and ``/settle`` and every retry of
+    either (``idempotency_key=``); after a lost response it is what earns the
+    facilitator's original answer back. Random on purpose: a key derived from
+    the ``X-PAYMENT`` is known to whoever holds the payment, and holding the
+    payment is exactly what the facilitator refuses to accept as a binding.
+    Store it with the order to resume that payment after a restart. Same shape
+    as ``createIdempotencyKey()`` in the TypeScript SDK. Merchant-private:
+    never hand it to the buyer.
+    """
+    return "x402-" + secrets.token_hex(32)
+
+
+def _checked_idempotency_key(key: Any) -> str:
+    """The caller's key, or TypeError / ValueError before anything is sent."""
+    if not isinstance(key, str):
+        raise TypeError(f"idempotency_key must be a string, got {type(key).__name__}")
+    if not _KEY_SHAPE.fullmatch(key) or key.startswith(_RESERVED_KEY_PREFIX):
+        raise ValueError(
+            'idempotency_key must be 1-255 visible ASCII characters and must not '
+            'start with "receipt:"'
+        )
+    return key
+
 
 def derive_idempotency_key(
     payload: PaymentPayload, operation: str, scope: Optional[str] = None
 ) -> Optional[str]:
-    """The ``Idempotency-Key`` this SDK sends for ``operation`` on ``payload``.
+    """A key derived from ``payload`` and ``scope``: ``x402-settle-<sha256 hex>``.
 
-    ``x402-<operation>-<sha256 hex>``. Without ``scope``, over the signed
-    ``payload`` block serialised with sorted keys and no whitespace: the 0.83.0
-    key, unchanged. With ``scope``, over the JSON array
-    ``["x402-idempotency-scope/1", <that block>, <scope>]`` serialised the same
-    way. Non-ASCII text is hashed as its UTF-8 bytes, never as JSON escapes. The
-    same authorization and the same scope give the same key in any process and
-    on any run, so a buyer re-presenting the same ``X-PAYMENT`` for the same
-    purchase to a seller that restarted lands on the facilitator's cached
-    settle instead of executing it again.
+    **Not a purchase binding unless ``scope`` is a secret of the seller** (an
+    order id the seller generates and stores with the purchase, which the buyer
+    does not know and cannot guess). Whoever holds the ``X-PAYMENT`` and the
+    scope recomputes this key. Without a scope, or with one the buyer controls
+    or guesses, a buyer resending their own ``X-PAYMENT`` in a NEW request makes
+    the seller send the same key and get the original settle back: the replay
+    the facilitator's receipt rail refuses to a bare payment. :class:`X402Client`
+    sends it only when the caller passes ``idempotency_scope``; by default it
+    sends :func:`new_idempotency_key`. Public for compatibility.
 
-    * **The scope names the purchase, and only the caller knows it.** A key
+    Without ``scope``, over the signed ``payload`` block serialised with sorted
+    keys and no whitespace: the 0.83.0 settle key, unchanged. With ``scope``,
+    over the JSON array ``["x402-idempotency-scope/1", <that block>, <scope>]``
+    serialised the same way. Non-ASCII text is hashed as its UTF-8 bytes, never
+    as JSON escapes. The same authorization and the same scope give the same
+    key in any process and on any run, so a seller that restarted and settles
+    the same purchase again lands on the facilitator's stored settle instead of
+    executing it again.
+
+    * **The scope names the purchase, and only the seller knows it.** A key
       derived from the signed block alone does not tell two purchases of the
-      same price apart: their settle requests are byte-identical. So
-      :class:`X402Client` sends a key only on a call that passes
-      ``idempotency_scope`` (see ``X402Config.send_idempotency_key``). One value
+      same price apart: their settle requests are byte-identical. One value
       per purchase, stable across that purchase's retries, never shared by two.
       The scope is generated by the seller and stored with the purchase, never
       a value taken from the request.
@@ -151,9 +232,17 @@ def derive_idempotency_key(
       opens with ``[`` and a fixed tag. No block, whatever its shape, derives
       the key of a scoped call. 0.83.1 hashed an object for scoped keys too, so
       a scoped key from 0.83.1 differs from the one derived now.
-    * **Namespaced by operation.** ``/verify`` and ``/settle`` carry the same
-      payload and the facilitator's store is one namespace: one key for both
-      would let a future verify cache answer a settle.
+    * **One key per payment, not per operation** (since 0.89.0; 0.83.0 to
+      0.88.0 sent ``x402-verify-...`` on ``/verify``). The facilitator's
+      receipt rail requires the same key on ``/verify`` and on ``/settle``: a
+      key that differs per operation binds only the settle, so the ``/verify``
+      of a retried purchase answered ``isValid: false``
+      (``authorization_already_settled``) for a payment that had settled.
+      ``operation`` is still validated and no longer changes the value. The
+      value is the settle key those releases already sent, so a purchase whose
+      settle went out before an upgrade keeps its key after it. ``/verify``
+      ignores the key on networks without receipts, so nothing caches a
+      verify under it.
     * **The signed block and the scope, not the requirements.** A settle of the
       same authorization for the same purchase under different terms must
       reuse the key, so the facilitator refuses it (``409``) instead of running
@@ -194,26 +283,7 @@ def derive_idempotency_key(
         return None
     material: Any = signed if scope is None else [_SCOPED_KEY_TAG, signed, scope]
     canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return f"x402-{operation}-{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
-
-
-#: Set once the warning for a keyed call without a scope has been logged: one
-#: line per process, not one per payment.
-_missing_idempotency_scope_warned = False
-
-
-def _warn_missing_idempotency_scope() -> None:
-    """Log, once per process, that the key is on and a call named no purchase."""
-    global _missing_idempotency_scope_warned
-    if _missing_idempotency_scope_warned:
-        return
-    _missing_idempotency_scope_warned = True
-    logger.warning(
-        "X402Config.send_idempotency_key is on, but this call passed no "
-        "idempotency_scope, so no Idempotency-Key was sent. Pass the purchase's "
-        "own identifier (an order id) as idempotency_scope to verify_payment(), "
-        "settle_payment() and process_payment(). Logged once per process."
-    )
+    return f"{_PAYMENT_KEY_PREFIX}{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
 #: The one reader of a facilitator error body, shared with the verdict
@@ -258,6 +328,86 @@ def _response_retry_after(response: Any) -> Optional[float]:
         return None
 
 
+#: The header with which the facilitator marks an answer served from a payment
+#: it had already admitted (or cached) instead of executed.
+IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"
+
+
+def _response_replayed(response: Any) -> bool:
+    """Does this facilitator response carry ``Idempotent-Replayed: true``? Never raises.
+
+    Read off the headers only: a body saying so is not the facilitator's word.
+    """
+    try:
+        headers = response.headers
+        value = headers.get(IDEMPOTENT_REPLAYED_HEADER)
+        if value is None and isinstance(headers, dict):
+            wanted = IDEMPOTENT_REPLAYED_HEADER.lower()
+            value = next((v for k, v in headers.items() if str(k).lower() == wanted), None)
+    except Exception:  # noqa: BLE001 - a header read must not break a settle
+        return False
+    return isinstance(value, str) and value.strip().lower() == "true"
+
+
+@dataclass
+class _Binding:
+    """The purchase binding of ONE payment handling.
+
+    ``key`` is what its ``/verify``, its ``/settle``, the settle's retries and
+    the timeout fallback all carry, and ``receipt_context`` the buyer's
+    ``X-UVD-Purchase``. ``brought``: the key came from the caller
+    (``idempotency_key`` or ``idempotency_scope``), so an earlier handling may
+    have admitted the payment under it. ``may_have_admitted``: an attempt of
+    THIS handling ended without a verdict (timeout, transport error, 5xx) and
+    may have admitted the payment.
+    """
+
+    key: Optional[str]
+    receipt_context: Optional[str]
+    brought: bool
+    may_have_admitted: bool = False
+
+    def headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.receipt_context is not None:
+            headers["X-UVD-Purchase"] = self.receipt_context
+        if self.key is not None:
+            headers[IDEMPOTENCY_KEY_HEADER] = self.key
+        return headers
+
+    def refuse_foreign_replay(self, response: Any, receipt: Any, network: str) -> None:
+        """Raise when ``response`` replays a payment this handling did not admit.
+
+        A handling with no binding of its own (a fresh key or none, no
+        ``X-UVD-Purchase``) cannot have admitted the payment before one of its
+        attempts ended without a verdict. A replay reaching it earlier was
+        earned by possession of the ``X-PAYMENT`` alone: another request's
+        purchase, handed to this one by a facilitator before 2.39.0 (2.39.0
+        answers it ``409``). Refused the way 2.39.0 refuses it, with the
+        receipt, so no caller delivers on it. Independent of how the key was
+        made. A replayed rejection is still the original rejection and is not
+        this method's business.
+        """
+        if self.brought or self.receipt_context is not None or self.may_have_admitted:
+            return
+        if not _response_replayed(response):
+            return
+        in_flight = response.status_code == 202 or (
+            receipt is not None and getattr(receipt, "status", None) in ("pending", "unknown")
+        )
+        raise PaymentSettlementError(
+            message=(
+                "The facilitator replayed a payment this request did not admit: the "
+                "X-PAYMENT was already used by another request"
+                + (" and is still in flight" if in_flight else "")
+                + ", so it is not delivered on"
+            ),
+            network=network,
+            reason=AUTHORIZATION_IN_FLIGHT if in_flight else AUTHORIZATION_ALREADY_SETTLED,
+            receipt=receipt,
+        )
+
+
 def retry_after_seconds(exc: Exception, default: Optional[float] = None) -> Optional[float]:
     """The ``Retry-After`` the facilitator asked for, in seconds, or ``default``.
 
@@ -299,6 +449,11 @@ def _is_retryable_settle_error(exc: Exception) -> bool:
         if exc.status_code is None:
             # Wrapped httpx.RequestError — transient transport issue.
             return True
+        if exc.status_code == 202:
+            # `settlement_in_progress`: the facilitator replays the admitted
+            # settle to the binding this attempt carried, and never executes a
+            # second one. See FacilitatorError._retryable_verdict.
+            return exc.retryable
         # A 429 is transient for a paywall deciding 402-vs-503, but this loop
         # has never re-POSTed one and re-POSTing is what costs money. Unchanged.
         if exc.status_code < 500:
@@ -343,12 +498,24 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
       ``anti_double_settle=False`` does NOT lift that. The opt-out exists to
       let a caller own the risk of an INFERENCE the SDK drew from a hash; it
       is not a licence to contradict a facilitator that said so outright.
+    * ``202 settlement_in_progress`` -> transient. The receipt rail's answer to
+      a resend that carries the binding that admitted the payment: present
+      the same request with the same binding again (503, never 402).
+    * ``authorization_in_flight`` (the receipt rail's ``409``, ``/verify``'s
+      ``invalidReason``) -> transient: the outcome is not final, so 503 and
+      the same request later, never a new signature.
+    * ``authorization_already_settled`` and ``receipt_request_conflict`` ->
+      final: the same request never gets a success back. Not a rejection
+      either; :func:`admitted_authorization_code` names them, and a seller
+      answers 409 (:func:`payment_conflict_response`).
     * Any other ``X402Error`` -> respects ``details["retryable"]`` when the
       raiser set it; otherwise final.
     * Non-x402 exceptions -> final (this function judges the payment path,
       not the world).
     """
     if isinstance(exc, X402TimeoutError):
+        return True
+    if admitted_authorization_code(exc) == AUTHORIZATION_IN_FLIGHT:
         return True
     if isinstance(exc, FacilitatorError):
         if exc.status_code is None:
@@ -363,6 +530,8 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
                     exc.status_code,
                     {"retryable": parse_facilitator_error_body(exc.response_body)["retryable"]},
                 )
+            return exc.retryable
+        if exc.status_code == 202:
             return exc.retryable
         return False
     if isinstance(exc, X402Error):
@@ -381,7 +550,11 @@ def is_transient_error(exc: Exception, *, anti_double_settle: bool = True) -> bo
 # `400 contract_call_failed (ref: ...)` (x402-rs `handlers.rs`, ContractCall
 # arm, which withholds revert reasons on purpose), so neither a code nor the
 # wording names the nonce there. What does reach it: other facilitators, the
-# nonce-store rejections of non-EVM chains, and `409 idempotency_key_conflict`.
+# nonce-store rejections of non-EVM chains, `409 idempotency_key_conflict`, and
+# the receipt rail's answers to an admitted authorization resent without the
+# binding that admitted it (`authorization_already_settled`,
+# `receipt_request_conflict`; `authorization_in_flight` is transient instead.
+# See `admitted_authorization_code`).
 
 #: Codes with which a facilitator says "this authorization was already used",
 #: compared NORMALISED (lowercase, separators stripped) against the values of
@@ -408,6 +581,13 @@ _SPENT_NONCE_CODES = frozenset(
         # when the record under this key carries the SAME body hash -- a settle
         # of this exact request that succeeded -- and cannot be parsed back.
         "idempotencycachecorrupt",
+        # The receipt rail (x402-rs 2.39.0) on an authorization it already
+        # admitted, resent without the binding that admitted it: settled, or
+        # admitted for another purchase. Neither is a rejection. Its third
+        # answer, `authorization_in_flight`, is not here: the outcome is not
+        # final, and is_transient_error() reads it (503, the same request later).
+        "authorizationalreadysettled",
+        "receiptrequestconflict",
     }
 )
 _SPENT_NONCE_CODE_FIELDS = ("code", "errorCode", "error_code", "error", "reason", "status")
@@ -519,6 +699,49 @@ def is_spent_nonce_error(exc: Exception) -> bool:
     return spent_nonce_evidence(exc) is not None
 
 
+def admitted_authorization_code(exc: Exception) -> Optional[str]:
+    """The receipt rail's code, when this failure says the authorization was
+    already admitted for a purchase this request did not bind.
+
+    One of :data:`~uvd_x402_sdk.exceptions.ADMITTED_AUTHORIZATION_CODES`, read
+    from the facilitator's ``error`` on a ``/settle`` failure
+    (:class:`FacilitatorError`, a ``409``) or from ``invalidReason`` on a
+    ``/verify`` (:class:`PaymentVerificationError`), and ``None`` otherwise:
+
+    * ``authorization_already_settled``: the payment is confirmed. The
+      receipt on the exception (``exc.receipt``) proves it to whoever holds
+      the payment, and ``receipt.settlement`` names the transaction.
+    * ``authorization_in_flight``: admitted, outcome not final. Transient
+      (:func:`is_transient_error`): the same request later learns the outcome.
+      Only the binding that admitted it (the same ``Idempotency-Key`` or the
+      same ``X-UVD-Purchase``) gets the original answer back; without it, a
+      resend learns the final outcome, never the success.
+    * ``receipt_request_conflict``: admitted for another purchase context, or
+      under other terms.
+
+    For a seller none of them is delivered on: the ``X-PAYMENT`` was already
+    used by another request. And none is a 402, which tells the buyer to sign
+    a new payment for one that moved or may still move.
+    :func:`payment_conflict_response` builds the answer: ``409`` for the first
+    and the last, ``503`` + ``Retry-After`` while in flight. The first and the
+    last also read as spent for :func:`is_spent_nonce_error`.
+
+    The client raises the same codes itself (as
+    :class:`PaymentSettlementError`) when a facilitator before 2.39.0 replays
+    a payment to a request that did not admit it.
+    """
+    if isinstance(exc, FacilitatorError):
+        code: Any = exc.error_code
+    elif isinstance(exc, X402Error):
+        code = getattr(exc, "reason", None)
+    else:
+        return None
+    if not isinstance(code, str):
+        return None
+    code = code.strip().lower()
+    return code if code in ADMITTED_AUTHORIZATION_CODES else None
+
+
 #: What a paywall waits before inviting a retry when the facilitator gave no
 #: ``Retry-After`` of its own. Matches the facilitator's own value for the EVM
 #: writer lease.
@@ -585,6 +808,52 @@ def transient_503_response(
         "Content-Type": "application/json",
         "Retry-After": str(int(retry_after)) if retry_after == int(retry_after) else str(retry_after),
     }
+
+
+def payment_conflict_response(
+    exc: X402Error,
+    *,
+    default_retry_after: float = DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS,
+) -> Optional[Tuple[int, Dict[str, Any], Dict[str, str]]]:
+    """Build the ``(status, body, headers)`` a paywall should answer when
+    :func:`admitted_authorization_code` names a code for ``exc``, else ``None``.
+
+    The ``X-PAYMENT`` was already admitted for another request, so nothing is
+    delivered on this one, and it is never a 402, which would tell the buyer to
+    sign a second payment for one that moved or may still move:
+
+    * ``authorization_in_flight`` -> **503** + ``Retry-After``, ``retryable``
+      true, ``reason`` the code: resend the SAME request later to learn the
+      outcome; only the binding that admitted it gets the original answer.
+      The body is :func:`transient_503_response`'s.
+    * ``authorization_already_settled`` and ``receipt_request_conflict`` ->
+      **409**, ``retryable`` false: this ``X-PAYMENT`` was already used.
+
+    Same mapping as ``buildPaymentConflictResponse`` in the TypeScript SDK. The
+    body is the exception's own ``to_dict()`` plus ``reason``, ``retryable``
+    and ``safeToReplay``; the receipt, when the facilitator sent one, travels in
+    ``PAYMENT-RESPONSE`` / ``X-PAYMENT-RESPONSE`` as a paid response carries it,
+    so whoever holds the payment can see where it went.
+    """
+    code = admitted_authorization_code(exc)
+    if code is None:
+        return None
+    if code == AUTHORIZATION_IN_FLIGHT:
+        status = 503
+        body, headers = transient_503_response(exc, default_retry_after=default_retry_after)
+    else:
+        status = 409
+        body = dict(exc.to_dict())
+        body["retryable"] = False
+        headers = {"Content-Type": "application/json"}
+    body["reason"] = code
+    body["safeToReplay"] = False
+    receipt = getattr(exc, "receipt", None)
+    if receipt is not None:
+        headers.update(
+            payment_response_headers({"success": False, "receipt": receipt.model_dump()})
+        )
+    return status, body, headers
 
 
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
@@ -1136,36 +1405,40 @@ class X402Client:
     # Facilitator Communication
     # =========================================================================
 
-    def _facilitator_headers(
+    def _binding(
         self,
         payload: PaymentPayload,
-        operation: str,
+        idempotency_key: Optional[str] = None,
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
-    ) -> Dict[str, str]:
-        """JSON content type, plus the ``Idempotency-Key`` for ``operation``.
+    ) -> "_Binding":
+        """The purchase binding of ONE payment handling.
 
-        The key goes out only when ``config.send_idempotency_key`` is on, the
-        caller named the purchase with ``idempotency_scope``, and the payload
-        has a signed block to derive it from. On without a scope (``None`` or
-        blank): no key and one warning per process, so the call goes out
-        exactly as with the config off -- never with a key that cannot tell
-        two purchases apart.
+        ``idempotency_key`` (the caller's own, see :func:`new_idempotency_key`)
+        or ``idempotency_scope`` (:func:`derive_idempotency_key`) when the
+        caller brings one, else a fresh random key; none at all with
+        ``config.send_idempotency_key`` off. ``TypeError`` / ``ValueError``
+        before anything is sent for a key or scope that is not a string, a
+        malformed key, or both at once.
         """
-        headers = {"Content-Type": "application/json"}
-        if receipt_context is not None:
-            headers["X-UVD-Purchase"] = receipt_context
+        if idempotency_scope is not None and not isinstance(idempotency_scope, str):
+            raise TypeError(
+                f"idempotency_scope must be a string, got {type(idempotency_scope).__name__}"
+            )
+        scope = idempotency_scope if idempotency_scope and idempotency_scope.strip() else None
+        if idempotency_key is not None:
+            _checked_idempotency_key(idempotency_key)
+            if scope is not None:
+                raise ValueError("pass idempotency_key or idempotency_scope, not both")
         if not self.config.send_idempotency_key:
-            return headers
-        if idempotency_scope is None or (
-            isinstance(idempotency_scope, str) and not idempotency_scope.strip()
-        ):
-            _warn_missing_idempotency_scope()
-            return headers
-        key = derive_idempotency_key(payload, operation, scope=idempotency_scope)
-        if key is not None:
-            headers[IDEMPOTENCY_KEY_HEADER] = key
-        return headers
+            return _Binding(key=None, receipt_context=receipt_context, brought=False)
+        if idempotency_key is not None:
+            return _Binding(key=idempotency_key, receipt_context=receipt_context, brought=True)
+        if scope is not None:
+            derived = derive_idempotency_key(payload, "settle", scope=scope)
+            if derived is not None:
+                return _Binding(key=derived, receipt_context=receipt_context, brought=True)
+        return _Binding(key=new_idempotency_key(), receipt_context=receipt_context, brought=False)
 
     def verify_payment(
         self,
@@ -1178,6 +1451,7 @@ class X402Client:
         token_decimals: Optional[int] = None,
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> VerifyResponse:
         """
         Verify payment with the facilitator.
@@ -1192,10 +1466,16 @@ class X402Client:
                 Must match what settle_payment will use.
             eip712_domain: Override the EIP-712 domain params sent via `extra`
                 ({"name": ..., "version": ...})
-            idempotency_scope: The caller's own identifier for this purchase
-                (an order id), mixed into the ``Idempotency-Key``. Read only
-                when ``config.send_idempotency_key`` is on; without it no key
-                is sent. Pass the same value to ``settle_payment``.
+            idempotency_key: The payment's ``Idempotency-Key``
+                (:func:`new_idempotency_key`). Pass the SAME key to
+                ``settle_payment``: on a network with receipts the key is the
+                purchase binding. Without it (and without
+                ``idempotency_scope``) the call sends a fresh key and reports
+                it back as ``idempotency_key`` on the response.
+            idempotency_scope: A secret order id of the seller, from which the
+                key is derived (:func:`derive_idempotency_key`) instead.
+            receipt_context: The buyer's validated ``X-UVD-Purchase``,
+                forwarded unchanged.
 
         Returns:
             VerifyResponse from facilitator
@@ -1205,6 +1485,24 @@ class X402Client:
             FacilitatorError: If facilitator returns an error
             TimeoutError: If request times out
         """
+        binding = self._binding(payload, idempotency_key, idempotency_scope, receipt_context)
+        return self._verify(
+            payload, expected_amount_usd, pay_to, asset=asset,
+            eip712_domain=eip712_domain, token_decimals=token_decimals, binding=binding,
+        )
+
+    def _verify(
+        self,
+        payload: PaymentPayload,
+        expected_amount_usd: Decimal,
+        pay_to: Optional[str],
+        *,
+        asset: Optional[str],
+        eip712_domain: Optional[Dict[str, str]],
+        token_decimals: Optional[int],
+        binding: "_Binding",
+    ) -> VerifyResponse:
+        """One ``/verify`` under ``binding``."""
         normalized_network = self.validate_network(payload.network)
         requirements = self._build_payment_requirements(
             payload,
@@ -1215,8 +1513,8 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
-        if receipt_context is not None:
-            context_data = json.loads(base64.b64decode(receipt_context, validate=True))
+        if binding.receipt_context is not None:
+            context_data = json.loads(base64.b64decode(binding.receipt_context, validate=True))
             requirements.resource = context_data["url"]
 
         envelope_version = resolve_envelope_version(
@@ -1237,7 +1535,7 @@ class X402Client:
             response = client.post(
                 f"{self.facilitator_url_for(payload.network)}/verify",
                 json=verify_request,
-                headers=self._facilitator_headers(payload, "verify", idempotency_scope, receipt_context),
+                headers=binding.headers(),
                 timeout=self.config.verify_timeout,
             )
 
@@ -1252,6 +1550,7 @@ class X402Client:
 
             data = response.json()
             verify_response = VerifyResponse(**data)
+            verify_response.idempotency_key = binding.key
 
             if not verify_response.isValid:
                 raise PaymentVerificationError(
@@ -1281,6 +1580,7 @@ class X402Client:
         retry: bool = False,
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -1304,27 +1604,58 @@ class X402Client:
                 transient transport errors and 5xx — but NEVER on 4xx,
                 business failures, or a 5xx whose body already carries a
                 transaction hash (anti-double-settle guard).
-            idempotency_scope: The caller's own identifier for this purchase
-                (an order id), mixed into the ``Idempotency-Key``. Read only
-                when ``config.send_idempotency_key`` is on; without it no key
-                is sent. The same value on a retry of the same purchase is
-                what lets the facilitator answer a settle that already
-                completed from its cache.
+            idempotency_key: The payment's ``Idempotency-Key``: the one its
+                ``verify_payment`` carried (``VerifyResponse.idempotency_key``),
+                or one the caller created with :func:`new_idempotency_key` and
+                stored with the order to resume after a restart. Every attempt
+                of this call and its timeout fallback carry it. Without it (and
+                without ``idempotency_scope``) the call sends a fresh key.
+            idempotency_scope: A secret order id of the seller, from which the
+                key is derived (:func:`derive_idempotency_key`) instead.
+            receipt_context: The buyer's validated ``X-UVD-Purchase``,
+                forwarded unchanged.
 
         Returns:
-            SettleResponse from facilitator
+            SettleResponse from facilitator. ``idempotent_replayed`` is True
+            when the facilitator answered from a payment it had already
+            admitted (``Idempotent-Replayed: true``) under this call's own
+            binding: the key or context the caller brought, or this call's
+            own earlier attempt. A replay that reached a call with no binding
+            of its own before any of its attempts could have admitted the
+            payment is somebody else's purchase: it is raised, never returned.
 
         Raises:
-            PaymentSettlementError: If settlement fails
+            PaymentSettlementError: If settlement fails, or with reason
+                ``authorization_already_settled`` / ``authorization_in_flight``
+                when the facilitator replayed a payment this call did not
+                admit (a facilitator before 2.39.0 does that to a bare resend).
             FacilitatorError: If facilitator returns an error
             TimeoutError: If request times out
         """
+        binding = self._binding(payload, idempotency_key, idempotency_scope, receipt_context)
+        return self._settle(
+            payload, expected_amount_usd, pay_to, asset=asset, eip712_domain=eip712_domain,
+            token_decimals=token_decimals, retry=retry, binding=binding,
+        )
+
+    def _settle(
+        self,
+        payload: PaymentPayload,
+        expected_amount_usd: Decimal,
+        pay_to: Optional[str],
+        *,
+        asset: Optional[str],
+        eip712_domain: Optional[Dict[str, str]],
+        token_decimals: Optional[int],
+        retry: bool,
+        binding: "_Binding",
+    ) -> SettleResponse:
+        """The settle of one handling: its attempts all carry ``binding``."""
         if not retry:
             return self._settle_once(
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
-                token_decimals=token_decimals,
-                idempotency_scope=idempotency_scope, receipt_context=receipt_context,
+                token_decimals=token_decimals, binding=binding,
             )
 
         for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
@@ -1332,8 +1663,7 @@ class X402Client:
                 return self._settle_once(
                     payload, expected_amount_usd, pay_to=pay_to,
                     asset=asset, eip712_domain=eip712_domain,
-                    token_decimals=token_decimals,
-                    idempotency_scope=idempotency_scope, receipt_context=receipt_context,
+                    token_decimals=token_decimals, binding=binding,
                 )
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
@@ -1372,6 +1702,7 @@ class X402Client:
         retry: bool = False,
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Settle payment without raising on payment-flow errors.
@@ -1408,6 +1739,7 @@ class X402Client:
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals, retry=retry,
                 idempotency_scope=idempotency_scope, receipt_context=receipt_context,
+                idempotency_key=idempotency_key,
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
@@ -1442,10 +1774,10 @@ class X402Client:
         asset: Optional[str] = None,
         eip712_domain: Optional[Dict[str, str]] = None,
         token_decimals: Optional[int] = None,
-        idempotency_scope: Optional[str] = None,
-        receipt_context: Optional[str] = None,
+        *,
+        binding: "_Binding",
     ) -> SettleResponse:
-        """Single settle attempt — the pre-retry settle_payment body, unchanged."""
+        """Single settle attempt — the pre-retry settle_payment body, under ``binding``."""
         normalized_network = self.validate_network(payload.network)
         requirements = self._build_payment_requirements(
             payload,
@@ -1456,8 +1788,8 @@ class X402Client:
             token_decimals=token_decimals,
         )
 
-        if receipt_context is not None:
-            context_data = json.loads(base64.b64decode(receipt_context, validate=True))
+        if binding.receipt_context is not None:
+            context_data = json.loads(base64.b64decode(binding.receipt_context, validate=True))
             requirements.resource = context_data["url"]
 
         envelope_version = resolve_envelope_version(
@@ -1470,7 +1802,7 @@ class X402Client:
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
-        headers = self._facilitator_headers(payload, "settle", idempotency_scope, receipt_context)
+        headers = binding.headers()
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
             f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
@@ -1488,16 +1820,23 @@ class X402Client:
             )
 
             if response.status_code != 200:
-                raise FacilitatorError(
+                refusal = FacilitatorError(
                     message=f"Facilitator settle failed with status {response.status_code}",
                     status_code=response.status_code,
                     response_body=response.text,
                     reason=_facilitator_reason(response.text),
                     retry_after=_response_retry_after(response),
                 )
+                if response.status_code == 202:
+                    binding.refuse_foreign_replay(response, refusal.receipt, payload.network)
+                if response.status_code >= 500:
+                    binding.may_have_admitted = True
+                raise refusal
 
             data = response.json()
             settle_response = SettleResponse(**data)
+            settle_response.idempotent_replayed = _response_replayed(response)
+            settle_response.idempotency_key = binding.key
 
             if not settle_response.success:
                 raise PaymentSettlementError(
@@ -1507,8 +1846,12 @@ class X402Client:
                     receipt=settle_response.receipt,
                 )
 
+            binding.refuse_foreign_replay(response, settle_response.receipt, payload.network)
             tx_hash = settle_response.get_transaction_hash()
-            logger.info(f"Payment settled! TX: {tx_hash}, Payer: {settle_response.payer}")
+            logger.info(
+                f"Payment settled! TX: {tx_hash}, Payer: {settle_response.payer}"
+                + (" (replayed by the facilitator)" if settle_response.idempotent_replayed else "")
+            )
             return settle_response
 
         except httpx.TimeoutException:
@@ -1517,13 +1860,16 @@ class X402Client:
                 f"Settle timed out after {settle_timeout}s on {payload.network}, "
                 f"checking on-chain state..."
             )
+            binding.may_have_admitted = True
             fallback = self._check_settle_fallback(
                 settle_request, settle_timeout, facilitator_url, headers=headers
             )
             if fallback:
+                fallback.idempotency_key = binding.key
                 return fallback
             raise X402TimeoutError(operation="settle", timeout_seconds=settle_timeout)
         except httpx.RequestError as e:
+            binding.may_have_admitted = True
             raise FacilitatorError(message=f"Facilitator request failed: {e}")
 
     def _check_settle_fallback(
@@ -1544,14 +1890,33 @@ class X402Client:
             facilitator_url: The facilitator the timed-out settle was sent to.
                 Must be that same one — re-resolving or defaulting could ask a
                 DIFFERENT facilitator about a payment it never saw.
-            headers: The headers of the timed-out settle. Same reason: under
-                the same ``Idempotency-Key`` a settle that completed is
-                answered from the facilitator's cache instead of executing.
+            headers: The headers of the timed-out settle: the same purchase
+                binding (``Idempotency-Key``, ``X-UVD-Purchase``). Under it a
+                settle that completed is answered from the facilitator's cache
+                or receipt (``200`` with ``Idempotent-Replayed: true``) instead
+                of executing, and on a network with receipts it is the only
+                resend that gets that answer back.
 
         Returns:
             SettleResponse if payment was confirmed on-chain, None otherwise.
+
+        Raises:
+            FacilitatorError: The facilitator's own answer when it says the
+                authorization was already admitted for a purchase this resend
+                does not bind (``409 authorization_already_settled``,
+                ``authorization_in_flight``, ``receipt_request_conflict``; see
+                :func:`admitted_authorization_code`). With the key on, the
+                resend carries the timed-out settle's own key and does not get
+                this for its own admission. With ``send_idempotency_key``
+                off it is what the timed-out settle gets when it WAS admitted:
+                PROBABLY this seller's own payment, but nothing proves it, so
+                do not deliver blindly; reconcile the receipt's
+                ``settlement.id`` with the seller's own records first. Never a
+                402 either, and not a timeout: resending the same request
+                without a binding never gets the success back.
         """
         url = facilitator_url or self.config.facilitator_url
+        admitted: Optional[FacilitatorError] = None
         try:
             client = self._get_http_client()
             response = client.post(
@@ -1565,19 +1930,41 @@ class X402Client:
                 data = response.json()
                 settle_response = SettleResponse(**data)
                 if settle_response.success:
+                    settle_response.idempotent_replayed = _response_replayed(response)
                     tx_hash = settle_response.get_transaction_hash()
                     logger.info(
                         f"Fallback confirmed payment on-chain! "
                         f"TX: {tx_hash}, Payer: {settle_response.payer}"
                     )
                     return settle_response
-
-            logger.warning("Fallback check: payment not confirmed on-chain")
-            return None
+            else:
+                refusal = FacilitatorError(
+                    message=(
+                        f"Facilitator settle failed with status {response.status_code} "
+                        f"on the resend after a timeout"
+                    ),
+                    status_code=response.status_code,
+                    response_body=response.text,
+                    reason=_facilitator_reason(response.text),
+                    retry_after=_response_retry_after(response),
+                )
+                if admitted_authorization_code(refusal) is not None:
+                    admitted = refusal
 
         except Exception as e:
             logger.warning(f"Fallback check failed: {e}")
             return None
+
+        if admitted is not None:
+            logger.warning(
+                "Fallback check: the facilitator had already admitted this authorization "
+                "(%s) and this resend does not carry the binding that admitted it. Not a "
+                "success to deliver on, and not a rejection.",
+                admitted.error_code,
+            )
+            raise admitted
+        logger.warning("Fallback check: payment not confirmed on-chain")
+        return None
 
     # =========================================================================
     # Main Processing Method
@@ -1594,6 +1981,7 @@ class X402Client:
         token_decimals: Optional[int] = None,
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> PaymentResult:
         """
         Process a complete x402 payment (verify + settle).
@@ -1603,6 +1991,9 @@ class X402Client:
         2. Verifies the payment signature with the facilitator
         3. Settles the payment on-chain
         4. Returns the payment result
+
+        One call is one handling of the payment: its verify, its settle and
+        the settle's timeout fallback carry ONE ``Idempotency-Key``.
 
         Args:
             x_payment_header: X-PAYMENT header value (base64-encoded JSON)
@@ -1616,40 +2007,48 @@ class X402Client:
                 the USD amount is converted with the network's USDC decimals,
                 which mis-prices any token that does not share them. Pass it
                 whenever `asset` is passed. Applied to both steps.
-            idempotency_scope: The caller's own identifier for this purchase
-                (an order id), mixed into the ``Idempotency-Key`` of both
-                steps. Read only when ``config.send_idempotency_key`` is on;
-                without it no key is sent.
+            idempotency_key: The payment's key, created with
+                :func:`new_idempotency_key` and stored with the order before
+                this call, to resume this payment after a restart. Without it
+                (and without ``idempotency_scope``) the call uses a fresh key.
+            idempotency_scope: A secret order id of the seller, from which the
+                key is derived (:func:`derive_idempotency_key`) instead.
+            receipt_context: The buyer's validated ``X-UVD-Purchase``,
+                forwarded unchanged to both steps.
 
         Returns:
             PaymentResult with payer address, transaction hash, etc.
+            ``idempotent_replayed`` is True when the settle was the
+            facilitator's replay of this purchase's own admitted payment: under
+            the key or context the caller brought, or answering this call's own
+            timed-out settle. ``idempotency_key`` is the key the call carried.
 
         Raises:
             InvalidPayloadError: If payload is invalid
             UnsupportedNetworkError: If network is not supported
-            PaymentVerificationError: If verification fails
-            PaymentSettlementError: If settlement fails
+            PaymentVerificationError: If verification fails, including an
+                authorization the facilitator already admitted for another
+                request (see :func:`admitted_authorization_code`)
+            PaymentSettlementError: If settlement fails, or the facilitator
+                replayed a payment this call did not admit
             FacilitatorError: If facilitator returns an error
             TimeoutError: If request times out
         """
         # Extract payload
         payload = self.extract_payload(x_payment_header)
         logger.info(f"Processing payment: network={payload.network}, amount=${expected_amount_usd}")
+        binding = self._binding(payload, idempotency_key, idempotency_scope, receipt_context)
 
         # Verify payment
-        verify_response = self.verify_payment(
-            payload, expected_amount_usd, pay_to=pay_to,
-            asset=asset, eip712_domain=eip712_domain,
-            token_decimals=token_decimals,
-            idempotency_scope=idempotency_scope, receipt_context=receipt_context,
+        verify_response = self._verify(
+            payload, expected_amount_usd, pay_to, asset=asset,
+            eip712_domain=eip712_domain, token_decimals=token_decimals, binding=binding,
         )
 
-        # Settle payment
-        settle_response = self.settle_payment(
-            payload, expected_amount_usd, pay_to=pay_to,
-            asset=asset, eip712_domain=eip712_domain,
-            token_decimals=token_decimals,
-            idempotency_scope=idempotency_scope, receipt_context=receipt_context,
+        # Settle payment, under the key the verification carried
+        settle_response = self._settle(
+            payload, expected_amount_usd, pay_to, asset=asset, eip712_domain=eip712_domain,
+            token_decimals=token_decimals, retry=False, binding=binding,
         )
 
         # Build result
@@ -1660,6 +2059,8 @@ class X402Client:
             network=payload.network,
             amount_usd=expected_amount_usd,
             receipt=settle_response.receipt,
+            idempotent_replayed=settle_response.idempotent_replayed,
+            idempotency_key=binding.key,
         )
 
     # =========================================================================
