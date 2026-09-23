@@ -412,6 +412,10 @@ class FacilitatorError(X402Error):
     without handing these over rebuilds the same dead end one layer up: the
     caller is told "do not re-send" and given nothing to check, so they cannot
     find out whether their money moved.
+
+    ``operation`` names the facilitator call that failed, ``"verify"`` or
+    ``"settle"``, when the client raised it from one of them, and is ``None``
+    otherwise. Not in ``to_dict()``.
     """
 
     @staticmethod
@@ -465,6 +469,7 @@ class FacilitatorError(X402Error):
         *,
         reason: Optional[str] = None,
         retry_after: Optional[float] = None,
+        operation: Optional[str] = None,
     ) -> None:
         fields = parse_facilitator_error_body(response_body)
         retryable = self._retryable_verdict(status_code, fields)
@@ -506,6 +511,7 @@ class FacilitatorError(X402Error):
         self.response_body = response_body
         self.reason = reason
         self.retry_after = retry_after
+        self.operation = operation
         self.retryable = retryable
         self.transaction = fields["transaction"]
         self.payment_id = fields["payment_id"]

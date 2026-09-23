@@ -31,10 +31,13 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 def _conflict_response(error: X402Error) -> Optional[HttpResponse]:
     """409 for an ``X-PAYMENT`` the facilitator already admitted for another
-    request, 503 + Retry-After while in flight or without a verdict (a timeout,
-    a store the facilitator could not read); ``None`` for a rejection. Never
-    delivered, and never a 402, which would ask the buyer for a second
-    payment."""
+    request or says was already used, 500 when the payment may have moved (a
+    transaction broadcast without a verdict, such as ``502
+    settlement_unconfirmed``, a 5xx the facilitator said not to retry, or a
+    settle that failed after a valid verify), 503 +
+    Retry-After while in flight or without a verdict (a timeout, a store the
+    facilitator could not read); ``None`` for a rejection. Never delivered, and
+    never a 402, which would ask the buyer for a second payment."""
     conflict = _undelivered_response(error)
     if conflict is None:
         return None

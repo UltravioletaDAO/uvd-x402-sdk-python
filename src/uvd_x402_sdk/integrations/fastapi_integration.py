@@ -57,11 +57,16 @@ def _payment_error_status(error: X402Error) -> int:
 def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
     """Status, body and headers for a payment that was not delivered on.
 
-    An authorization the facilitator already admitted for another request is
-    409, or 503 + Retry-After while it is still in flight; a failure without a
-    verdict (a timeout, a settle still in flight, a store the facilitator could
-    not read) is 503 + Retry-After. Never a 402 for either, which would ask the
-    buyer for a second payment. Every rejection keeps the answer it had.
+    An authorization the facilitator already admitted for another request, or
+    says was already used, is 409 (503 + Retry-After while it is still in
+    flight); a payment that may have moved (a transaction broadcast without a
+    verdict, such as ``502 settlement_unconfirmed``, a 5xx the facilitator said
+    not to retry, or a settle that failed after a valid verify) is 500, with the
+    transaction to check when there is one; a failure without
+    a verdict (a timeout, a settle still in flight, a store the facilitator
+    could not read) is 503 + Retry-After. Never a 402 for any of them, which
+    would ask the buyer for a second payment. Every rejection keeps the answer
+    it had.
     """
     answer = _undelivered_response(error)
     if answer is not None:
