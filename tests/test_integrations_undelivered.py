@@ -11,12 +11,20 @@ runs in its own framework against a facilitator over a real socket that answers
   503 + ``Retry-After``. The TypeScript SDK answers ``settlement_unconfirmed``
   the same way (2.98.0, ``src/backend/index.ts``, ``settlementFailureBody``);
 * a ``5xx`` whose body says ``retryable: false`` without a transaction: 500;
+* a ``/settle`` that fails after ``/verify`` accepted the same payload: the
+  opaque ``400 contract_call_failed (ref)`` of an EVM revert and the ``400
+  internal_error (ref)`` that carries a nonce Stellar, Algorand, NEAR or Sui
+  already saw are 500, like every settle failure in the TypeScript SDK; so is a
+  settle that was mined and reverted (``200 success: false`` with the hash);
 * an authorization the facilitator says was already used
   (``spent_nonce_evidence``): 409 with the evidence, never 402;
-* a rejection (an invalid signature, insufficient funds) keeps the answer it
-  had: 402, and 400 in ``require_payment``. So does the opaque ``400
-  contract_call_failed (ref)``, which cannot be told apart from an invalid
-  signature;
+* a rejection keeps the answer it had: 402, and 400 in ``require_payment``. An
+  invalid signature or insufficient funds on ``/verify``, the same on the
+  settle's re-validation (``200 {"isValid": false}``, which used to fail to
+  parse), a refusal of the settle request before anything ran, and the opaque
+  ``400`` tokens on ``/verify``, where a used authorization and a bad signature
+  read the same;
+* every answer that tells the buyer not to pay again says so in its text;
 * the mutations: without each new branch, its case is answered as before.
 
 Nothing is delivered in any of them. The SDK re-sends none of them either:
@@ -34,8 +42,10 @@ from typing import Any, Optional
 import pytest
 
 import uvd_x402_sdk.client as client_module
-from tests.receipt_rail import PAYER, _receipt, x_payment
-from tests.test_integrations_replay import SITES
+from tests.receipt_rail import PAYER, RECIPIENT, _receipt, x_payment
+from tests.test_integrations_replay import PRICE, SITES
+from uvd_x402_sdk import X402Client
+from uvd_x402_sdk.exceptions import FacilitatorError, PaymentSettlementError
 
 TX = "0x" + "ab" * 32
 PAYMENT_ID = "0x" + "cd" * 32
@@ -134,6 +144,25 @@ MAY_HAVE_SETTLED = {
         (502, {"error": "upstream_failure", "retryable": False}, {}),
         None, None, "upstream_failure",
     ),
+    # x402-rs handlers.rs, ContractCall arm: an EVM revert, token only. After a
+    # valid verify of the same payload it is not a bad signature: the likeliest
+    # change between the two calls is that the authorization was used.
+    "400-contract-call-failed-on-settle": (
+        (400, {"error": "contract_call_failed (ref: local)"}, {}),
+        None, None, "contract_call_failed (ref: local)",
+    ),
+    # x402-rs handlers.rs, Other arm: how x402-rs reports a nonce the Stellar,
+    # Algorand, NEAR or Sui nonce store already saw (NonceReused).
+    "400-internal-error-on-settle": (
+        (400, {"error": "internal_error (ref: local)"}, {}),
+        None, None, "internal_error (ref: local)",
+    ),
+    # x402-rs chain/evm.rs: a settle transaction mined and reverted.
+    "200-reverted-with-transaction": (
+        (200, {"success": False, "errorReason": "invalid_scheme", "transaction": TX,
+               "network": "arc", "payer": PAYER}, {}),
+        TX, None, "invalid_scheme",
+    ),
 }
 
 
@@ -152,6 +181,7 @@ def test_a_payment_that_may_have_moved_is_500_with_what_to_check(scripted, mount
     assert inner["reason"] == reason
     assert inner.get("transaction") == transaction
     assert inner.get("paymentId") == payment_id
+    assert "do not sign another" in inner["message"]
     assert inner["message"] == (
         client_module._MAY_HAVE_SETTLED_MESSAGE if transaction
         else client_module._MAY_HAVE_SETTLED_NO_TRANSACTION_MESSAGE
@@ -180,7 +210,8 @@ def test_the_receipt_of_a_payment_that_may_have_moved_travels_in_payment_respons
 
 #: case -> (verify answer, settle answer, evidence, reason)
 ALREADY_USED = {
-    # A non-EVM nonce store (x402-rs src/chain/stellar.rs, NonceReused).
+    # Another facilitator's nonce store, in words. x402-rs does not send the
+    # words: it reports its own as `400 internal_error (ref)` (the 500 above).
     "400-nonce-store-wording": (
         VERIFIED, (400, {"error": "Nonce 5 already used for address GABC"}, {}),
         "wording", None,
@@ -223,6 +254,8 @@ def test_an_authorization_already_used_is_409_with_the_evidence(scripted, mount,
     assert inner["retryable"] is False and inner["safeToReplay"] is False
     assert inner["spentNonceEvidence"] == evidence
     assert inner.get("reason") == reason
+    assert "do not sign another" in inner["message"]
+    assert "already used" in inner["message"]
     assert inner["message"] == client_module._AUTHORIZATION_ALREADY_USED_MESSAGE
     assert "retry-after" not in headers
     assert site.delivered == 0
@@ -230,27 +263,41 @@ def test_an_authorization_already_used_is_409_with_the_evidence(scripted, mount,
 
 # -- a rejection keeps its answer ----------------------------------------------
 
+def _verdict(reason: str) -> Answer:
+    """x402-rs's rejection, on /verify and on the settle's re-validation alike."""
+    return 200, {"isValid": False, "invalidReason": reason, "payer": PAYER}, {}
+
+
 #: case -> (verify answer, settle answer)
 REJECTED = {
-    "invalid-signature": (
-        (200, {"isValid": False, "invalidReason": "invalid_exact_evm_payload_signature",
-               "payer": PAYER}, {}),
-        SETTLED,
-    ),
-    "insufficient-funds-on-verify": (
-        (200, {"isValid": False, "invalidReason": "insufficient_funds", "payer": PAYER}, {}),
-        SETTLED,
-    ),
-    "insufficient-funds-on-settle": (
+    "invalid-signature": (_verdict("invalid_signature"), SETTLED),
+    "insufficient-funds-on-verify": (_verdict("insufficient_funds"), SETTLED),
+    # x402-rs re-validates before it settles and answers in the verify's shape;
+    # the SDK used to fail to parse it (a ValidationError, no answer at all).
+    "insufficient-funds-on-settle": (VERIFIED, _verdict("insufficient_funds")),
+    "invalid-timing-on-settle": (VERIFIED, _verdict("invalid_timing")),
+    # Another facilitator's settle verdict, without a transaction.
+    "success-false-without-transaction": (
         VERIFIED,
         (200, {"success": False, "errorReason": "insufficient_funds", "network": "arc",
-               "payer": PAYER}, {}),
+               "payer": PAYER, "transaction": ""}, {}),
     ),
-    # x402-rs's ContractCall arm withholds the revert on purpose: a used
-    # authorization and an invalid signature read the same. Closing it takes a
-    # stable code from the facilitator (docs/planning/BACKLOG.md, 2026-09-13).
-    "opaque-contract-call-failed": (
-        VERIFIED, (400, {"error": "contract_call_failed (ref: local)"}, {}),
+    # Refusals of the settle request before anything ran.
+    "settle-reserved-idempotency-key": (
+        VERIFIED,
+        (400, {"success": False, "error": "reserved_idempotency_key", "retryable": False,
+               "safeToReplay": False}, {}),
+    ),
+    "settle-invalid-request": (VERIFIED, (400, {"error": "Invalid request"}, {})),
+    "settle-address-blocked": (VERIFIED, (403, {"error": "Address blocked: listed"}, {})),
+    # On /verify the opaque tokens stay a 402: a used authorization and an
+    # invalid signature read the same there. Closing it takes a stable code
+    # from the facilitator (docs/planning/BACKLOG.md, 2026-09-13).
+    "opaque-contract-call-failed-on-verify": (
+        (400, {"error": "contract_call_failed (ref: local)"}, {}), SETTLED,
+    ),
+    "opaque-internal-error-on-verify": (
+        (400, {"error": "internal_error (ref: local)"}, {}), SETTLED,
     ),
 }
 
@@ -316,14 +363,25 @@ def test_without_the_spent_branch_an_authorization_already_used_is_a_402(
 
     for case in ALREADY_USED:
         verify, settle, _, _ = ALREADY_USED[case]
-        status, _ = _answer(scripted, mount, settle, verify)
-        # The cache-corrupt row is transient as well, and goes back to its 503.
-        assert status == (503 if case == "503-idempotency-cache-corrupt" else SITES[mount]), case
+        status, inner = _answer(scripted, mount, settle, verify)
+        # Each falls to what it would be without the evidence: 402, 503 for the
+        # transient cache row, 500 for a settle refusal after a valid verify.
+        assert status != 409 and "spentNonceEvidence" not in inner, case
+
+
+@all_sites
+def test_without_the_settle_branch_a_settle_that_failed_after_verify_is_a_402(
+    scripted, mount, monkeypatch
+):
+    monkeypatch.setattr(client_module, "_settle_refused_after_verify", lambda exc: False)
+
+    for case in ("400-contract-call-failed-on-settle", "400-internal-error-on-settle"):
+        status, _ = _answer(scripted, mount, MAY_HAVE_SETTLED[case][0])
+        assert status == SITES[mount], case
 
 
 def test_the_mapping_itself_first_match_wins():
     """The order, without a framework: conflict, hash, spent, transient, 5xx."""
-    from uvd_x402_sdk.exceptions import FacilitatorError, PaymentSettlementError
 
     def status(code: Optional[int], body: dict[str, Any]) -> Optional[int]:
         answer = client_module._undelivered_response(
@@ -341,7 +399,69 @@ def test_the_mapping_itself_first_match_wins():
     assert status(503, {"error": "receipt_store_unavailable", "retryable": True}) == 503
     assert status(500, {"error": "x", "retryable": False}) == 500
     assert status(400, {"error": "contract_call_failed (ref: a)"}) is None
+
+    def settle(code: int, body: dict[str, Any]) -> Optional[int]:
+        answer = client_module._undelivered_response(FacilitatorError(
+            "x", status_code=code, response_body=json.dumps(body), operation="settle"))
+        return None if answer is None else answer[0]
+
+    assert settle(400, {"error": "contract_call_failed (ref: a)"}) == 500
+    assert settle(400, {"error": "internal_error (ref: a)"}) == 500
+    assert settle(404, {}) == 500  # an unknown refusal: the safe side
+    assert settle(400, {"error": "Nonce 5 already used"}) == 409  # the evidence first
+    assert settle(429, {}) == 503
+    for refused in ({"error": "Invalid request"}, {"error": "invalid_address (ref: a)"},
+                    {"error": "reserved_idempotency_key"},
+                    {"error": "receipt_request_not_supported"},
+                    {"error": "Failed to deserialize SettleRequest: x"}):
+        assert settle(400, refused) is None, refused
+    assert settle(403, {"error": "Address blocked: listed"}) is None
+    assert settle(403, {"error": "forbidden"}) is None  # any 403: refused, not run
+    assert settle(409, {"error": "receipt_resource_mismatch"}) is None
     assert status(None, {}) == 503
     broadcast = PaymentSettlementError("settle failed", network="arc", tx_hash=TX)
     answer = client_module._undelivered_response(broadcast)
     assert answer is not None and answer[0] == 500 and answer[1]["transaction"] == TX
+
+
+# -- the client underneath ------------------------------------------------------
+
+
+def _client(rail: Scripted) -> X402Client:
+    return X402Client(recipient_address=RECIPIENT, facilitator_url=rail.url)
+
+
+def test_the_settles_re_validation_rejection_is_raised_as_a_rejection(scripted):
+    """``200 {"isValid": false}`` from /settle used to raise pydantic's
+    ValidationError, which no integration catches."""
+    rail = scripted(settle=_verdict("insufficient_funds"))
+
+    with pytest.raises(PaymentSettlementError) as caught:
+        _client(rail).process_payment(x_payment(), PRICE)
+
+    assert caught.value.reason == "insufficient_funds" and caught.value.tx_hash is None
+    result = _client(rail).try_settle_payment(_client(rail).extract_payload(x_payment()), PRICE)
+    assert result["success"] is False and result["tx_hash"] is None
+
+
+def test_a_settle_mined_and_reverted_keeps_its_transaction(scripted):
+    rail = scripted(settle=MAY_HAVE_SETTLED["200-reverted-with-transaction"][0])
+
+    with pytest.raises(PaymentSettlementError) as caught:
+        _client(rail).process_payment(x_payment(), PRICE)
+
+    assert caught.value.tx_hash == TX and caught.value.reason == "invalid_scheme"
+    result = _client(rail).try_settle_payment(_client(rail).extract_payload(x_payment()), PRICE)
+    assert result["success"] is False and result["tx_hash"] == TX
+
+
+@pytest.mark.parametrize("path", ["/verify", "/settle"])
+def test_the_client_names_the_call_that_failed(scripted, path):
+    refusal: Answer = (400, {"error": "contract_call_failed (ref: local)"}, {})
+    rail = scripted(**{path.strip("/"): refusal})
+
+    with pytest.raises(FacilitatorError) as caught:
+        _client(rail).process_payment(x_payment(), PRICE)
+
+    assert caught.value.operation == path.strip("/")
+    assert "operation" not in caught.value.to_dict()["details"]

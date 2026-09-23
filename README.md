@@ -1337,6 +1337,8 @@ Two more answers are never a `402` either, because the payment may have moved:
 |---|---|---|
 | `502 settlement_unconfirmed`, or any other failure whose body names a `transaction` | `500` | `transaction`, `paymentId`, `reason`, `retryable: false` |
 | another `5xx` with `retryable: false` | `500` | `reason`, `retryable: false` |
+| a `4xx` from `/settle` after `/verify` accepted the same payload (`400 contract_call_failed (ref: …)`, `400 internal_error (ref: …)`), unless it refused the request before running anything | `500` | `reason`, `retryable: false` |
+| `/settle` `200 success: false` that names a `transaction` (mined and reverted) | `500` | `transaction`, `reason`, `retryable: false` |
 | an authorization already used (`is_spent_nonce_error`), transient or not | `409` | `spentNonceEvidence`, the code as `reason` when there is one, `retryable: false` |
 
 `500` is the TypeScript SDK's answer to `settlement_unconfirmed`: the transaction was broadcast and
@@ -1345,9 +1347,25 @@ The body tells the buyer not to sign another payment and to check the transactio
 receipt, when there is one, travels in `PAYMENT-RESPONSE`. The SDK still re-sends none of these.
 A `202 settlement_in_progress` stays `503`: re-sending it under its binding is the recovery.
 
-One case still reaches `402`: on EVM the facilitator reports a used authorization as an opaque `400
-contract_call_failed (ref: …)`, the same answer as an invalid signature, so nothing tells the two
-apart. On networks with receipts the facilitator names it (`authorization_already_settled`, `409`).
+A settle runs only after `/verify` accepted the same payload and signature, so an opaque `4xx` from
+the settle is not a bad signature: something changed between the two calls, most likely the
+authorization being used. The TypeScript SDK answers every settle failure it may not retry with
+`500`. The settle `4xx`s that stay a rejection are the ones the facilitator sends before it runs
+anything: `403`, `Invalid request` and the other parse failures, `invalid_address`, `clock_error`,
+`reserved_idempotency_key`, `invalid_receipt_context` and `receipt_*`.
+
+What still reaches `402` (`400` in `require_payment`):
+
+- **The opaque `400` tokens on `/verify`.** x402-rs reports a used authorization without naming it:
+  on EVM as `contract_call_failed (ref: …)`, the same answer as an invalid signature, and on
+  Stellar, Algorand, NEAR and Sui as `internal_error (ref: …)`, the same answer as their invalid
+  signatures and other internal errors. On `/verify` nothing tells them apart. On networks with
+  receipts the facilitator names it (`authorization_already_settled`, `409`).
+- **The facilitator's verdicts.** On `/verify` or on the settle's re-validation (`200 {"isValid":
+  false, "invalidReason"}`), and a `/settle` `200 success: false` without a transaction. A settle
+  re-validation that finds `insufficient_funds` right after a valid verify may mean the balance
+  moved in between. It stays a rejection.
+- **The settle-request refusals listed above.**
 
 The receipt travels in `PAYMENT-RESPONSE` when the facilitator sent one. Only the FastAPI
 integration forwards the buyer's `X-UVD-Purchase`; with it, a resumed purchase gets its original
@@ -1379,10 +1397,18 @@ def answer(exc):
         return already_used(exc)              # 409, already used: do NOT sign again
     if transient:
         return transient_503_response(exc)    # 503, no verdict: same credential, later
-    if (getattr(exc, "status_code", None) or 0) >= 500:
+    status = getattr(exc, "status_code", None) or 0
+    if status >= 500:
         return may_have_settled(exc)          # 500, the facilitator said not to retry
+    if getattr(exc, "operation", None) == "settle" and 400 <= status < 500 \
+            and not refused_before_running(exc):
+        return may_have_settled(exc)          # 500, the settle failed after a valid verify
     return payment_rejected(exc)              # 402
 ```
+
+`exc.operation` is `"verify"` or `"settle"` on a `FacilitatorError` the client raised from that
+call. `refused_before_running` is the list above (`403`, the parse failures, `invalid_address`,
+`clock_error`, `reserved_idempotency_key`, `invalid_receipt_context`, `receipt_*`).
 
 ### When the facilitator refuses a retry, it says where to look
 

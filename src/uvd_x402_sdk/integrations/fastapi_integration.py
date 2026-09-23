@@ -60,8 +60,9 @@ def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
     An authorization the facilitator already admitted for another request, or
     says was already used, is 409 (503 + Retry-After while it is still in
     flight); a payment that may have moved (a transaction broadcast without a
-    verdict, such as ``502 settlement_unconfirmed``, or a 5xx the facilitator
-    said not to retry) is 500 with the transaction to check; a failure without
+    verdict, such as ``502 settlement_unconfirmed``, a 5xx the facilitator said
+    not to retry, or a settle that failed after a valid verify) is 500, with the
+    transaction to check when there is one; a failure without
     a verdict (a timeout, a settle still in flight, a store the facilitator
     could not read) is 503 + Retry-After. Never a 402 for any of them, which
     would ask the buyer for a second payment. Every rejection keeps the answer

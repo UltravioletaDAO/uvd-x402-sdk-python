@@ -930,6 +930,55 @@ def _broadcast_transaction(exc: X402Error) -> Optional[str]:
     return None
 
 
+#: What x402-rs refuses on ``/settle`` before it executes anything: the request,
+#: not the payment. Compared against the ``error`` token without its
+#: `` (ref: …)`` suffix (``handlers.rs`` ``post_settle`` and its
+#: ``IntoResponse``; ``receipts/mod.rs`` ``settle``). ``403`` is ``Address
+#: blocked``. Every other ``4xx`` of a settle may come after the payment moved.
+_SETTLE_REQUEST_REFUSALS = frozenset(
+    {
+        "Invalid request",
+        "invalid_address",
+        "clock_error",
+        "reserved_idempotency_key",
+        "invalid_receipt_context",
+    }
+)
+_SETTLE_REQUEST_REFUSAL_PREFIXES = (
+    "receipt_",
+    "Failed to deserialize",
+    "Failed to decode",
+    "Failed to process",
+    "PAYMENT-SIGNATURE header",
+    "Invalid UTF-8",
+    "Address blocked",
+)
+_REF_SUFFIX = re.compile(r"\s*\(ref: [^)]*\)\s*$")
+
+
+def _settle_refused_after_verify(exc: FacilitatorError) -> bool:
+    """A ``4xx`` from ``/settle`` that is not a refusal of the request itself.
+
+    The integrations settle only after ``/verify`` accepted the same payload and
+    signature, so a settle that fails there -- the opaque ``400
+    contract_call_failed (ref)`` of an EVM revert, or ``400 internal_error
+    (ref)``, which is how x402-rs reports a nonce Stellar, Algorand, NEAR or Sui
+    already saw -- is not a bad signature. Something changed between the two
+    calls, and the likeliest change is that the authorization was used. Only a
+    ``403`` and what ``_SETTLE_REQUEST_REFUSALS`` and
+    ``_SETTLE_REQUEST_REFUSAL_PREFIXES`` name were refused before anything ran.
+    """
+    status = exc.status_code
+    if exc.operation != "settle" or status is None or not 400 <= status < 500:
+        return False
+    if status == 403:
+        return False
+    token = _REF_SUFFIX.sub("", exc.error_code or "")
+    if token in _SETTLE_REQUEST_REFUSALS or token.startswith(_SETTLE_REQUEST_REFUSAL_PREFIXES):
+        return False
+    return True
+
+
 def _may_have_settled_response(
     exc: X402Error, transaction: Optional[str]
 ) -> Tuple[int, Dict[str, Any], Dict[str, str]]:
@@ -995,7 +1044,11 @@ def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any],
        ``503 idempotency_store_unavailable`` or ``receipt_store_unavailable``,
        another retryable ``5xx``, a 429): 503 + ``Retry-After``
        (:func:`transient_503_response`). Present the same ``X-PAYMENT`` later.
-    5. Any other ``5xx`` (the facilitator said ``retryable: false``): 500.
+    5. Any other ``5xx`` (the facilitator said ``retryable: false``), and a
+       ``4xx`` from ``/settle`` that is not a refusal of the request
+       (:func:`_settle_refused_after_verify`: ``400 contract_call_failed
+       (ref)``, ``400 internal_error (ref)``): 500. The TypeScript SDK answers
+       every settle failure it may not retry with 500.
 
     None of them is a 402: each tells the buyer not to sign another payment.
     The anti-double-settle guard in :func:`is_transient_error` is unchanged:
@@ -1015,7 +1068,9 @@ def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any],
     if transient:
         body, headers = transient_503_response(exc)
         return 503, body, _with_receipt(headers, exc)
-    if isinstance(exc, FacilitatorError) and (exc.status_code or 0) >= 500:
+    if isinstance(exc, FacilitatorError) and (
+        (exc.status_code or 0) >= 500 or _settle_refused_after_verify(exc)
+    ):
         return _may_have_settled_response(exc, None)
     return None
 
@@ -1710,6 +1765,7 @@ class X402Client:
                     response_body=response.text,
                     reason=_facilitator_reason(response.text),
                     retry_after=_response_retry_after(response),
+                    operation="verify",
                 )
 
             data = response.json()
@@ -1730,7 +1786,7 @@ class X402Client:
         except httpx.TimeoutException:
             raise X402TimeoutError(operation="verify", timeout_seconds=self.config.verify_timeout)
         except httpx.RequestError as e:
-            raise FacilitatorError(message=f"Facilitator request failed: {e}")
+            raise FacilitatorError(message=f"Facilitator request failed: {e}", operation="verify")
 
     def settle_payment(
         self,
@@ -1990,6 +2046,7 @@ class X402Client:
                     response_body=response.text,
                     reason=_facilitator_reason(response.text),
                     retry_after=_response_retry_after(response),
+                    operation="settle",
                 )
                 if response.status_code == 202:
                     binding.refuse_foreign_replay(response, refusal.receipt, payload.network)
@@ -1998,6 +2055,17 @@ class X402Client:
                 raise refusal
 
             data = response.json()
+            if isinstance(data, dict) and "success" not in data and data.get("isValid") is False:
+                # x402-rs answers a settle whose re-validation fails in the
+                # shape of a verify (`200 {"isValid": false, "invalidReason"}`):
+                # a rejection, raised as one instead of failing to parse.
+                rejected = VerifyResponse(**data)
+                raise PaymentSettlementError(
+                    message=f"Payment settlement failed: {rejected.invalidReason}",
+                    network=payload.network,
+                    reason=rejected.invalidReason or rejected.message,
+                    receipt=rejected.receipt,
+                )
             settle_response = SettleResponse(**data)
             settle_response.idempotent_replayed = _response_replayed(response)
             settle_response.idempotency_key = binding.key
@@ -2006,6 +2074,9 @@ class X402Client:
                 raise PaymentSettlementError(
                     message=f"Payment settlement failed: {settle_response.message}",
                     network=payload.network,
+                    # A failed settle that names a transaction was mined and
+                    # reverted: the hash is where the buyer looks.
+                    tx_hash=_extract_tx_hash_from_body(data),
                     reason=settle_response.errorReason or settle_response.message,
                     receipt=settle_response.receipt,
                 )
@@ -2034,7 +2105,7 @@ class X402Client:
             raise X402TimeoutError(operation="settle", timeout_seconds=settle_timeout)
         except httpx.RequestError as e:
             binding.may_have_admitted = True
-            raise FacilitatorError(message=f"Facilitator request failed: {e}")
+            raise FacilitatorError(message=f"Facilitator request failed: {e}", operation="settle")
 
     def _check_settle_fallback(
         self,
@@ -2122,6 +2193,7 @@ class X402Client:
                     response_body=response.text,
                     reason=_facilitator_reason(response.text),
                     retry_after=_response_retry_after(response),
+                    operation="settle",
                 )
             except Exception as e:
                 logger.warning(f"Fallback check failed: {e}")

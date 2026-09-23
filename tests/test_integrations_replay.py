@@ -15,7 +15,9 @@ Each entry point runs in its own framework against ``tests/receipt_rail.py``
   X-PAYMENT later is delivered once;
 * without the guard in the settle handling, the replayed settle IS delivered
   (the mutation that proves the test above discriminates);
-* on a network without receipts, the answer each entry point gave before.
+* on a network without receipts, a bare resend that the chain refuses at
+  settle, after a valid verify (the opaque ``400 contract_call_failed (ref)``):
+  500, never 402 (0.90.1; it was the 402 each entry point gave before).
 
 With the buyer's ``X-UVD-Purchase``, which only the FastAPI integration
 forwards, a resumed purchase is delivered: the facilitator matched the
@@ -359,8 +361,9 @@ def generic_decorator(rail: Facilitator) -> Site:
     return site
 
 
-#: entry point -> the status it answered, before and after this change, to a
-#: bare resend on a network without receipts (an opaque 400 from the chain).
+#: entry point -> the status it answers a rejection with. Until 0.90.1 it was
+#: also the answer to a bare resend on a network without receipts (an opaque
+#: 400 from the chain at settle), which is now a 500.
 SITES = {
     fastapi_dependency: 402,
     fastapi_x402_depends: 402,
@@ -458,15 +461,18 @@ def test_while_the_first_payment_is_in_flight_the_answer_is_503_with_retry_after
 
 
 @all_sites
-def test_legacy_a_bare_resend_keeps_the_answer_it_had(rails, mount):
+def test_legacy_a_bare_resend_refused_at_settle_is_500_never_402(rails, mount):
+    """The resend passed /verify, so the settle's opaque 400 is not a bad
+    signature: the authorization was used, by the first request."""
     rail = rails("legacy")
     site = mount(rail)
     site.get(x_payment())
 
     status, body, _ = site.get(x_payment())
 
-    assert status == SITES[mount], body
-    assert site.delivered == 1
+    assert status == 500, body
+    assert _reason(body) == "contract_call_failed (ref: local)"
+    assert site.delivered == 1 and rail.moved == 1
 
 
 @pytest.fixture
