@@ -22,7 +22,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[fastapi]"
     )
 
-from uvd_x402_sdk.client import X402Client, payment_conflict_response
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
@@ -58,13 +58,14 @@ def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
     """Status, body and headers for a payment that was not delivered on.
 
     An authorization the facilitator already admitted for another request is
-    409, or 503 + Retry-After while it is still in flight: never delivered
-    again and never a 402, which would ask the buyer for a second payment.
-    Every other failure keeps the answer it had.
+    409, or 503 + Retry-After while it is still in flight; a failure without a
+    verdict (a timeout, a settle still in flight, a store the facilitator could
+    not read) is 503 + Retry-After. Never a 402 for either, which would ask the
+    buyer for a second payment. Every rejection keeps the answer it had.
     """
-    conflict = payment_conflict_response(error)
-    if conflict is not None:
-        return conflict
+    answer = _undelivered_response(error)
+    if answer is not None:
+        return answer
     return _payment_error_status(error), error.to_dict(), _receipt_error_headers(error)
 
 

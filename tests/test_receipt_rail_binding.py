@@ -40,6 +40,7 @@ from uvd_x402_sdk import (
     is_transient_error,
     new_idempotency_key,
     payment_conflict_response,
+    transient_503_response,
 )
 from uvd_x402_sdk.exceptions import (
     FacilitatorError,
@@ -194,15 +195,47 @@ def test_with_the_key_off_the_fallback_reads_the_409_as_already_used_not_as_a_ti
     assert rail.executed == 1
 
 
-def test_in_flight_under_the_handlings_key_is_transient_and_the_same_key_gets_the_settle(rails):
+@pytest.fixture
+def quick_polls(monkeypatch):
+    """The fallback's pause between asks, shortened for a test's clock."""
+    monkeypatch.setattr(client_module, "_IN_FLIGHT_POLL_MAX_INTERVAL_SECONDS", 0.1)
+
+
+def test_a_settle_that_outlives_its_timeout_is_awaited_in_the_same_handling(rails, quick_polls):
+    """The settle timed out while the payment was in flight. The fallback's
+    resend under the same key gets ``202 settlement_in_progress``: this
+    handling's own payment, moving. It asks again within the budget, and the
+    same call ends in the settle, once."""
     rail = rails(hold_before_confirm=1.0)
+    settled = _seller(rail, settle_timeout=0.3).settle_payment(_payload(), PRICE)
+
+    assert settled.success and settled.idempotent_replayed is True
+    assert rail.executed == 1 and rail.moved == 1
+    assert len(set(rail.keys("/settle"))) == 1 and len(rail.keys("/settle")) >= 3
+
+
+def test_a_settle_still_in_flight_after_the_budget_raises_the_202_not_a_timeout(
+    rails, quick_polls, monkeypatch
+):
+    """Past the budget the 202 itself is raised: transient, with the reason and
+    the receipt, so a paywall answers 503 + Retry-After. A TimeoutError here
+    was answered 402 by every middleware, over a payment that was moving."""
+    monkeypatch.setattr(client_module, "SETTLE_IN_FLIGHT_POLL_SECONDS", 0.3)
+    rail = rails(hold_before_confirm=1.5)
     key = new_idempotency_key()
 
-    with pytest.raises(X402TimeoutError) as caught:
+    with pytest.raises(FacilitatorError) as caught:
         _seller(rail, settle_timeout=0.3).settle_payment(_payload(), PRICE, idempotency_key=key)
-    assert is_transient_error(caught.value)
 
-    time.sleep(1.0)  # the first settle confirms
+    error = caught.value
+    assert error.status_code == 202 and error.error_code == "settlement_in_progress"
+    assert error.retryable and is_transient_error(error)
+    assert error.receipt is not None and error.receipt.status == "pending"
+    assert payment_conflict_response(error) is None  # not another request's payment
+    body, headers = transient_503_response(error)
+    assert body["reason"] == "settlement_in_progress" and headers["Retry-After"]
+
+    time.sleep(1.5)  # the first settle confirms
     later = _seller(rail).settle_payment(_payload(), PRICE, idempotency_key=key)
     assert later.success and later.idempotent_replayed is True
     assert rail.executed == 1 and rail.moved == 1
@@ -301,15 +334,15 @@ def test_other_terms_for_an_admitted_authorization_are_a_conflict(rails):
 
 
 # ---------------------------------------------------------------------------
-# A facilitator before 2.39.0: it replays to any resend of the same request
+# A facilitator before 2.39.0: the replay was not tied to the binding
 # ---------------------------------------------------------------------------
 
 
 def test_before_2_39_a_replay_on_the_first_attempt_of_a_new_request_is_refused(rails):
-    """Production answered this way on 2026-09-23 (2.38.0): /verify gives the
-    stored verdict and /settle the original 200 with Idempotent-Replayed to
-    whoever resends the X-PAYMENT. This handling carried a fresh key and no
-    X-UVD-Purchase, and none of its attempts had run: not its payment."""
+    """2.36.0 to 2.38.0 did not tie the replay to the binding: /verify gives the
+    stored verdict and /settle the original 200 with Idempotent-Replayed. This
+    handling carried a fresh key and no X-UVD-Purchase, and none of its
+    attempts had run: not its payment."""
     rail = rails("receipts-2.38")
     first = _seller(rail).process_payment(x_payment(), PRICE)
 

@@ -17,9 +17,10 @@ answer back only with the binding that admitted it, the same
 * another purchase context or other terms: ``409 receipt_request_conflict``.
 
 ``mode="receipts-2.38"`` is the same rail as 2.36.0 to 2.38.0 shipped it
-(``src/receipts/mod.rs`` at ``cc2cf345``), which production still ran on
-2026-09-23 (``GET /version`` -> ``2.38.0``): the original answer to ANY resend
-of the same request, binding or not, and the stored verdict on ``/verify``.
+(``src/receipts/mod.rs`` at ``cc2cf345``; production until 2026-09-23
+07:06:29Z): those versions did not tie the replay to the binding, so they
+answer a resend of the same request with the original answer, binding or not,
+and the stored verdict on ``/verify``.
 
 ``mode="legacy"`` is a network without receipts, the ``post_settle``
 idempotency contract of x402-rs 2.28.0 that
@@ -33,7 +34,9 @@ executes, and the "chain" answers a second execution of one authorization with
 In every mode the "chain" moves an authorization once. ``hold_before_confirm``
 keeps the first settle in flight for that long (the pending window);
 ``hold_after_confirm`` confirms it and then sits on the answer (a response lost
-after the payment moved).
+after the payment moved). ``store_down`` is a store the facilitator cannot
+read: ``503 receipt_store_unavailable`` on ``/settle`` with receipts, ``503
+idempotency_store_unavailable`` on a keyed ``/settle`` without; nothing moves.
 
 It is NOT the facilitator binary, for the reasons given in
 ``tests/test_idempotency_local_facilitator.py``.
@@ -91,6 +94,8 @@ def _receipt(status: str, tx: Optional[str], purchase_id: Optional[str]) -> Dict
         settlement={"id": tx, "idType": "evm-transaction-hash"} if tx else None,
         proof=None,
     )
+    if status == "pending":
+        receipt["retry"] = {"action": "poll", "afterSeconds": 2}
     receipt["request"]["purchaseId"] = purchase_id
     receipt["requestHash"] = commitment(receipt["requestHashVersion"], receipt["request"])
     return receipt
@@ -119,9 +124,11 @@ class Facilitator:
         *,
         hold_before_confirm: float = 0.0,
         hold_after_confirm: float = 0.0,
+        store_down: bool = False,
     ) -> None:
         assert mode in MODES, mode
         self.mode = mode
+        self.store_down = store_down
         self.hold_before_confirm = hold_before_confirm
         self.hold_after_confirm = hold_after_confirm
         #: (path, Idempotency-Key or None, X-UVD-Purchase or None), in arrival order.
@@ -184,6 +191,12 @@ class Facilitator:
             fingerprint = hashlib.sha256(
                 json.dumps(request, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
+            if self.store_down and path == "/settle":
+                if self.mode != "legacy":
+                    return 503, _failure("receipt_store_unavailable", retryable=True), {}
+                if key is not None:
+                    body = {"error": "idempotency_store_unavailable", "correlation_id": "local"}
+                    return 503, body, {}
             if self.mode == "legacy":
                 answered = self._legacy_lookup(path, key, raw)
                 if answered is not None:

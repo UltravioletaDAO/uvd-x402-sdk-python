@@ -21,12 +21,9 @@ admitida devuelve su respuesta original **sólo** a quien trae el vínculo con q
 (el mismo `Idempotency-Key` o la misma capacidad `X-UVD-Purchase`). Tener el pago firmado no
 es un vínculo.
 
-**Medido el 2026-09-23:** producción corre `2.38.0` (`GET /version`), que todavía devuelve el
-settle original, con `Idempotent-Replayed: true`, a CUALQUIER reenvío del mismo request
-(`src/receipts/mod.rs` en `cc2cf345`, `response(&existing, true)`). Con 0.88.0, un comprador
-que reenvía su propio `X-PAYMENT` en un request nuevo a un middleware del SDK en Arc o Hedera
-recibe la entrega otra vez. 0.89.0 lo cierra del lado del SDK, sin esperar al despliegue de
-2.39.0.
+**Versión en producción:** `2.39.0` desde el 2026-09-23 07:06:29Z; antes, `2.38.0`. Los
+facilitadores anteriores a 2.39.0 no ataban la respuesta al vínculo; el SDK se defiende igual,
+con cualquier versión del facilitador.
 
 ---
 
@@ -40,13 +37,27 @@ recibe la entrega otra vez. 0.89.0 lo cierra del lado del SDK, sin esperar al de
 | `client.py`, `derive_idempotency_key` | Pública por compatibilidad. Devuelve `x402-settle-…` para las dos operaciones: es la llave que 0.83.0-0.88.0 mandaban en `/settle`, así que una compra liquidada antes de actualizar conserva su llave. Docstring: **no es un vínculo salvo que el scope sea un secreto del vendedor**. El SDK sólo la usa cuando se le pasa `idempotency_scope` |
 | `client.py`, `admitted_authorization_code()`, `payment_conflict_response()` | Nombran y contestan los tres rechazos del riel: `authorization_already_settled` y `receipt_request_conflict` → 409 (gastados para `is_spent_nonce_error`, finales); `authorization_in_flight` → 503 + `Retry-After`, `retryable: true` (transitorio para `is_transient_error`). Mismo mapeo que `buildPaymentConflictResponse` del SDK de TypeScript |
 | `exceptions.py` | Las tres constantes + `ADMITTED_AUTHORIZATION_CODES`. `FacilitatorError.retryable` es `True` por nombre para `202 settlement_in_progress` y para `409 authorization_in_flight` |
-| `client.py`, fallback por timeout | Reenvía con la misma llave del manejo (ya reusaba los headers: lo que faltaba era una llave por defecto). Si recibe uno de esos 409, lanza la respuesta del facilitador en lugar de un `TimeoutError`, que invitaba a reenviar la misma credencial sin vínculo, algo que nunca devuelve el éxito |
+| `client.py`, fallback por timeout | Reenvía con la misma llave del manejo (ya reusaba los headers: lo que faltaba era una llave por defecto). Si recibe uno de esos 409, lanza la respuesta del facilitador en lugar de un `TimeoutError`, que invitaba a reenviar la misma credencial sin vínculo, algo que nunca devuelve el éxito. Si recibe un `202 settlement_in_progress` vinculado (su pago, en vuelo), vuelve a preguntar hasta `SETTLE_IN_FLIGHT_POLL_SECONDS` (30 s; pausa según `Retry-After` o `retry.afterSeconds` del recibo, tope 5 s) y, pasado el presupuesto, lanza ese 202 (ronda 2) |
 | `models.py` | `idempotent_replayed` en `SettleResponse` y `PaymentResult` (del header, nunca del cuerpo); `idempotency_key` en `VerifyResponse`, `SettleResponse` y `PaymentResult`, con `exclude=True` para que no llegue al comprador en `PAYMENT-RESPONSE` |
 | `config.py` | `send_idempotency_key` pasa a `True` por defecto (ver §2) |
-| Integraciones | FastAPI (`FastAPIX402`, `X402Depends`, `fastapi_require_payment`, `X402Middleware`), Flask (`FlaskX402`, `flask_require_payment`), Django (`DjangoX402Middleware`, `django_require_payment`, `X402PaymentView`), Lambda (`LambdaX402`, `lambda_handler`) y `require_payment`: 409, o 503 + `Retry-After` en vuelo, donde antes contestaban 402 (o 400). Nunca entregan sobre esos rechazos. El resto de los fallos contesta lo mismo que antes |
+| Integraciones | FastAPI (`FastAPIX402`, `X402Depends`, `fastapi_require_payment`, `X402Middleware`), Flask (`FlaskX402`, `flask_require_payment`), Django (`DjangoX402Middleware`, `django_require_payment`, `X402PaymentView`), Lambda (`LambdaX402`, `lambda_handler`) y `require_payment`, todas por `_undelivered_response()`: 409, o 503 + `Retry-After` en vuelo, donde antes contestaban 402 (o 400). Nunca entregan sobre esos rechazos. Desde la ronda 2, todo fallo sin veredicto (timeout, 202 en vuelo, `503 idempotency_store_unavailable` / `receipt_store_unavailable`, 5xx reintentable, 429) sale 503 + `Retry-After` con el `reason`. Los rechazos contestan lo mismo que antes |
 | `.github/workflows/ci.yml` | Instala `fastapi,flask,django`. Sin eso, cada test de middleware se saltaba, y el test de recibos de FastAPI que entró en 0.88.0 **fallaba** en la resolución del CI (medido en venv limpio sobre `origin/main`: 1230 passed, 1 failed) |
 | `tests/receipt_rail.py` | Doble de facilitador sobre socket real en tres formas: `receipts` (2.39.0), `receipts-2.38` (2.36.0-2.38.0) y `legacy` (sin recibos, contrato 2.28.0) |
 | Tests nuevos | `tests/test_receipt_rail_binding.py` (41), `tests/test_integrations_replay.py` (108: los 12 puntos de entrada por escenario); 16 más en `test_idempotency_key.py` y 2 en `test_idempotency_opt_in.py` |
+
+## Ronda 2 (refutador: MERGEABLE CON RONDA, sin P0)
+
+| Punto | Qué cambió | Test que lo fija | Mutación |
+|---|---|---|---|
+| **P1**: el `202` vinculado del fallback salía `TimeoutError` y todas las integraciones contestaban 402 sobre un pago que se movía | El fallback vuelve a preguntar dentro del presupuesto y el mismo request termina en su settle (una entrega). Pasado el presupuesto lanza el 202 (transitorio, con el recibo pendiente), y las integraciones contestan 503 + `Retry-After` con `reason: settlement_in_progress` | `test_a_settle_that_outlives_its_timeout_is_awaited_and_delivered_once` (12 puntos de entrada), `test_a_settle_still_in_flight_past_the_budget_is_503_with_retry_after` (12), `test_a_settle_still_in_flight_resumed_with_x_uvd_purchase_is_delivered_once` (FastAPI ×4: 503 y después, con la misma `X-UVD-Purchase`, una entrega), más dos en `test_receipt_rail_binding.py` | M1, el 202 vuelve a leerse como "no confirmado": **26 rojos** |
+| **P2-a**: `503 idempotency_store_unavailable` / `receipt_store_unavailable` salían 402/400 (Flask, Django, Lambda, decorador) y 503 sin `Retry-After` (FastAPI) | `_undelivered_response()`: todo lo que `is_transient_error` llama transitorio sale 503 + `Retry-After` en las cinco integraciones | `test_a_store_the_facilitator_cannot_read_is_503_and_the_same_payment_is_delivered_later` (12 × con/sin recibos: 503, y el mismo `X-PAYMENT` después, una entrega) | M2, sin el 503 transitorio: **36 rojos** |
+| **P2-c**: redacción pública | "producción corre 2.38.0" pasa a la versión con su hora (2.39.0 desde 2026-09-23 07:06:29Z), y la descripción de cómo respondían 2.36-2.38 pasa a "no ataban la respuesta al vínculo" en el handoff, CLAUDE.md, README, CHANGELOG, la guía de recibos, el comentario de `client.py` y los tests | — | — |
+| **P3**: el 202 vinculado en FastAPI salía sin `Retry-After` ni `reason` | El mismo camino que P1 | Los tests de P1 recorren FastAPI | M1 / M2 |
+
+Una consecuencia que vale la pena ver: el timeout que no se resuelve en el fallback (sin 202, sin
+respuesta) también es "sin veredicto", y ahora sale 503 + `Retry-After` en todas las
+integraciones. En 0.88.0 salía 402 en todas: por el `TimeoutError` sin `retryable` que FastAPI leía
+y por el 402 fijo de las demás.
 
 ## 2. Decisiones que tomé
 
@@ -76,13 +87,14 @@ recibe la entrega otra vez. 0.89.0 lo cierra del lado del SDK, sin esperar al de
 
 | Qué | Resultado |
 |---|---|
-| Suite en venv NUEVO, Python 3.11, `pip install -e '.[signer,dev,dx402,escrow,hedera,fastapi,flask,django]'` (la línea nueva del CI) | **1404 passed**, 0 failed. Resolución: fastapi 0.141.1, starlette 1.6.0, Flask 3.1.3, Django 5.2.17, pydantic 2.13.5, httpx 0.28.1, pytest 9.1.1 |
+| Suite en venv NUEVO, Python 3.11, `pip install -e '.[signer,dev,dx402,escrow,hedera,fastapi,flask,django]'` (la línea nueva del CI) | **1457 passed**, 0 failed (ronda 1: 1404; la ronda 2 suma 53). Resolución: fastapi 0.141.1, starlette 1.6.0 (1.7.0 en la corrida de la ronda 2, también verde), Flask 3.1.3, Django 5.2.17, pydantic 2.13.5, httpx 0.28.1, pytest 9.1.1 |
 | Base `origin/main` (0.88.0), venv nuevo con la línea VIEJA del CI | 1230 passed, **1 failed** (`test_receipts.py::test_fastapi_propagates_receipt_and_validates_context`, falta `fastapi`), 1 skipped |
 | Job `cross-language` replicado: TypeScript `main` (`b079792`, 2.97.0) clonado, `npm ci && npm run build`, vectores `--check` y `cross-language-conformance.mjs` contra este árbol con `.[signer]` en venv nuevo | vectores al día; **CROSS-LANGUAGE CONFORMANCE PASSED — 430 checks across 8 phases** |
 | Pre-CI de c0der (`scripts/preci.py --base origin/main`) | dispara `ci.yml` (jobs `test` y `cross-language`); `publish.yml` no escucha PRs. Los dos jobs se corrieron a mano, arriba |
 | `ruff check` sobre los archivos tocados | sin errores nuevos salvo UP006/UP045 (`Dict`/`Optional`), que es el estilo de todo el paquete (el repo trae cientos, el CI no corre ruff) |
 | `mypy src/` con el mismo venv, base vs rama | 150 = 150; ninguno nuevo |
 | Mutación 1: guardia anulada (`refuse_foreign_replay` → `return`) | 12 rojos: la fila 2.38 de `test_the_same_x_payment_in_a_new_request_is_not_delivered_again`, uno por punto de entrada. La fila 2.39 sigue verde: el facilitador rechaza por su cuenta (dos defensas independientes). También queda como test (`test_without_the_guard_the_replayed_settle_would_be_delivered`, 12 casos) |
+| Ronda 2, M1 (el 202 vinculado del fallback vuelve a ser "no confirmado") y M2 (sin 503 para lo que no tiene veredicto) | **26** y **36** rojos |
 | Mutación 2: llave por defecto derivada del `X-PAYMENT` (el error del encargo) | 28 rojos, entre ellos "dos manejos del mismo `X-PAYMENT` mandan llaves distintas" en los tres niveles. Los de no entrega siguen verdes: la guardia no depende de la llave |
 | Contra el facilitador vivo | **Nada que liquide.** Sólo `GET /version` y `GET /supported` (lectura) |
 

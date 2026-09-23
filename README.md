@@ -1277,8 +1277,7 @@ reaches the buyer in `PAYMENT-RESPONSE`.
   fresh key, no `X-UVD-Purchase`) that receives `Idempotent-Replayed: true` before any of its own
   attempts could have admitted the payment raises `PaymentSettlementError` with reason
   `authorization_already_settled` (or `authorization_in_flight` for a `202`), carrying the receipt.
-  Facilitators 2.36.0 to 2.38.0 hand the original settle to any resend of the same request; 2.39.0
-  answers `409` itself. The replay the handling's own fallback or retry receives is its own, and is
+  Facilitators before 2.39.0 did not tie the replay to the binding; 2.39.0 answers `409` itself. The replay the handling's own fallback or retry receives is its own, and is
   returned with `idempotent_replayed=True`.
 - **`idempotency_scope`** is kept: `derive_idempotency_key(payload, "settle", scope=...)` is
   `x402-settle-<sha256>` over `["x402-idempotency-scope/1", <signed block>, <scope>]`, the value
@@ -1309,6 +1308,10 @@ What the facilitator does with the key:
   settle the facilitator cannot check is `503 idempotency_store_unavailable` and does not execute
   (without a key it used to settle): `is_transient_error()` reads it as transient, so answer 503 +
   `Retry-After` and let the buyer present the same credential again.
+- **A settle that outlives its timeout is awaited.** The fallback's resend under the handling's own
+  key can get `202 settlement_in_progress`: the payment was admitted and is moving. The fallback asks
+  again for up to `SETTLE_IN_FLIGHT_POLL_SECONDS` (30), and the same request ends in its settle.
+  Past that it raises the `202` itself (transient, with the pending receipt), never a timeout.
 - **What it does not catch:** a buyer who signs a *new* authorization for the same purchase. That is
   another payment.
 
@@ -1322,6 +1325,11 @@ them with 402:
 | `authorization_already_settled` | this `X-PAYMENT` was already used, and the payment is confirmed | `409` |
 | `receipt_request_conflict` | admitted for another purchase context, or under other terms | `409` |
 | `authorization_in_flight` | admitted for another request, outcome not final | `503` + `Retry-After`, `retryable: true` |
+
+The same integrations answer every failure without a verdict with `503` + `Retry-After` and the
+facilitator's `reason`: a timeout, a settle still in flight (`settlement_in_progress`), `503
+idempotency_store_unavailable` or `receipt_store_unavailable`, another retryable `5xx`, a `429`. The
+buyer presents the same `X-PAYMENT` later and never signs another one.
 
 The receipt travels in `PAYMENT-RESPONSE` when the facilitator sent one. Only the FastAPI
 integration forwards the buyer's `X-UVD-Purchase`; with it, a resumed purchase gets its original

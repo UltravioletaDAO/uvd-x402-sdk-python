@@ -57,8 +57,13 @@ never sends one.
 | `202 settlement_in_progress` under the handling's binding | none (transient) | retry the same request |
 
 `payment_conflict_response(exc)` builds those answers, and every SDK middleware
-and decorator uses it; none of them is a `402`. Facilitators 2.36.0 to 2.38.0
-replay an admitted settle to any resend. A handling with no binding of its own (a
+and decorator uses it; none of them is a `402`. They also answer every failure
+without a verdict (a timeout, a store the facilitator could not read, a settle
+still in flight) with `503` + `Retry-After`. When a settle times out while the
+payment is in flight, the fallback's resend under the same key gets `202
+settlement_in_progress` and asks again for up to `SETTLE_IN_FLIGHT_POLL_SECONDS`,
+so the same request usually ends in its settle. Facilitators before 2.39.0 did
+not tie the replay to the binding. A handling with no binding of its own (a
 fresh key, no `X-UVD-Purchase`) that receives such a replay before any of its own
 attempts could have admitted the payment raises `PaymentSettlementError` with the
 same codes and the receipt. The replay a handling's own fallback or retry receives

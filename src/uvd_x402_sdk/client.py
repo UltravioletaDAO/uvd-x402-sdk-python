@@ -32,6 +32,7 @@ from uvd_x402_sdk.exceptions import (
     ADMITTED_AUTHORIZATION_CODES,
     AUTHORIZATION_ALREADY_SETTLED,
     AUTHORIZATION_IN_FLIGHT,
+    SETTLEMENT_IN_PROGRESS,
     X402Error,
     InvalidPayloadError,
     PaymentVerificationError,
@@ -96,6 +97,19 @@ logger = logging.getLogger(__name__)
 SETTLE_RETRY_ATTEMPTS = 3
 _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 
+#: How long the timeout fallback keeps asking about a settle the facilitator
+#: answers ``202 settlement_in_progress`` under this handling's own binding: the
+#: settle that timed out was admitted and is still in flight. Within it the same
+#: request ends in its settle; past it the 202 itself is raised (transient: a
+#: paywall answers 503 + Retry-After, never 402), and only this binding's resend
+#: gets the answer later.
+SETTLE_IN_FLIGHT_POLL_SECONDS = 30.0
+#: Ceiling on the pause between two of those asks. The facilitator's own
+#: guidance (``Retry-After``, or the receipt's ``retry.afterSeconds``) wins when
+#: it is shorter; without any, one second.
+_IN_FLIGHT_POLL_MAX_INTERVAL_SECONDS = 5.0
+_IN_FLIGHT_POLL_DEFAULT_INTERVAL_SECONDS = 1.0
+
 
 # =============================================================================
 # Idempotency-Key: the purchase binding (X402Config.send_idempotency_key)
@@ -144,10 +158,10 @@ _SETTLE_RETRY_MAX_BACKOFF_SECONDS = 10.0
 #     with the same reason. Another purchase context: `409
 #     receipt_request_conflict`. A rejected payment replays its rejection.
 #
-# Facilitators 2.36.0 to 2.38.0 replayed an admitted settle to ANY resend of
-# the same request. A handling that brought no binding of its own (a fresh key,
-# no `X-UVD-Purchase`) refuses a replay that reaches it before any attempt of
-# its own could have admitted the payment (see `_Binding`).
+# Facilitators before 2.39.0 did not tie the replay to the binding. A handling
+# that brought no binding of its own (a fresh key, no `X-UVD-Purchase`) refuses
+# a replay that reaches it before any attempt of its own could have admitted
+# the payment (see `_Binding`), whatever the facilitator's version.
 
 #: The header the facilitator deduplicates a settle on.
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
@@ -406,6 +420,19 @@ class _Binding:
             reason=AUTHORIZATION_IN_FLIGHT if in_flight else AUTHORIZATION_ALREADY_SETTLED,
             receipt=receipt,
         )
+
+
+def _in_flight_poll_interval(refusal: FacilitatorError) -> float:
+    """Seconds to wait before asking again about a settle still in flight."""
+    wait = refusal.retry_after
+    if wait is None:
+        retry = getattr(refusal.receipt, "retry", None)
+        after = retry.get("afterSeconds") if isinstance(retry, dict) else None
+        if isinstance(after, (int, float)) and not isinstance(after, bool) and after > 0:
+            wait = float(after)
+    if wait is None:
+        wait = _IN_FLIGHT_POLL_DEFAULT_INTERVAL_SECONDS
+    return min(wait, _IN_FLIGHT_POLL_MAX_INTERVAL_SECONDS)
 
 
 def retry_after_seconds(exc: Exception, default: Optional[float] = None) -> Optional[float]:
@@ -762,7 +789,8 @@ def transient_503_response(
     verdict — present the SAME credential again".
 
     The body keeps the exception's own ``to_dict()`` shape and adds ``retryable``,
-    the facilitator's ``reason`` when it sent one, and ``safeToRetry``:
+    the facilitator's ``reason`` when it sent one (``settlement_in_progress``
+    for its ``202``, which names the state in ``error``), and ``safeToRetry``:
     ``False`` for ``forward_failed`` and for any unrecognised ``reason``, where
     the write may already have executed.
 
@@ -780,6 +808,9 @@ def transient_503_response(
     retry_after = retry_after_seconds(exc, default_retry_after) or default_retry_after
     retry_after = min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
     reason = facilitator_reason(exc)
+    if reason is None and getattr(exc, "error_code", None) == SETTLEMENT_IN_PROGRESS:
+        # The facilitator names this state in `error`, not `reason`.
+        reason = SETTLEMENT_IN_PROGRESS
 
     body: Dict[str, Any] = dict(exc.to_dict())
     body["retryable"] = True
@@ -854,6 +885,33 @@ def payment_conflict_response(
             payment_response_headers({"success": False, "receipt": receipt.model_dump()})
         )
     return status, body, headers
+
+
+def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any], Dict[str, str]]]:
+    """What the SDK's middlewares and decorators answer for a payment that is
+    neither delivered nor rejected, or ``None`` for a rejection (each keeps its
+    own 402 or 400).
+
+    :func:`payment_conflict_response` first (409, or 503 while in flight), then
+    any failure :func:`is_transient_error` calls transient -- a timeout, a
+    ``202 settlement_in_progress``, a ``5xx`` such as ``503
+    idempotency_store_unavailable`` or ``receipt_store_unavailable``, a 429 --
+    as 503 + ``Retry-After`` (:func:`transient_503_response`): present the same
+    ``X-PAYMENT`` later, never sign another. The receipt, when there is one,
+    travels in ``PAYMENT-RESPONSE``.
+    """
+    conflict = payment_conflict_response(exc)
+    if conflict is not None:
+        return conflict
+    if not is_transient_error(exc):
+        return None
+    body, headers = transient_503_response(exc)
+    receipt = getattr(exc, "receipt", None)
+    if receipt is not None:
+        headers.update(
+            payment_response_headers({"success": False, "receipt": receipt.model_dump()})
+        )
+    return 503, body, headers
 
 
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
@@ -1897,10 +1955,21 @@ class X402Client:
                 of executing, and on a network with receipts it is the only
                 resend that gets that answer back.
 
+        A ``202 settlement_in_progress`` under the same binding means the
+        timed-out settle was admitted and is still in flight: the fallback asks
+        again (same request, same binding) for up to
+        ``SETTLE_IN_FLIGHT_POLL_SECONDS``, pausing as the facilitator says.
+
         Returns:
             SettleResponse if payment was confirmed on-chain, None otherwise.
 
         Raises:
+            FacilitatorError: The ``202 settlement_in_progress`` itself when the
+                settle is still in flight after that budget. Transient
+                (:func:`is_transient_error`): a paywall answers 503 +
+                ``Retry-After``, never 402, because the payment is moving. Before
+                0.89.0 this was a ``TimeoutError`` that the SDK's middlewares
+                answered with 402.
             FacilitatorError: The facilitator's own answer when it says the
                 authorization was already admitted for a purchase this resend
                 does not bind (``409 authorization_already_settled``,
@@ -1916,28 +1985,28 @@ class X402Client:
                 without a binding never gets the success back.
         """
         url = facilitator_url or self.config.facilitator_url
-        admitted: Optional[FacilitatorError] = None
-        try:
-            client = self._get_http_client()
-            response = client.post(
-                f"{url}/settle",
-                json=settle_request,
-                headers=headers or {"Content-Type": "application/json"},
-                timeout=30.0,  # Short timeout for fallback check
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                settle_response = SettleResponse(**data)
-                if settle_response.success:
-                    settle_response.idempotent_replayed = _response_replayed(response)
-                    tx_hash = settle_response.get_transaction_hash()
-                    logger.info(
-                        f"Fallback confirmed payment on-chain! "
-                        f"TX: {tx_hash}, Payer: {settle_response.payer}"
-                    )
-                    return settle_response
-            else:
+        client = self._get_http_client()
+        deadline = time.monotonic() + SETTLE_IN_FLIGHT_POLL_SECONDS
+        in_flight: Optional[FacilitatorError] = None
+        while True:
+            try:
+                response = client.post(
+                    f"{url}/settle",
+                    json=settle_request,
+                    headers=headers or {"Content-Type": "application/json"},
+                    timeout=30.0,  # Short timeout for fallback check
+                )
+                if response.status_code == 200:
+                    settle_response = SettleResponse(**response.json())
+                    if settle_response.success:
+                        settle_response.idempotent_replayed = _response_replayed(response)
+                        tx_hash = settle_response.get_transaction_hash()
+                        logger.info(
+                            f"Fallback confirmed payment on-chain! "
+                            f"TX: {tx_hash}, Payer: {settle_response.payer}"
+                        )
+                        return settle_response
+                    break
                 refusal = FacilitatorError(
                     message=(
                         f"Facilitator settle failed with status {response.status_code} "
@@ -1948,21 +2017,37 @@ class X402Client:
                     reason=_facilitator_reason(response.text),
                     retry_after=_response_retry_after(response),
                 )
-                if admitted_authorization_code(refusal) is not None:
-                    admitted = refusal
+            except Exception as e:
+                logger.warning(f"Fallback check failed: {e}")
+                break
 
-        except Exception as e:
-            logger.warning(f"Fallback check failed: {e}")
-            return None
+            if admitted_authorization_code(refusal) is not None:
+                logger.warning(
+                    "Fallback check: the facilitator had already admitted this authorization "
+                    "(%s) and this resend does not carry the binding that admitted it. Not a "
+                    "success to deliver on, and not a rejection.",
+                    refusal.error_code,
+                )
+                raise refusal
+            if not (refusal.status_code == 202 and refusal.retryable):
+                break
+            # `202 settlement_in_progress` under this handling's own binding: the
+            # settle that timed out was admitted and is still in flight. Ask
+            # again, the same request under the same binding, while the budget
+            # lasts; the facilitator never executes it twice.
+            in_flight = refusal
+            wait = _in_flight_poll_interval(refusal)
+            if time.monotonic() + wait >= deadline:
+                break
+            time.sleep(wait)
 
-        if admitted is not None:
+        if in_flight is not None:
             logger.warning(
-                "Fallback check: the facilitator had already admitted this authorization "
-                "(%s) and this resend does not carry the binding that admitted it. Not a "
-                "success to deliver on, and not a rejection.",
-                admitted.error_code,
+                "Fallback check: the settle is still in flight after %.0fs; the same "
+                "request under the same binding gets its answer later",
+                SETTLE_IN_FLIGHT_POLL_SECONDS,
             )
-            raise admitted
+            raise in_flight
         logger.warning("Fallback check: payment not confirmed on-chain")
         return None
 

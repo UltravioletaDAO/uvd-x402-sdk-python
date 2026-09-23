@@ -10,7 +10,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, Union, Dict
 
 from uvd_x402_sdk.config import X402Config
-from uvd_x402_sdk.client import X402Client, payment_conflict_response
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.exceptions import (
     X402Error,
     PaymentRequiredError,
@@ -294,10 +294,10 @@ def _create_error_response(
     config: X402Config,
 ) -> Any:
     """Create an error response for x402 errors."""
-    # Already admitted for another request: 409, or 503 + Retry-After while in
-    # flight. Not delivered again, and not a 402, which would ask for a second
-    # payment.
-    conflict = payment_conflict_response(error)
+    # Already admitted for another request (409, or 503 + Retry-After while in
+    # flight), or no verdict yet (503 + Retry-After): not delivered, and not a
+    # 402, which would ask for a second payment.
+    conflict = _undelivered_response(error)
     if conflict is not None:
         status, body, headers = conflict
         return _create_json_response(status, body, headers)

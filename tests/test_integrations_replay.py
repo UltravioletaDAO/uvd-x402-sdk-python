@@ -5,10 +5,14 @@ Each entry point runs in its own framework against ``tests/receipt_rail.py``
 
 * a first payment is delivered;
 * the same X-PAYMENT in a NEW request is not delivered again, whether the
-  facilitator refuses it (2.39.0: ``authorization_already_settled``) or hands
-  it the original settle with ``Idempotent-Replayed: true`` (2.36.0 to 2.38.0,
-  production on 2026-09-23): 409, never 402;
+  facilitator refuses it (2.39.0: ``authorization_already_settled``) or
+  answers with the original settle and ``Idempotent-Replayed: true`` (2.36.0
+  to 2.38.0 did not tie the replay to the binding): 409, never 402;
 * while the first payment is still in flight: 503 + ``Retry-After``, never 402;
+* a settle that outlives its timeout: awaited within the same handling and
+  delivered once, or 503 + ``Retry-After`` past the budget, never 402;
+* a store the facilitator cannot read: 503 + ``Retry-After``, and the same
+  X-PAYMENT later is delivered once;
 * without the guard in the settle handling, the replayed settle IS delivered
   (the mutation that proves the test above discriminates);
 * on a network without receipts, the answer each entry point gave before.
@@ -463,6 +467,91 @@ def test_legacy_a_bare_resend_keeps_the_answer_it_had(rails, mount):
 
     assert status == SITES[mount], body
     assert site.delivered == 1
+
+
+@pytest.fixture
+def slow_settle(monkeypatch):
+    """Every client times its settle out at 0.3s and pauses 0.1s between the
+    fallback's asks: the settle below takes longer than that."""
+    monkeypatch.setattr(X402Client, "_get_settle_timeout", lambda self, network: 0.3)
+    monkeypatch.setattr(client_module, "_IN_FLIGHT_POLL_MAX_INTERVAL_SECONDS", 0.1)
+
+
+@all_sites
+def test_a_settle_that_outlives_its_timeout_is_awaited_and_delivered_once(
+    rails, mount, slow_settle
+):
+    """The settle times out while the payment is in flight. The fallback's
+    resend, under the same key, gets this handling's own
+    ``202 settlement_in_progress``; it asks again within the budget, and the
+    same request is delivered once. (0.89.0's first cut read the 202 as a
+    timeout and every entry point answered 402 over a payment that moved.)"""
+    rail = rails(hold_before_confirm=1.0)
+    site = mount(rail)
+
+    status, body, _ = site.get(x_payment())
+
+    assert (status, site.delivered) == (200, 1), body
+    assert rail.executed == 1 and rail.moved == 1
+
+
+@all_sites
+def test_a_settle_still_in_flight_past_the_budget_is_503_with_retry_after(
+    rails, mount, slow_settle, monkeypatch
+):
+    monkeypatch.setattr(client_module, "SETTLE_IN_FLIGHT_POLL_SECONDS", 0.3)
+    rail = rails(hold_before_confirm=1.5)
+    site = mount(rail)
+
+    status, body, headers = site.get(x_payment())
+
+    assert status == 503, body
+    assert _reason(body) == "settlement_in_progress"
+    assert int(headers["retry-after"]) > 0
+    assert "payment-response" in headers  # the pending receipt
+    assert site.delivered == 0 and rail.executed == 1
+
+
+@pytest.mark.parametrize("mount", FASTAPI, ids=lambda mount: mount.__name__)
+def test_a_settle_still_in_flight_resumed_with_x_uvd_purchase_is_delivered_once(
+    rails, mount, slow_settle, monkeypatch
+):
+    """Past the budget the buyer gets 503; resending the same request with its
+    X-UVD-Purchase after the settle confirms is the same purchase, and it is
+    delivered once."""
+    monkeypatch.setattr(client_module, "SETTLE_IN_FLIGHT_POLL_SECONDS", 0.3)
+    rail = rails(hold_before_confirm=1.5)
+    site = mount(rail)
+    context = PurchaseContext()
+    context.bind(httpx.Request("GET", URL))
+
+    first, _, _ = site.get(x_payment(), **{"X-UVD-Purchase": context.header()})
+    time.sleep(1.5)  # the settle confirms
+    again, body, _ = site.get(x_payment(), **{"X-UVD-Purchase": context.header()})
+
+    assert (first, again) == (503, 200), body
+    assert site.delivered == 1 and rail.executed == 1 and rail.moved == 1
+
+
+@all_sites
+@pytest.mark.parametrize("mode", ["receipts", "legacy"])
+def test_a_store_the_facilitator_cannot_read_is_503_and_the_same_payment_is_delivered_later(
+    rails, mount, mode
+):
+    """``503 receipt_store_unavailable`` / ``503 idempotency_store_unavailable``
+    (the key is on by default): nothing moved and there is no verdict. The
+    buyer presents the same X-PAYMENT again, never signs another one."""
+    rail = rails(mode, store_down=True)
+    site = mount(rail)
+
+    status, body, headers = site.get(x_payment())
+    assert status == 503, body
+    assert int(headers["retry-after"]) > 0
+    assert site.delivered == 0 and rail.moved == 0
+
+    rail.store_down = False
+    status, body, _ = site.get(x_payment())
+    assert (status, site.delivered, rail.moved) == (200, 1, 1), body
 
 
 @pytest.mark.parametrize("mount", FASTAPI, ids=lambda mount: mount.__name__)

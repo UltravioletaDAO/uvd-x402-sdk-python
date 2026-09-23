@@ -18,7 +18,7 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[flask]"
     )
 
-from uvd_x402_sdk.client import X402Client, payment_conflict_response
+from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.response import create_402_response, create_402_headers
@@ -27,11 +27,12 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def _conflict_response(error: X402Error) -> Any:
-    """409, or 503 + Retry-After while in flight, for an ``X-PAYMENT`` the
-    facilitator already admitted for another request; ``None`` for any other
-    failure. Never delivered again, and never a 402, which would ask the buyer
-    for a second payment."""
-    conflict = payment_conflict_response(error)
+    """409 for an ``X-PAYMENT`` the facilitator already admitted for another
+    request, 503 + Retry-After while in flight or without a verdict (a timeout,
+    a store the facilitator could not read); ``None`` for a rejection. Never
+    delivered, and never a 402, which would ask the buyer for a second
+    payment."""
+    conflict = _undelivered_response(error)
     if conflict is None:
         return None
     status, body, headers = conflict
