@@ -17,10 +17,20 @@ Now every path ends one of two ways: the amount goes out as a plain decimal that
 is a whole number of base units of each chain listed (a base-unit integer where
 the wire carries one), or ``ValueError`` before anything is emitted or sent.
 
-``FORMS`` are eight shapes a price takes on its way in: six a payer could not
-sign as written, and two controls (trailing zeros are valid). Each is checked
-with a 6-decimal token (USDC on Base) and a 7-decimal one (USDC on Stellar): 16
-cases, 11 of which the v1 body used to send in a form a strict payer refuses.
+Float noise is not a digit below one base unit. A price computed with floats
+(``Decimal(str(35 * 0.01))`` is ``0.35000000000000003``) lands within
+``10 ** -(decimals + 6)`` of a whole number of base units, or within
+``abs(amount) * 2 ** -49`` of it, and is charged as that number: ``"0.35"``,
+350000 base units at 6 decimals. A real sub-unit digit (``0.0000015`` at 6
+decimals, half a base unit on $1,000,000) is still refused.
+
+``FORMS`` are eight shapes a price takes on its way in: two in exponent form, two
+carrying float noise, two with a real sub-unit digit, and two controls (trailing
+zeros are valid). Each is checked with a 6-decimal token (USDC on Base) and a
+7-decimal one (USDC on Stellar): 16 cases, 11 of which the v1 body used to send
+in a form a strict payer refuses. ``TestFloatNoise`` runs ``n * 0.01``,
+``n * 0.07`` and ``n * 0.10`` through the v1 body for n up to 10,000 and through
+``get_token_amount()`` for n up to 100,000, and the documented price examples.
 The mutations at the end put each old behavior back and check it turns red.
 """
 from __future__ import annotations
@@ -28,6 +38,7 @@ from __future__ import annotations
 import json
 import re
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,11 +51,13 @@ from uvd_x402_sdk import erc8004 as erc8004_module
 from uvd_x402_sdk import response as response_module
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.erc8004 import build_erc8004_payment_requirements
+from uvd_x402_sdk.integrations.lambda_integration import lambda_handler
 from uvd_x402_sdk.models import PaymentPayload
+from uvd_x402_sdk.networks import NetworkConfig, NetworkType, get_network
 from uvd_x402_sdk.networks import base as base_module
-from uvd_x402_sdk.networks import get_network
 from uvd_x402_sdk.response import create_402_response, create_402_response_v2
 
+REPO = Path(__file__).resolve().parent.parent
 EVM_RECIPIENT = "0x2222222222222222222222222222222222222222"
 STELLAR_RECIPIENT = "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 FACILITATOR = "http://facilitator.invalid"
@@ -69,8 +82,8 @@ CONFIGS: dict[int, X402Config] = {
 FORMS: tuple[tuple[str, Decimal, dict[int, str | None]], ...] = (
     ("normalize-10.00", Decimal("10.00").normalize(), {6: "10", 7: "10"}),
     ("1E+3", Decimal("1E+3"), {6: "1000", 7: "1000"}),
-    ("float-3x0.10", Decimal(str(3 * 0.10)), {6: None, 7: None}),
-    ("binary-2.01", Decimal(2.01), {6: None, 7: None}),
+    ("float-3x0.10", Decimal(str(3 * 0.10)), {6: "0.3", 7: "0.3"}),
+    ("binary-2.01", Decimal(2.01), {6: "2.01", 7: "2.01"}),
     ("5E-7", Decimal("5E-7"), {6: None, 7: "0.0000005"}),
     ("0.0000015", Decimal("0.0000015"), {6: None, 7: "0.0000015"}),
     ("2.010", Decimal("2.010"), {6: "2.010", 7: "2.010"}),
@@ -79,6 +92,7 @@ FORMS: tuple[tuple[str, Decimal, dict[int, str | None]], ...] = (
 CASES = [(form_id, value, decimals) for form_id, value, _ in FORMS for decimals in (6, 7)]
 EXPECTED_V1 = {(form_id, d): expected[d] for form_id, _, expected in FORMS for d in (6, 7)}
 REFUSED = {case for case, expected in EXPECTED_V1.items() if expected is None}
+NOISY = {(form_id, d) for form_id in ("float-3x0.10", "binary-2.01") for d in (6, 7)}
 
 PLAIN_DECIMAL = re.compile(r"[0-9]+(\.[0-9]+)?")
 
@@ -222,6 +236,8 @@ class TestTheSixteenForms:
     def test_the_default_message_says_the_same_plain_amount(self) -> None:
         body = create_402_response(Decimal("1E+1"), CONFIGS[6])
         assert body["message"] == "Payment of $10 USDC required"
+        body = create_402_response(Decimal(str(35 * 0.01)), CONFIGS[6])
+        assert body["message"] == "Payment of $0.35 USDC required"
 
     def test_the_refusal_names_the_chain_and_its_decimals(self) -> None:
         with pytest.raises(ValueError, match=r"0\.0000015 .*USDC on base \(6 decimals\)"):
@@ -236,20 +252,42 @@ class TestTheSixteenForms:
         with pytest.raises(ValueError, match="on base"):
             create_402_response(Decimal("0.0000015"), both)
         assert create_402_response(Decimal("0.000001"), both)["amount"] == "0.000001"
+        assert create_402_response(Decimal(str(35 * 0.01)), both)["amount"] == "0.35"
 
-    @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
-    def test_a_price_that_is_not_a_number_is_refused(self, value: str) -> None:
+    def test_a_v1_body_whose_chains_would_charge_different_amounts_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """At 18 decimals the noise of 3 * 0.10 is a whole number of base units,
+        at 6 it rounds away: one v1 amount cannot say both."""
+        monkeypatch.setitem(
+            base_module._NETWORK_REGISTRY,
+            "eighteen",
+            NetworkConfig(
+                name="eighteen",
+                display_name="Eighteen",
+                network_type=NetworkType.EVM,
+                usdc_address="0x" + "33" * 20,
+                usdc_decimals=18,
+            ),
+        )
+        config = X402Config(recipient_evm=EVM_RECIPIENT, supported_networks=["base", "eighteen"])
+        with pytest.raises(ValueError, match="different amounts"):
+            create_402_response(Decimal(str(3 * 0.10)), config)
+        assert create_402_response(Decimal("0.3"), config)["amount"] == "0.3"
+
+    @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "-0.01"])
+    def test_a_price_that_is_not_a_number_or_is_negative_is_refused(self, value: str) -> None:
         for decimals in (6, 7):
             assert v1_amount(Decimal(value), decimals) is None
             assert v2_amount(Decimal(value), decimals) is None
+            assert token_amount(Decimal(value), decimals) is None
+        assert settled_amount(Decimal(value), None) is None
 
     def test_exact_beyond_the_decimal_context(self) -> None:
-        """A ``Decimal`` product rounds to 28 significant digits, which turned
-        this sub-unit digit into a whole number of base units."""
+        """A ``Decimal`` product rounds to 28 significant digits: these 36 digits
+        of base units would come out as 1234567890123456789012345679 * 10 ** 8."""
         base = get_network("base")
         assert base is not None
-        with pytest.raises(ValueError):
-            base.get_token_amount(Decimal("1.0000000000000000000000000000001"))
         huge = Decimal("123456789012345678901234567890.123456")
         assert base.get_token_amount(huge) == 123456789012345678901234567890123456
 
@@ -277,6 +315,148 @@ class TestEveryCentPrice:
         assert wrong == []
 
 
+# ── prices computed with floats: the noise rounds away ──────────────────────
+
+N = range(1, 10_001)
+# Through get_token_amount only. Up to 1,000,000 was measured once (6,000,000
+# prices, none refused or off); it takes ~45 s, so the suite runs 100,000,
+# which already holds the first price an absolute bound alone refuses at 6
+# decimals (58516 * 0.07 = $4,096.12).
+WIDE_N = range(1, 100_001)
+STEPS = ("0.01", "0.07", "0.10")
+
+
+def float_price(n: int, step: str) -> Decimal:
+    """The form the SDK's own examples used to teach: ``Decimal(str(n * 0.01))``."""
+    return Decimal(str(n * float(step)))
+
+
+def meant(n: int, step: str) -> Decimal:
+    return Decimal(n) * Decimal(step)
+
+
+def v1_sweep(price: Callable[[int, str], Decimal], decimals: int) -> list[tuple[str, int, str]]:
+    """Every (step, n) whose v1 body is refused, or does not say the price meant."""
+    wrong = []
+    for step in STEPS:
+        for n in N:
+            amount = v1_amount(price(n, step), decimals)
+            if amount is None or Decimal(amount) != meant(n, step):
+                wrong.append((step, n, str(amount)))
+            elif not payer_can_sign(amount, decimals):
+                wrong.append((step, n, amount))
+    return wrong
+
+
+def base_unit_sweep(decimals: int, ns: range) -> list[tuple[str, int]]:
+    """Every (step, n) whose base units are refused, or are not the price meant."""
+    network = get_network(NETWORKS[decimals])
+    assert network is not None
+    wrong = []
+    for step in STEPS:
+        per_n = int(Decimal(step).scaleb(decimals))
+        for n in ns:
+            try:
+                if network.get_token_amount(float_price(n, step)) != n * per_n:
+                    wrong.append((step, n))
+            except ValueError:
+                wrong.append((step, n))
+    return wrong
+
+
+# A real digit below one base unit, tiny and on a $1,000,000 price: (value, decimals)
+SUB_UNIT = (
+    ("5E-7", 6), ("0.0000015", 6), ("1.5E-7", 7), ("1000000.0000005", 6),
+    ("1000000.00000005", 7),
+)
+
+# The examples, as the SDK documents them now: (file, the price expression).
+DOCUMENTED = (
+    ("src/uvd_x402_sdk/decorators.py", 'Decimal(items) * Decimal("0.10")'),
+    ("src/uvd_x402_sdk/integrations/lambda_integration.py", 'Decimal(pixels) * Decimal("0.01")'),
+    ("README.md", 'Decimal(quantity) * Decimal("0.01")'),
+    ("examples/lambda_example.py", 'Decimal(pixels) * Decimal("0.01")'),
+)
+# A price computed as `x = Decimal(str(n * 0.01))` or `return Decimal(str(...))`;
+# prose that names the pattern to explain it is not a match.
+FLOAT_FORM = re.compile(r"(?:return|=)\s*Decimal\(str\([^()]*\*\s*[0-9]*\.[0-9]")
+
+
+class TestFloatNoise:
+    @pytest.mark.parametrize("decimals", [6, 7])
+    def test_every_float_price_goes_out_as_the_price_meant(self, decimals: int) -> None:
+        assert v1_sweep(float_price, decimals) == []
+
+    @pytest.mark.parametrize("decimals", [6, 7])
+    def test_every_float_price_asks_the_base_units_meant(self, decimals: int) -> None:
+        assert base_unit_sweep(decimals, WIDE_N) == []
+
+    def test_a_real_sub_unit_digit_is_refused(self) -> None:
+        for value, decimals in SUB_UNIT:
+            assert token_amount(Decimal(value), decimals) is None, (value, decimals)
+            assert v1_amount(Decimal(value), decimals) is None, (value, decimals)
+
+    @pytest.mark.parametrize("decimals", [6, 7])
+    def test_where_a_real_half_base_unit_starts_to_round(self, decimals: int) -> None:
+        """The relative bound reaches half a base unit from 2 ** 49 half units:
+        ~$281 million at 6 decimals, ~$28 million at 7 (the docstring's numbers)."""
+        half = Decimal(5).scaleb(-(decimals + 1))
+        below = Decimal(250_000_000).scaleb(6 - decimals) + half
+        above = Decimal(300_000_000).scaleb(6 - decimals) + half
+        assert token_amount(below, decimals) is None
+        assert token_amount(above, decimals) == "300000000000000"
+
+    @pytest.mark.parametrize("decimals", [6, 7])
+    def test_the_documented_form_for_every_n(self, decimals: int) -> None:
+        assert v1_sweep(meant, decimals) == []
+
+    def test_the_old_documented_form_at_35(self) -> None:
+        """The case measured through ``lambda_handler``: the noise is there, and
+        the body says the price meant."""
+        price = float_price(35, "0.01")
+        assert price == Decimal("0.35000000000000003")
+        assert v1_amount(price, 6) == "0.35"
+        assert v1_amount(price, 7) == "0.35"
+        assert v2_amount(price, 6) == token_amount(price, 6) == "350000"
+        assert settled_amount(price, None) == "350000"
+
+    def test_the_examples_multiply_in_decimal(self) -> None:
+        for path, expression in DOCUMENTED:
+            assert expression in (REPO / path).read_text(encoding="utf-8"), path
+        files = [REPO / "README.md"] + [
+            path
+            for root in ("src", "docs", "examples")
+            for path in sorted((REPO / root).rglob("*"))
+            if path.suffix in (".py", ".md")
+        ]
+        still_float = [
+            f"{path.relative_to(REPO).as_posix()}:{number}"
+            for path in files
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+            if FLOAT_FORM.search(line)
+        ]
+        assert still_float == []
+
+    @pytest.mark.parametrize("price", [float_price, meant], ids=["old-float-form", "documented"])
+    def test_lambda_handler_answers_402_with_the_price(
+        self, price: Callable[[int, str], Decimal]
+    ) -> None:
+        """``lambda_handler`` with the docstring's ``calculate_price`` and 35 pixels:
+        a 402 saying $0.35, not an exception."""
+
+        def calculate_price(event: dict[str, Any]) -> Decimal:
+            pixels = json.loads(event.get("body", "{}")).get("pixels", 1)
+            return price(pixels, "0.01")
+
+        @lambda_handler(amount_callback=calculate_price, recipient_address=EVM_RECIPIENT)
+        def handler(event: Any, context: Any, payment_result: Any = None) -> dict[str, Any]:
+            return {"statusCode": 200, "body": "{}"}
+
+        response = handler({"body": json.dumps({"pixels": 35}), "headers": {}}, None)
+        assert response["statusCode"] == 402
+        assert json.loads(response["body"])["amount"] == "0.35"
+
+
 # ── the mutations: each old behavior put back turns its test red ────────────
 
 
@@ -286,10 +466,17 @@ def truncating(amount: Any, decimals: int, **_: Any) -> int:
     return int(value * (Decimal(10) ** decimals))
 
 
+def unchecked(amount: Any, decimals: int, **_: Any) -> Fraction:
+    """The v1 body before this fix: the price as written, never checked."""
+    return Fraction(Decimal(str(amount))) * 10**decimals
+
+
 # The cases a strict payer refused when the v1 body wrote str(amount).
 EXPONENT_FORM = {
     ("normalize-10.00", 6), ("normalize-10.00", 7), ("1E+3", 6), ("1E+3", 7), ("5E-7", 7),
 }
+# Truncation charges the real sub-unit digits, and Decimal(2.01), one unit short.
+TRUNCATED = REFUSED | {("binary-2.01", 6), ("binary-2.01", 7)}
 
 
 class TestMutations:
@@ -308,17 +495,57 @@ class TestMutations:
     def test_the_v1_body_without_its_exactness_check_asks_what_nobody_can_sign(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(response_module, "to_base_units", lambda *a, **k: 0)
+        monkeypatch.setattr(response_module, "to_base_units", unchecked)
         mismatches = v1_mismatches()
-        assert set(mismatches) == REFUSED
-        assert not any(payer_can_sign(mismatches[case] or "", case[1]) for case in REFUSED)
+        assert set(mismatches) == REFUSED | NOISY
+        assert not any(payer_can_sign(mismatches[case] or "", case[1]) for case in mismatches)
+
+    def test_without_the_tolerance_every_float_price_with_noise_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(base_module, "_FLOAT_NOISE_BASE_UNITS", Fraction(0))
+        monkeypatch.setattr(base_module, "_FLOAT_NOISE_RELATIVE", Fraction(0))
+        noisy = [(s, n) for s in STEPS for n in N if float_price(n, s) != meant(n, s)]
+        assert len(noisy) > 0
+        for decimals in (6, 7):
+            wrong = v1_sweep(float_price, decimals)
+            assert [(s, n) for s, n, amount in wrong if amount == "None"] == noisy
+        # The old documented form at 35 pixels: refused, as the branch before
+        # the tolerance refused it.
+        assert v1_amount(float_price(35, "0.01"), 6) is None
+        assert v1_mismatches() == {case: None for case in NOISY}
+
+    def test_without_the_relative_bound_larger_float_prices_are_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(base_module, "_FLOAT_NOISE_RELATIVE", Fraction(0))
+        refused = [(s, n) for s, n, amount in v1_sweep(float_price, 7) if amount == "None"]
+        # n * 0.10 is 1e-13 off from n = 5123 (1748 prices), n * 0.07 from 6656 (1403).
+        assert len(refused) == 1748 + 1403
+        assert refused[0] == ("0.07", 6656) and ("0.10", 5123) in refused
+        assert base_unit_sweep(6, WIDE_N)[:1] == [("0.07", 58516)]
+
+    def test_a_relative_bound_of_2_to_the_minus_30_rounds_a_real_half_unit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(base_module, "_FLOAT_NOISE_RELATIVE", Fraction(1, 2**30))
+        charged = {(v, d) for v, d in SUB_UNIT if token_amount(Decimal(v), d) is not None}
+        assert charged == {("1000000.0000005", 6), ("1000000.00000005", 7)}
+
+    def test_a_tolerance_of_one_base_unit_charges_the_real_sub_unit_digits(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 10 ** -decimals whole tokens: everything rounds, nothing is refused.
+        monkeypatch.setattr(base_module, "_FLOAT_NOISE_BASE_UNITS", Fraction(1))
+        assert set(v1_mismatches()) == REFUSED
+        assert set(base_unit_mismatches(token_amount)) == REFUSED
 
     def test_get_token_amount_truncating_asks_less_than_written(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(base_module, "to_base_units", truncating)
-        assert set(base_unit_mismatches(token_amount)) == REFUSED
-        assert set(base_unit_mismatches(v2_amount)) == REFUSED
+        assert set(base_unit_mismatches(token_amount)) == TRUNCATED
+        assert set(base_unit_mismatches(v2_amount)) == TRUNCATED
         # 5E-7 with 6 decimals: a price of 0.
         assert base_unit_mismatches(token_amount)[("5E-7", 6)] == "0"
 
@@ -327,13 +554,14 @@ class TestMutations:
     ) -> None:
         monkeypatch.setattr(base_module, "to_base_units", truncating)
         monkeypatch.setattr(client_module, "to_base_units", truncating)
-        assert set(base_unit_mismatches(settled_amount)) == REFUSED
-        refused_at_6 = {case for case in REFUSED if case[1] == 6}
-        assert set(base_unit_mismatches(lambda v, d: settled_amount(v, None), (6,))) == refused_at_6
+        assert set(base_unit_mismatches(settled_amount)) == TRUNCATED
+        truncated_at_6 = {case for case in TRUNCATED if case[1] == 6}
+        default_path = base_unit_mismatches(lambda v, d: settled_amount(v, None), (6,))
+        assert set(default_path) == truncated_at_6
 
     def test_the_erc8004_helper_truncating_requires_less_than_written(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(erc8004_module, "to_base_units", truncating)
-        refused_at_6 = {case for case in REFUSED if case[1] == 6}
-        assert set(base_unit_mismatches(lambda v, d: erc8004_amount(v), (6,))) == refused_at_6
+        truncated_at_6 = {case for case in TRUNCATED if case[1] == 6}
+        assert set(base_unit_mismatches(lambda v, d: erc8004_amount(v), (6,))) == truncated_at_6
