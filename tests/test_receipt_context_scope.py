@@ -30,7 +30,7 @@ PRICE = Decimal("0.01")
 #: ``TARGETS`` as a server decodes them.
 PROTECTED = (
     "/paid", "/other", "/api/paid",
-    "/x[1]", "/a|b", "/a^b", "/a\\b", "/p%q", "/a%41", "/plain",
+    "/x[1]", "/a|b", "/a^b", "/a\\b", "/p%q", "/a%41", "/plain", "/a#b",
 )
 
 
@@ -128,11 +128,14 @@ def _get(
     root_path: str = "",
     server: Optional[tuple] = ("testserver", 80),
     scheme: str = "http",
+    wire_path: Optional[bytes] = None,
 ) -> tuple:
     """One GET of ``target`` (path and query) as an HTTP client sends it:
     ``raw_path`` and ``query_string`` are what httpx puts on the wire, and
-    ``path`` is ``raw_path`` decoded, as an ASGI server hands it on."""
-    raw = httpx.Request("GET", f"{scheme}://testserver{target}").url.raw_path
+    ``path`` is ``raw_path`` decoded, as an ASGI server hands it on.
+    ``wire_path`` replaces what httpx would send, for a request a server can
+    receive although this client would not write it."""
+    raw = wire_path or httpx.Request("GET", f"{scheme}://testserver{target}").url.raw_path
     raw_path, _, query = raw.partition(b"?")
     headers = [(b"x-payment", x_payment().encode()), (b"x-uvd-purchase", context.encode())]
     if host is not None:
@@ -333,6 +336,21 @@ def test_the_request_url_has_a_bare_authority_or_none(host, url):
 @mounts
 def test_the_query_is_part_of_the_url(rail, mount):
     status, body = _get(mount(rail), "/plain?q=1", _context("http://testserver/plain?q=2"))
+
+    assert (status, _mismatch(body)) == (400, True), body
+    assert rail.calls == []
+
+
+@mounts
+def test_a_raw_path_that_could_end_the_path_is_not_compared_as_written(rail, mount):
+    """A server can hand on a ``raw_path`` holding a ``#`` (sent unescaped).
+    It decodes to the routed path, but ``_RAW_PATH`` keeps it from being the
+    path compared as written; the full path is compared percent-encoded
+    (``/a%23b``), so a context for ``http://testserver/a#b``, where a URL
+    reads ``#b`` as a fragment, does not match."""
+    status, body = _get(
+        mount(rail), "/a#b", _context("http://testserver/a#b"), wire_path=b"/a#b"
+    )
 
     assert (status, _mismatch(body)) == (400, True), body
     assert rail.calls == []
