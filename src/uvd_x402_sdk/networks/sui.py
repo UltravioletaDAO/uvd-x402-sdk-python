@@ -29,13 +29,15 @@ Key differences from other chains:
 """
 
 import base64
-from typing import Dict, Any, Optional
+from decimal import Decimal
+from typing import Dict, Any, Optional, Union
 
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
     TokenConfig,
     register_network,
+    to_base_units,
 )
 
 # Sui fee payer addresses (facilitator wallets)
@@ -403,9 +405,14 @@ SUI_OBJECT_ID_LENGTH = 66  # 0x + 64 hex chars
 SUI_DIGEST_LENGTH = 44  # base58 encoded 32-byte digest
 
 
-def format_sui_amount(usd_amount: float, decimals: int = 6) -> int:
+def format_sui_amount(usd_amount: Union[Decimal, float, int, str], decimals: int = 6) -> int:
     """
     Convert USD amount to Sui token base units.
+
+    Converted with :func:`~uvd_x402_sdk.networks.base.to_base_units`, as the
+    settle converts: float noise rounds to the nearest base unit (``2.01`` is
+    2010000 at 6 decimals, where scaling the float gave 2009999), and a real
+    digit below one base unit raises.
 
     Args:
         usd_amount: Amount in USD (e.g., 10.50)
@@ -413,8 +420,12 @@ def format_sui_amount(usd_amount: float, decimals: int = 6) -> int:
 
     Returns:
         Amount in base units
+
+    Raises:
+        ValueError: If the amount has a real digit below one base unit
+            (``1.0000005`` at 6 decimals), is negative or is not finite.
     """
-    return int(usd_amount * (10 ** decimals))
+    return to_base_units(usd_amount, decimals, unit="the Sui token")
 
 
 def parse_sui_amount(base_units: int, decimals: int = 6) -> float:

@@ -17,7 +17,7 @@ import re
 import secrets
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Optional, Tuple, List, Dict, Any, Union
 
@@ -63,9 +63,11 @@ from uvd_x402_sdk.models import (
 from uvd_x402_sdk.receipts import payment_response_headers
 from uvd_x402_sdk.policy import (
     AdvertisedQuote,
+    Offer,
     ParsedAccepts,
     PolicyRefusal,
     PurchasePolicy,
+    canonical_address,
     no_readable_offer,
     offer_valid_until,
     parse_accepts,
@@ -78,7 +80,7 @@ from uvd_x402_sdk.networks import (
     is_caip2_format,
     parse_caip2_network,
 )
-from uvd_x402_sdk.networks.base import to_base_units
+from uvd_x402_sdk.networks.base import TokenConfig, get_token_config, to_base_units
 
 logger = logging.getLogger(__name__)
 
@@ -1145,6 +1147,98 @@ def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
             f"(missing: {', '.join(missing)})"
         )
     return {"name": domain["name"], "version": domain["version"]}
+
+
+def _signing_token(network: str, token_type: str) -> Optional[TokenConfig]:
+    """The token ``create_authorization()`` signs on ``network``.
+
+    It comes from the network registry. None where it signs nothing: an
+    unknown or non-EVM network, or a token the registry does not have there.
+    ``create_authorization()`` raises its own error for those, before signing.
+    """
+    try:
+        normalized = normalize_network(network)
+    except ValueError:
+        return None
+    config = get_network(normalized)
+    if config is None or config.network_type != NetworkType.EVM:
+        return None
+    return get_token_config(normalized, token_type)  # type: ignore[arg-type]
+
+
+def _is_token(asset: str, token: TokenConfig) -> bool:
+    """Whether ``asset`` is ``token``'s address, compared as the purchase
+    policy compares addresses: hex in any case, anything else exactly."""
+    return canonical_address(asset) == canonical_address(token.address)
+
+
+def _signs_as_offered(option: Mapping[str, Any], token_type: str) -> bool:
+    """Whether ``token_type`` pays ``option`` in the token it names.
+
+    True when the option's ``asset`` is that token's address on the option's
+    own network, and when it names no asset (it is then paid in that token).
+    """
+    asset = option.get("asset")
+    if not asset:
+        return True
+    token = _signing_token(option["network"], token_type)
+    return token is not None and _is_token(asset, token)
+
+
+def _offer_in(offer: Any, asset: str) -> Any:
+    """``offer`` naming ``asset``: an :class:`Offer` or a raw ``accepts`` entry."""
+    if isinstance(offer, Offer):
+        return replace(offer, asset=asset)
+    return {**offer, "asset": asset}
+
+
+def _check_signed_as_offered(
+    amount: Any,
+    asset: Optional[str],
+    network: str,
+    price: Decimal,
+    token_type: str,
+    token_decimals: int,
+) -> None:
+    """Raise ``ValueError`` unless signing ``price`` signs the offer itself.
+
+    ``create_authorization()`` signs the registry's token for ``token_type``,
+    whatever ``asset`` the offer names, and ``fetch()`` prices the offer with
+    ``token_decimals`` while ``create_authorization()`` converts that price
+    back into base units with the decimals of the token it signs. Where the
+    token is not the offer's, where those decimals differ, or where the offer
+    has more digits than the ``Decimal`` division keeps (28), the signature
+    would carry another token or amount than the one ``max_amount`` and the
+    purchase policy were checked against. An offer that names no asset is paid
+    in ``token_type``'s token on the offer's network (USDC by default).
+    """
+    token = _signing_token(network, token_type)
+    if token is None:
+        return
+    if asset and not _is_token(asset, token):
+        raise ValueError(
+            f"This offer asks to be paid in {asset} on {network}, and "
+            f"token_type={token_type!r} signs {token_type.upper()} at {token.address}. "
+            f"Nothing was signed."
+        )
+    decimals = token.decimals
+    try:
+        signed: Optional[int] = to_base_units(price, decimals)
+    except ValueError:
+        signed = None
+    if signed == int(amount):
+        return
+    would_sign = "no whole number of base units" if signed is None else f"{signed} base units"
+    reason = (
+        f"token_decimals={token_decimals} does not match the {decimals} decimals of "
+        f"{token_type.upper()} on {network}, which is what signs"
+        if token_decimals != decimals
+        else f"{amount} has more digits than the price carries exactly"
+    )
+    raise ValueError(
+        f"This offer asks {amount} base units, and signing its price "
+        f"{format(price, 'f')} would sign {would_sign}: {reason}. Nothing was signed."
+    )
 
 
 def _merge_caller_extra(
@@ -3365,6 +3459,7 @@ class X402Client:
         self,
         options: List[Dict[str, Any]],
         token_decimals: int,
+        token_type: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Default selector: the cheapest option, ignoring the ceiling.
 
@@ -3373,9 +3468,17 @@ class X402Client:
         more than you allowed" (:class:`PaymentExceedsMaxError`), not a vague
         "no acceptable option". So this always returns the cheapest, and
         :meth:`fetch` enforces the ceiling with one explicit check afterwards.
+
+        With ``token_type``, the cheapest is taken among the options that
+        token signs as offered: those whose ``asset`` is its address on the
+        option's own network, and those that name no asset. Only when there is
+        none is it taken among them all, as without ``token_type``.
         """
         if not options:
             return None
+        if token_type is not None:
+            signable = [opt for opt in options if _signs_as_offered(opt, token_type)]
+            options = signable or options
         scale = Decimal(10) ** token_decimals
         return min(options, key=lambda opt: Decimal(opt["amount"]) / scale)
 
@@ -3422,10 +3525,24 @@ class X402Client:
             max_amount: Ceiling in token units (e.g. ``Decimal("0.10")``). None
                 = no ceiling (pay whatever is asked -- discouraged for untrusted
                 resources).
-            token_type: Token to pay with (default ``usdc``).
+            token_type: Token to pay with (default ``usdc``). The offer's
+                ``asset`` must be that token's address on the offer's network
+                (hex compared in any case); an offer in another token raises
+                ``ValueError`` before anything is signed. An offer that names
+                no asset is paid in ``token_type``'s token on the offer's
+                network (USDC by default), and the purchase policy judges it
+                as that token too.
             token_decimals: Decimals of ``token_type`` (default 6 for USDC).
+                The offer is priced with them and signed with the decimals
+                the SDK's registry gives the token on the offer's network.
+                The amount signed is always the offer's own atomic amount:
+                where the two conversions would not give it back,
+                ``ValueError`` is raised before anything is signed.
             select: Optional ``callable(options) -> option`` to override the
-                default cheapest-within-ceiling selection.
+                default cheapest-within-ceiling selection. The default takes
+                the cheapest among the offers ``token_type`` signs as offered
+                (in its token, or naming no asset), and among them all only
+                when there is none.
             valid_duration: Authorization validity in seconds.
             eip712_domain: Override the signing domain (see
                 :meth:`create_authorization`); by default the domain from the
@@ -3449,6 +3566,12 @@ class X402Client:
 
         Raises:
             RuntimeError: No signer connected.
+            ValueError: Signing the chosen offer would not sign its own token
+                or atomic amount (its ``asset`` is not ``token_type``'s token,
+                ``token_decimals`` differs from the signing token's decimals,
+                or the amount has more digits than a price carries exactly).
+                Raised after the ceiling and the policy, whose own refusals
+                come first, and before anything is signed.
             PaymentExceedsMaxError: The price exceeds ``max_amount``.
             PolicyRefusedError: The purchase policy will not pay for this offer.
                 Carries one of the six contract codes in ``refusal_code``.
@@ -3499,7 +3622,12 @@ class X402Client:
 
         chosen = (
             select(options) if select is not None
-            else self._select_payment_option(options, token_decimals)
+            else self._select_payment_option(
+                options,
+                token_decimals,
+                # Native Hedera checks the chosen offer against its own ledger.
+                token_type if self._hedera_signer is None else None,
+            )
         )
         if not chosen:
             raise NoAcceptablePaymentError(
@@ -3528,15 +3656,34 @@ class X402Client:
         if offer is None:
             # A custom `select` may hand back a dict it built itself.
             offer = chosen.get("raw") or chosen
+        offered_asset = offer.asset if isinstance(offer, Offer) else str(offer.get("asset") or "")
+        now = int(time.time())
         decision = in_force.evaluate(
             offer,
-            int(time.time()),
+            now,
             quote=quote,
             valid_until=offer_valid_until(parsed.extensions),
             unreadable=parsed.unreadable,
         )
         if isinstance(decision, PolicyRefusal):
             raise PolicyRefusedError(decision, resource=url)
+        # An offer that names no asset is paid in the token `token_type` signs
+        # on its network, and was judged above with no asset at all. Judge it
+        # again as that token, so that token's ceilings hold; the decision
+        # above keeps its codes and its order.
+        signing = None if self._hedera_signer is not None or offered_asset else (
+            _signing_token(chosen["network"], token_type)
+        )
+        if signing is not None:
+            decision = in_force.evaluate(
+                _offer_in(offer, signing.address),
+                now,
+                quote=quote,
+                valid_until=offer_valid_until(parsed.extensions),
+                unreadable=parsed.unreadable,
+            )
+            if isinstance(decision, PolicyRefusal):
+                raise PolicyRefusedError(decision, resource=url)
         logger.debug(
             "policy approved this offer: amount=%s versus_quote=%s",
             decision.amount,
@@ -3548,6 +3695,17 @@ class X402Client:
                 raise ValueError("Hedera supports x402 v2 without extensions")
             header = self._hedera_signer.create_payment_header(chosen["raw"], resource={"url": url})
         else:
+            # The ceiling and the policy judged the offer's own token and amount,
+            # each with its own refusals and in its own order. Sign exactly that,
+            # or nothing.
+            _check_signed_as_offered(
+                chosen["amount"],
+                offered_asset or None,
+                chosen["network"],
+                price,
+                token_type,
+                token_decimals,
+            )
             header = self.create_authorization(
                 pay_to=chosen["payTo"],
                 amount_usd=price,
