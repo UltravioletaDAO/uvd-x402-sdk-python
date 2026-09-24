@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 """
 ERC-8004 Trustless Agents client for x402 SDK.
 
@@ -2294,7 +2295,8 @@ def build_erc8004_payment_requirements(
     return {
         "scheme": "exact",
         "network": _wire(network),
-        "maxAmountRequired": str(int(float(amount) * 1_000_000)),  # 6 decimals
+        # 6 decimals, in Decimal: as a float, "2.01" came out 2009999.
+        "maxAmountRequired": str(int(Decimal(str(amount)) * 10**6)),
         "resource": resource,
         "description": description,
         "mimeType": mime_type,

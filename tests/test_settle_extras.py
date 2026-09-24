@@ -40,7 +40,7 @@ from tests.receipt_rail import _receipt
 from uvd_x402_sdk import X402Client
 from uvd_x402_sdk.client import _undelivered_response, is_spent_nonce_error
 from uvd_x402_sdk.config import X402Config
-from uvd_x402_sdk.erc8004 import ERC8004_EXTENSION_ID
+from uvd_x402_sdk.erc8004 import ERC8004_EXTENSION_ID, build_erc8004_payment_requirements
 from uvd_x402_sdk.exceptions import (
     MAX_ERROR_BODY_BYTES,
     WRITE_AMBIGUOUS_REASONS,
@@ -617,6 +617,17 @@ class TestDefaultAmountIsExact:
         for to_input in inputs:
             wrong = [c for c in CENT_PRICES if base.get_token_amount(to_input(c)) != c * 10**4]
             assert wrong == []
+
+    def test_the_erc8004_requirements_helper_converts_exactly(self) -> None:
+        """``build_erc8004_payment_requirements`` had its own float conversion,
+        with the same 151 prices one base unit short."""
+        wrong = [
+            c for c in CENT_PRICES
+            if build_erc8004_payment_requirements(str(Decimal(c) / 100), RECIPIENT, FACILITATOR)[
+                "maxAmountRequired"
+            ] != str(c * 10**4)
+        ]
+        assert wrong == []
 
     @pytest.mark.parametrize(
         "price, atomic",
