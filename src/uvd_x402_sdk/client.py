@@ -64,6 +64,7 @@ from uvd_x402_sdk.policy import (
     ParsedAccepts,
     PolicyRefusal,
     PurchasePolicy,
+    canonical_address,
     no_readable_offer,
     offer_valid_until,
     parse_accepts,
@@ -76,7 +77,7 @@ from uvd_x402_sdk.networks import (
     is_caip2_format,
     parse_caip2_network,
 )
-from uvd_x402_sdk.networks.base import get_token_config, to_base_units
+from uvd_x402_sdk.networks.base import TokenConfig, get_token_config, to_base_units
 
 logger = logging.getLogger(__name__)
 
@@ -1117,10 +1118,10 @@ def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
     return {"name": domain["name"], "version": domain["version"]}
 
 
-def _signing_token_decimals(network: str, token_type: str) -> Optional[int]:
-    """Decimals of the token ``create_authorization()`` signs on ``network``.
+def _signing_token(network: str, token_type: str) -> Optional[TokenConfig]:
+    """The token ``create_authorization()`` signs on ``network``.
 
-    They come from the network registry. None where it signs nothing: an
+    It comes from the network registry. None where it signs nothing: an
     unknown or non-EVM network, or a token the registry does not have there.
     ``create_authorization()`` raises its own error for those, before signing.
     """
@@ -1131,25 +1132,39 @@ def _signing_token_decimals(network: str, token_type: str) -> Optional[int]:
     config = get_network(normalized)
     if config is None or config.network_type != NetworkType.EVM:
         return None
-    token = get_token_config(normalized, token_type)  # type: ignore[arg-type]
-    return None if token is None else token.decimals
+    return get_token_config(normalized, token_type)  # type: ignore[arg-type]
 
 
 def _check_signed_as_offered(
-    amount: Any, network: str, price: Decimal, token_type: str, token_decimals: int
+    amount: Any,
+    asset: Optional[str],
+    network: str,
+    price: Decimal,
+    token_type: str,
+    token_decimals: int,
 ) -> None:
-    """Raise ``ValueError`` unless signing ``price`` signs the offer's ``amount``.
+    """Raise ``ValueError`` unless signing ``price`` signs the offer itself.
 
-    ``fetch()`` prices an offer with ``token_decimals``, and
-    ``create_authorization()`` converts that price back into base units with the
-    decimals of the token it signs. Where those decimals differ, or the offer
+    ``create_authorization()`` signs the registry's token for ``token_type``,
+    whatever ``asset`` the offer names, and ``fetch()`` prices the offer with
+    ``token_decimals`` while ``create_authorization()`` converts that price
+    back into base units with the decimals of the token it signs. Where the
+    token is not the offer's, where those decimals differ, or where the offer
     has more digits than the ``Decimal`` division keeps (28), the signature
-    would carry another amount than the one ``max_amount`` and the purchase
-    policy were checked against.
+    would carry another token or amount than the one ``max_amount`` and the
+    purchase policy were checked against. An offer that names no asset is paid
+    in the network's USDC, as before.
     """
-    decimals = _signing_token_decimals(network, token_type)
-    if decimals is None:
+    token = _signing_token(network, token_type)
+    if token is None:
         return
+    if asset and canonical_address(asset) != canonical_address(token.address):
+        raise ValueError(
+            f"This offer asks to be paid in {asset} on {network}, and "
+            f"token_type={token_type!r} signs {token_type.upper()} at {token.address}. "
+            f"Nothing was signed."
+        )
+    decimals = token.decimals
     try:
         signed: Optional[int] = to_base_units(price, decimals)
     except ValueError:
@@ -3406,7 +3421,11 @@ class X402Client:
             max_amount: Ceiling in token units (e.g. ``Decimal("0.10")``). None
                 = no ceiling (pay whatever is asked -- discouraged for untrusted
                 resources).
-            token_type: Token to pay with (default ``usdc``).
+            token_type: Token to pay with (default ``usdc``). The offer's
+                ``asset`` must be that token's address on the offer's network
+                (hex compared in any case); an offer in another token raises
+                ``ValueError`` before anything is signed. An offer that names
+                no asset is paid in the network's USDC.
             token_decimals: Decimals of ``token_type`` (default 6 for USDC).
                 The offer is priced with them and signed with the decimals
                 the SDK's registry gives the token on the offer's network.
@@ -3438,11 +3457,12 @@ class X402Client:
 
         Raises:
             RuntimeError: No signer connected.
-            ValueError: Signing the chosen offer would not sign its own atomic
-                amount (``token_decimals`` differs from the signing token's
-                decimals, or the amount has more digits than a price carries
-                exactly). Raised before the ceiling and the policy, with
-                nothing signed.
+            ValueError: Signing the chosen offer would not sign its own token
+                or atomic amount (its ``asset`` is not ``token_type``'s token,
+                ``token_decimals`` differs from the signing token's decimals,
+                or the amount has more digits than a price carries exactly).
+                Raised after the ceiling and the policy, whose own refusals
+                come first, and before anything is signed.
             PaymentExceedsMaxError: The price exceeds ``max_amount``.
             PolicyRefusedError: The purchase policy will not pay for this offer.
                 Carries one of the six contract codes in ``refusal_code``.
@@ -3508,12 +3528,6 @@ class X402Client:
                 raise ValueError("Hedera offer differs from the connected ledger or selected asset")
             token_decimals = 6
         price = Decimal(chosen["amount"]) / (Decimal(10) ** token_decimals)
-        if self._hedera_signer is None:
-            # The ceiling and the policy judge the offer's own amount: before
-            # either runs, make sure it is also the amount that gets signed.
-            _check_signed_as_offered(
-                chosen["amount"], chosen["network"], price, token_type, token_decimals
-            )
         if ceiling is not None and price > ceiling:
             raise PaymentExceedsMaxError(price, ceiling, resource=url)
 
@@ -3548,6 +3562,17 @@ class X402Client:
                 raise ValueError("Hedera supports x402 v2 without extensions")
             header = self._hedera_signer.create_payment_header(chosen["raw"], resource={"url": url})
         else:
+            # The ceiling and the policy judged the offer's own token and amount,
+            # each with its own refusals and in its own order. Sign exactly that,
+            # or nothing.
+            _check_signed_as_offered(
+                chosen["amount"],
+                chosen.get("asset"),
+                chosen["network"],
+                price,
+                token_type,
+                token_decimals,
+            )
             header = self.create_authorization(
                 pay_to=chosen["payTo"],
                 amount_usd=price,
