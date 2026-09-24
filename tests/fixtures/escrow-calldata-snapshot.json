@@ -1,0 +1,1415 @@
+{
+  "_note": [
+    "Recorded by tests/test_escrow_calldata_snapshot.py --record.",
+    "Never edited, never re-recorded. See that file's docstring.",
+    "Hex values of 32 bytes or more are stored without the 0x prefix."
+  ],
+  "recorded_from": {
+    "commit": "86dbb568c87b0e48f170b5c2454e30d27ee6497a",
+    "version": "0.90.1"
+  },
+  "signer": "synthetic test key 0x4b * 32, never held funds",
+  "tables": {
+    "ESCROW_CONTRACTS": {
+      "1": {
+        "escrow": "0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+        "operator_factory": "0x1e52a74cE6b69F04a506eF815743E1052A1BD28F",
+        "token_collector": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+        "protocol_fee_config": "0x5b3e33791C1764cF7e2573Bf8116F1D361FD97Cd",
+        "refund_request": "0xFa8C4Cb156053b867Ae7489220A29b5939E3Df70",
+        "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      },
+      "10": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+      },
+      "137": {
+        "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "operator_factory": "0xb33D6502EdBbC47201cd1E53C49d703EC0a660b8",
+        "token_collector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "protocol_fee_config": "0xE78648e7af7B1BaDE717FF6E410B922F92adE80f",
+        "refund_request": "0xed02d3E5167BCc9582D851885A89b050AB816a56",
+        "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+      },
+      "143": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603"
+      },
+      "8453": {
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "protocol_fee_config": "0x59314674BAbb1a24Eb2704468a9cCdD50668a1C6",
+        "refund_request": "0x35fb2EFEfAc3Ee9f6E52A9AAE5C9655bC08dEc00",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      "42161": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+      },
+      "42220": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C"
+      },
+      "43114": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+      },
+      "84532": {
+        "escrow": "0x29025c0E9D4239d438e169570818dB9FE0A80873",
+        "operator_factory": "0x97d53e63A9CB97556c00BeFd325AF810c9b267B2",
+        "token_collector": "0x5cA789000070DF15b4663DB64a50AeF5D49c5Ee0",
+        "protocol_fee_config": "0x8F96C493bAC365E41f0315cf45830069EBbDCaCe",
+        "refund_request": "0x1C2Ab244aC8bDdDB74d43389FF34B118aF2E90F4",
+        "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      },
+      "11155111": {
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      },
+      "1187947933": {
+        "escrow": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+        "operator_factory": "0x3Cd5c76Fefe46CB07788Ee8f80B93B20D81941D4",
+        "token_collector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+        "protocol_fee_config": "0xf62788834C99B2E85a6891C0b46D1EB996f8f596",
+        "refund_request": "0x69e9BF2b40Ed472b55E47e9D4205d93Ed673093F",
+        "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20"
+      }
+    },
+    "ESCROW_CHAIN_NAMES": {
+      "1": "Ethereum Mainnet",
+      "10": "Optimism",
+      "137": "Polygon",
+      "143": "Monad",
+      "8453": "Base Mainnet",
+      "42161": "Arbitrum",
+      "42220": "Celo",
+      "43114": "Avalanche",
+      "84532": "Base Sepolia",
+      "11155111": "Ethereum Sepolia",
+      "1187947933": "SKALE Base"
+    },
+    "BASE_MAINNET_CONTRACTS": {
+      "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+      "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+      "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
+      "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+      "protocol_fee_config": "0x59314674BAbb1a24Eb2704468a9cCdD50668a1C6",
+      "refund_request": "0x35fb2EFEfAc3Ee9f6E52A9AAE5C9655bC08dEc00",
+      "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    },
+    "CREATE3_CHAIN_IDS": [
+      1187947933
+    ],
+    "VERIFIED_USDC_DOMAINS": {
+      "1": [
+        "USD Coin",
+        "2"
+      ],
+      "10": [
+        "USD Coin",
+        "2"
+      ],
+      "137": [
+        "USD Coin",
+        "2"
+      ],
+      "143": [
+        "USDC",
+        "2"
+      ],
+      "8453": [
+        "USD Coin",
+        "2"
+      ],
+      "42161": [
+        "USD Coin",
+        "2"
+      ],
+      "42220": [
+        "USDC",
+        "2"
+      ],
+      "43114": [
+        "USD Coin",
+        "2"
+      ],
+      "1187947933": [
+        "Bridged USDC (SKALE Bridge)",
+        "2"
+      ]
+    },
+    "PAYMENT_INFO_TYPEHASH": "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591"
+  },
+  "abis": {
+    "OPERATOR_ABI": [
+      {
+        "type": "function",
+        "name": "release",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "refundInEscrow",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint120"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "charge",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "tokenCollector",
+            "type": "address"
+          },
+          {
+            "name": "collectorData",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "refundPostEscrow",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "tokenCollector",
+            "type": "address"
+          },
+          {
+            "name": "collectorData",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      }
+    ],
+    "OPERATOR_ABI_V2": [
+      {
+        "type": "function",
+        "name": "release",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "refundInEscrow",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint120"
+          },
+          {
+            "name": "data",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "charge",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "tokenCollector",
+            "type": "address"
+          },
+          {
+            "name": "collectorData",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      },
+      {
+        "type": "function",
+        "name": "refundPostEscrow",
+        "inputs": [
+          {
+            "name": "paymentInfo",
+            "type": "tuple",
+            "components": [
+              {
+                "name": "operator",
+                "type": "address"
+              },
+              {
+                "name": "payer",
+                "type": "address"
+              },
+              {
+                "name": "receiver",
+                "type": "address"
+              },
+              {
+                "name": "token",
+                "type": "address"
+              },
+              {
+                "name": "maxAmount",
+                "type": "uint120"
+              },
+              {
+                "name": "preApprovalExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "authorizationExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "refundExpiry",
+                "type": "uint48"
+              },
+              {
+                "name": "minFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "maxFeeBps",
+                "type": "uint16"
+              },
+              {
+                "name": "feeReceiver",
+                "type": "address"
+              },
+              {
+                "name": "salt",
+                "type": "uint256"
+              }
+            ]
+          },
+          {
+            "name": "amount",
+            "type": "uint256"
+          },
+          {
+            "name": "tokenCollector",
+            "type": "address"
+          },
+          {
+            "name": "collectorData",
+            "type": "bytes"
+          }
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable"
+      }
+    ]
+  },
+  "chains": {
+    "1": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+        "operator_factory": "0x1e52a74cE6b69F04a506eF815743E1052A1BD28F",
+        "token_collector": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+        "protocol_fee_config": "0x5b3e33791C1764cF7e2573Bf8116F1D361FD97Cd",
+        "refund_request": "0xFa8C4Cb156053b867Ae7489220A29b5939E3Df70",
+        "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "013cf75c83929057834d206b4c589993fcaeac462134f04b45079a92d829c507"
+            },
+            "signature": "14458ddf66ed5e61056f973ea73ef6deeea45235e30e3a304a61208b6fc829bd40719420f85dbd890f49702dcff3a6bf56e7ad8f7c65427c75fc3c69bb9594361c",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:1",
+            "maxAmountRequired": "5000000",
+            "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba"
+            }
+          }
+        }
+      }
+    },
+    "10": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff8500000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff8500000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff8500000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff8500000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "85924b51cf5e4a3239957463766efa94f4559f881ebaa1117c7b42acb2810f42"
+            },
+            "signature": "1a04f45984224f459acc8c07ecce68a4c546d0f91cfe6b380cae6a0b57751d64394b4b07cd63e46f6cf977df2cd4cfa8cdf8e944944eabfe8aeee8a6c70006d41b",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:10",
+            "maxAmountRequired": "5000000",
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "137": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "operator_factory": "0xb33D6502EdBbC47201cd1E53C49d703EC0a660b8",
+        "token_collector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "protocol_fee_config": "0xE78648e7af7B1BaDE717FF6E410B922F92adE80f",
+        "refund_request": "0xed02d3E5167BCc9582D851885A89b050AB816a56",
+        "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000003c499c542cef5e3811e1192ce70d8cc03d5c335900000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "04a672e46f82b3aab13abef851fe634cb9d91f725c9197244badfbfa8dff6cab"
+            },
+            "signature": "00529dba0ca520649ddaf8ba62f5925a17b42a19aa8562cb57cc15bd9b7c19ea3baa744ac71f65785b314aa819e64187c0d5d0eda3e7030d363d9de81f8b8a601c",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:137",
+            "maxAmountRequired": "5000000",
+            "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98"
+            }
+          }
+        }
+      }
+    },
+    "143": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000754704bc059f8c67012fed69bc8a327a5aafb60300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000754704bc059f8c67012fed69bc8a327a5aafb60300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000754704bc059f8c67012fed69bc8a327a5aafb60300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000754704bc059f8c67012fed69bc8a327a5aafb60300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "55982d671b7580d347fe25c054c5370386d8c9994271ed6c5380768eb501c2a9"
+            },
+            "signature": "871c48b7e9d9b43557d3badce14e75964ee8396ac20a216b7c01341f3602324374c5e8b63ee69491db7f1e5e5970900066ee777caa697177847c2be9cf9536991b",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:143",
+            "maxAmountRequired": "5000000",
+            "asset": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "8453": {
+      "contracts": {
+        "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "operator_factory": "0x3D0837fF8Ea36F417261577b9BA568400A840260",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "protocol_fee_config": "0x59314674BAbb1a24Eb2704468a9cCdD50668a1C6",
+        "refund_request": "0x35fb2EFEfAc3Ee9f6E52A9AAE5C9655bC08dEc00",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d79000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000708000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d79000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000708000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d79000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000708000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda0291300000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d79000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000708000000000000000000000000271f9fa7f8907acf178ccfb470076d9129d8f0eb5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "006a3de509789040ca79686e14083d8188bc42c222db6b56ec2adb5c9f7a78d1"
+            },
+            "signature": "2e4d4376afccf0681d517a8184d7ed68086d2f72ede79db647979a8054a5e3f231e8fb232a2917b2b3c40f632130f1216a0eb73d8d9fbc5d8753a3cc6f553a4a1c",
+            "paymentInfo": {
+              "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453",
+            "maxAmountRequired": "5000000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+              "operatorAddress": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+              "tokenCollector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8"
+            }
+          }
+        }
+      }
+    },
+    "42161": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e583100000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e583100000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e583100000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e583100000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "0c35f0fee42ec27a82689fbb0007b4d501565bae661845d71dbe17dc45d2d6de"
+            },
+            "signature": "1cd8b89e1f3ce9ff6d1ffbbdfd64d1ab700fca5b59a351a5125d46c82c3c5dfc7785870b6a227ce3548979c57d7213e7dcf3745e61962374a5ae7287eba7db401c",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:42161",
+            "maxAmountRequired": "5000000",
+            "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "42220": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000ceba9300f2b948710d2653dd7b07f33a8b32118c00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000ceba9300f2b948710d2653dd7b07f33a8b32118c00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000ceba9300f2b948710d2653dd7b07f33a8b32118c00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000ceba9300f2b948710d2653dd7b07f33a8b32118c00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "6bbbcc8e6485fcb3712b8ef8e6dfb0ad6b209a7653ff0386d62169e875a8da3b"
+            },
+            "signature": "17c291b4a74f2762635f388aaa8f5f9247877a18f0717436b85ed9e20156efbf08d5951ed0945b3785b04aa864d769b52af7a670f39c43f84d359d980ccdb79f1b",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:42220",
+            "maxAmountRequired": "5000000",
+            "asset": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "43114": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000b97ef9ef8734c71904d8002f8b6bc66dd9c48a6e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "aca5f4e4f3fd26c559657c9a3fb8ce1f823a95c74848aa8632e8458570c66d4a"
+            },
+            "signature": "8b6edf03de41df68919464e852b34d2d86d461ca22ade6fde92c34a4be7ce21e265bd9ac8ef4be0e221e1d3c2e8fe85653bf7459e71859a467a4da8a09bfefe11b",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:43114",
+            "maxAmountRequired": "5000000",
+            "asset": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "84532": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x29025c0E9D4239d438e169570818dB9FE0A80873",
+        "operator_factory": "0x97d53e63A9CB97556c00BeFd325AF810c9b267B2",
+        "token_collector": "0x5cA789000070DF15b4663DB64a50AeF5D49c5Ee0",
+        "protocol_fee_config": "0x8F96C493bAC365E41f0315cf45830069EBbDCaCe",
+        "refund_request": "0x1C2Ab244aC8bDdDB74d43389FF34B118aF2E90F4",
+        "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc0000000000000000000000001111111111111111111111111111111111111111000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e00000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x5cA789000070DF15b4663DB64a50AeF5D49c5Ee0",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "372fd197cdb545485e20ec0513036ac099d3b60e280b45355d72b56060c4aa86"
+            },
+            "signature": "f96d0716f1bd5ff533447e08d6d5c71ca6b103d5b8bd36479139a884b40bef780111058a4165dd94d07e6e02e572f00ff2c9bd812e293524c44999fe013c5a4a1c",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:84532",
+            "maxAmountRequired": "5000000",
+            "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x29025c0E9D4239d438e169570818dB9FE0A80873",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x5cA789000070DF15b4663DB64a50AeF5D49c5Ee0"
+            }
+          }
+        }
+      }
+    },
+    "11155111": {
+      "contracts": {
+        "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "operator_factory": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "protocol_fee_config": "0xD979dBfBdA5f4b16AAF60Eaab32A44f352076838",
+        "refund_request": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"
+      },
+      "operator_abi": "OPERATOR_ABI",
+      "calldata": {
+        "release": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c723800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "release_partial": "ecf39b0a0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c723800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e8480",
+        "refund_in_escrow": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c723800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b40",
+        "refund_in_escrow_partial": "e2b8996f0000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc00000000000000000000000011111111111111111111111111111111111111110000000000000000000000001c7d4b196cb0c7b01d743fbc6116a902379c723800000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d790000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007080000000000000000000000000e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c0"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "e9c48d0dd0d8d5ca0711d2e3a54adaff49d175c47a222a07cdbfe142b3f30815"
+            },
+            "signature": "9e2b60561d1eba5332c2f6ef92d5c8f58478a4c7a77eea6fc553a19a8344885978977380ff88fabdd08dc1855158d710ab7ad7733ad54e883271959c077f86711c",
+            "paymentInfo": {
+              "operator": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:11155111",
+            "maxAmountRequired": "5000000",
+            "asset": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+              "operatorAddress": "0x0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+              "tokenCollector": "0x230fd3A171750FA45db2976121376b7F47Cba308"
+            }
+          }
+        }
+      }
+    },
+    "1187947933": {
+      "contracts": {
+        "operator": "0x43E46d4587fCCc382285C52012227555ed78D183",
+        "escrow": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+        "operator_factory": "0x3Cd5c76Fefe46CB07788Ee8f80B93B20D81941D4",
+        "token_collector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+        "protocol_fee_config": "0xf62788834C99B2E85a6891C0b46D1EB996f8f596",
+        "refund_request": "0x69e9BF2b40Ed472b55E47e9D4205d93Ed673093F",
+        "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20"
+      },
+      "operator_abi": "OPERATOR_ABI_V2",
+      "calldata": {
+        "release": "c602dd4a00000000000000000000000043e46d4587fccc382285c52012227555ed78d183000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc000000000000000000000000111111111111111111111111111111111111111100000000000000000000000085889c8c714505e0c94b30fcfcf64fe3ac8fcb2000000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d7900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070800000000000000000000000043e46d4587fccc382285c52012227555ed78d1835a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b4000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000000",
+        "release_partial": "c602dd4a00000000000000000000000043e46d4587fccc382285c52012227555ed78d183000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc000000000000000000000000111111111111111111111111111111111111111100000000000000000000000085889c8c714505e0c94b30fcfcf64fe3ac8fcb2000000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d7900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070800000000000000000000000043e46d4587fccc382285c52012227555ed78d1835a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000001e848000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000000",
+        "refund_in_escrow": "4e04eaa000000000000000000000000043e46d4587fccc382285c52012227555ed78d183000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc000000000000000000000000111111111111111111111111111111111111111100000000000000000000000085889c8c714505e0c94b30fcfcf64fe3ac8fcb2000000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d7900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070800000000000000000000000043e46d4587fccc382285c52012227555ed78d1835a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000004c4b4000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000000",
+        "refund_in_escrow_partial": "4e04eaa000000000000000000000000043e46d4587fccc382285c52012227555ed78d183000000000000000000000000504e4fbab7bc2962b361e3730b965e61f289d0cc000000000000000000000000111111111111111111111111111111111111111100000000000000000000000085889c8c714505e0c94b30fcfcf64fe3ac8fcb2000000000000000000000000000000000000000000000000000000000004c4b400000000000000000000000000000000000000000000000000000000068e786100000000000000000000000000000000000000000000000000000000068e794200000000000000000000000000000000000000000000000000000000068e8d7900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000070800000000000000000000000043e46d4587fccc382285c52012227555ed78d1835a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a00000000000000000000000000000000000000000000000000000000002dc6c000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "authorize": {
+        "url": "https://facilitator.ultravioletadao.xyz/settle",
+        "body": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x504e4FbaB7bC2962b361E3730B965E61F289d0cC",
+              "to": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+              "value": "5000000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "37fda3a8a1f9e80dd8af74a52292fbd1729fcfac84f30985abd16c082f742df3"
+            },
+            "signature": "c657e132f0c6db4ced6cc70a55443a7e8a5157df3c6767d0392fd389e57173c267453d25e2bce20ab2bf424753ade2b9e19f181402cbc72238aad545003506071b",
+            "paymentInfo": {
+              "operator": "0x43E46d4587fCCc382285C52012227555ed78D183",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+              "maxAmount": "5000000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1760007200,
+              "refundExpiry": 1760090000,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x43E46d4587fCCc382285C52012227555ed78D183",
+              "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:1187947933",
+            "maxAmountRequired": "5000000",
+            "asset": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+            "payTo": "0x1111111111111111111111111111111111111111",
+            "extra": {
+              "escrowAddress": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+              "operatorAddress": "0x43E46d4587fCCc382285C52012227555ed78D183",
+              "tokenCollector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -109,6 +109,8 @@ VERIFIED_USDC_DOMAINS: dict[int, tuple[str, str]] = {
     43114: ("USD Coin", "2"),                         # avalanche
     10: ("USD Coin", "2"),                            # optimism
     1187947933: ("Bridged USDC (SKALE Bridge)", "2"),  # skale
+    5042: ("USDC", "2"),                              # arc (networks/evm.py ARC)
+    5042002: ("USDC", "2"),                           # arc-testnet (networks/evm.py)
 }
 
 
@@ -510,6 +512,9 @@ def build_escrow_pre_auth(
 #   | release          | el payer; el dueno del operador (`FEE_RECIPIENT()`)     |
 #   | refundInEscrow   | el receiver; el dueno del operador; el payer, pero solo  |
 #   |                  | pasado `authorizationExpiry`                             |
+#
+# El dueno del operador se lee con `FEE_RECIPIENT()` en los operadores v1/v2 y con
+# `FEE_RECEIVER()` en los v3 (Arc; `advanced_escrow.ESCROW_GENERATIONS`).
 #
 # El receiver NUNCA puede hacer release (auto-pagarse es justo lo que el escrow
 # existe para impedir) y el payer NUNCA puede refundear antes del vencimiento

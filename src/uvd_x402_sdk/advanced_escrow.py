@@ -26,6 +26,11 @@ Contract mapping:
     operator.charge()           -> escrow.charge()       (direct payment)
     operator.refundPostEscrow() -> escrow.refund()       (dispute refund)
 
+On "v3" chains (ESCROW_GENERATIONS; Arc and Arc Testnet) the operator is the
+canonical x402r one: release() calls operator.capture(), refund_in_escrow()
+calls operator.void() (whole capturable amount only) and refund_post_escrow()
+calls operator.refund().
+
 Example:
     >>> from uvd_x402_sdk.advanced_escrow import AdvancedEscrowClient
     >>>
@@ -193,6 +198,32 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
         "refund_request": "0x69e9BF2b40Ed472b55E47e9D4205d93Ed673093F",
         "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
     },
+    # ----- Canonical x402r deployments -----
+    # Same addresses on every chain (CREATE2). Sources: BackTrackCo/x402r-sdk
+    # packages/core/src/config/index.ts @ bbfec12c and BackTrackCo/x402r-contracts
+    # deployments/canonical-v1.0.1.json + canonical-v1.0.2.json @ c5223eaa.
+    # Registry key <- upstream contract:
+    #   escrow           <- AuthCaptureEscrow (commerce-payments v1.0.0)
+    #   operator_factory <- PaymentOperatorFactory v1.0.2
+    #   token_collector  <- ERC3009PaymentCollector
+    #   refund_request   <- RefundRequestFactory v1.0.1
+    # Code at each one read on both chains: tests/fixtures/arc-escrow-d.json.
+    5042: {  # Arc
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "protocol_fee_config": "0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc",
+        "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
+        "usdc": "0x3600000000000000000000000000000000000000",
+    },
+    5042002: {  # Arc Testnet
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "protocol_fee_config": "0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc",
+        "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
+        "usdc": "0x3600000000000000000000000000000000000000",
+    },
 }
 
 # Human-readable chain names for diagnostics and error messages.
@@ -208,7 +239,38 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     143: "Monad",
     43114: "Avalanche",
     1187947933: "SKALE Base",
+    5042: "Arc",
+    5042002: "Arc Testnet",
 }
+
+# Operator generation per chain. It picks the operator ABI and the calls
+# behind release() / refund_in_escrow():
+#   "v1" legacy operators: release(pi, amount) / refundInEscrow(pi, amount)
+#   "v2" CREATE3 operators: the same two with a trailing ``bytes data``
+#   "v3" canonical x402r operators (PaymentOperatorFactory v1.0.2): capture /
+#        void / refund. There is no release and no refundInEscrow.
+# A chain outside this table (explicit ``contracts``) is "v1", as before.
+ESCROW_GENERATIONS: dict[int, str] = {
+    84532: "v1",
+    11155111: "v1",
+    8453: "v1",
+    1: "v1",
+    10: "v1",
+    137: "v1",
+    42161: "v1",
+    42220: "v1",
+    143: "v1",
+    43114: "v1",
+    1187947933: "v2",
+    5042: "v3",
+    5042002: "v3",
+}
+
+
+def get_escrow_generation(chain_id: int) -> str:
+    """Return the operator generation of a chain: "v1", "v2" or "v3"."""
+    return ESCROW_GENERATIONS.get(chain_id, "v1")
+
 
 # Base Mainnet contract addresses (Fase 5 PaymentOperator).
 BASE_MAINNET_CONTRACTS = {
@@ -259,7 +321,10 @@ def is_escrow_supported(chain_id: int) -> bool:
 # PaymentOperator ABI (minimal, for the 5 functions we need)
 # Chain IDs using CREATE3-deployed operators (new ABI with bytes data param).
 # Existing chains (Base, Ethereum, etc.) use legacy operators with old ABI.
-CREATE3_CHAIN_IDS: set[int] = {1187947933}  # SKALE Base
+# Derived from ESCROW_GENERATIONS ("v2"); kept for callers that import it.
+CREATE3_CHAIN_IDS: set[int] = {
+    chain_id for chain_id, gen in ESCROW_GENERATIONS.items() if gen == "v2"
+}
 
 # PaymentInfo tuple components (shared between ABI versions)
 _PAYMENT_INFO_COMPONENTS = [
@@ -410,9 +475,100 @@ OPERATOR_ABI_V2 = [
 ]
 
 
+# Canonical x402r PaymentOperator ABI (v3): BackTrackCo/x402r-contracts
+# src/operator/payment/PaymentOperator.sol @ 8345776e, embedded in
+# PaymentOperatorFactory v1.0.2. capture() pays the receiver; void() takes NO
+# amount and returns the whole capturableAmount to the payer; refund() returns
+# captured funds. The operator owner reads as FEE_RECEIVER(). Every selector
+# here is in the factory's code (tests/test_arc_escrow.py).
+OPERATOR_ABI_V3 = [
+    {
+        "type": "function",
+        "name": "capture",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint256"},
+            {"name": "data", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "function",
+        "name": "void",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "data", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "type": "function",
+        "name": "refund",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+            {"name": "amount", "type": "uint256"},
+            {"name": "tokenCollector", "type": "address"},
+            {"name": "collectorData", "type": "bytes"},
+        ],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    *[
+        {
+            "type": "function",
+            "name": name,
+            "inputs": [],
+            "outputs": [{"name": "", "type": "address"}],
+            "stateMutability": "view",
+        }
+        for name in (
+            "FEE_RECEIVER",
+            "AUTHORIZE_PRE_ACTION_CONDITION",
+            "CHARGE_PRE_ACTION_CONDITION",
+            "CAPTURE_PRE_ACTION_CONDITION",
+            "VOID_PRE_ACTION_CONDITION",
+            "REFUND_PRE_ACTION_CONDITION",
+        )
+    ],
+]
+
+# AuthCaptureEscrow reads (commerce-payments v1.0.0): the state a v3 void()
+# reads before it moves anything.
+ESCROW_STATE_ABI = [
+    {
+        "type": "function",
+        "name": "getHash",
+        "inputs": [
+            {"name": "paymentInfo", "type": "tuple", "components": _PAYMENT_INFO_COMPONENTS},
+        ],
+        "outputs": [{"name": "", "type": "bytes32"}],
+        "stateMutability": "view",
+    },
+    {
+        "type": "function",
+        "name": "paymentState",
+        "inputs": [{"name": "paymentInfoHash", "type": "bytes32"}],
+        "outputs": [
+            {"name": "hasCollectedPayment", "type": "bool"},
+            {"name": "capturableAmount", "type": "uint120"},
+            {"name": "refundableAmount", "type": "uint120"},
+        ],
+        "stateMutability": "view",
+    },
+]
+
+_OPERATOR_ABIS: dict[str, list] = {
+    "v1": OPERATOR_ABI,
+    "v2": OPERATOR_ABI_V2,
+    "v3": OPERATOR_ABI_V3,
+}
+
+
 def get_operator_abi(chain_id: int) -> list:
-    """Return the correct operator ABI for a chain (v2 for CREATE3, v1 for legacy)."""
-    return OPERATOR_ABI_V2 if chain_id in CREATE3_CHAIN_IDS else OPERATOR_ABI
+    """Return the operator ABI of the chain's generation (v1 legacy, v2 CREATE3, v3 canonical)."""
+    return _OPERATOR_ABIS[get_escrow_generation(chain_id)]
 
 
 # ============================================================
@@ -484,6 +640,30 @@ class TransactionResult:
     error: Optional[str] = None
 
 
+class EscrowNothingToVoidError(Exception):
+    """refund_in_escrow() on a v3 chain found ``capturableAmount == 0``.
+
+    Nothing is left in escrow under this PaymentInfo (captured, voided,
+    reclaimed, or never authorized), so there is nothing to return. Not a
+    partial amount: that one is a ``ValueError``. No transaction was sent.
+    """
+
+    def __init__(self, message: str, payment_info_hash: str) -> None:
+        super().__init__(message)
+        self.payment_info_hash = payment_info_hash
+
+
+class EscrowStateUnavailableError(Exception):
+    """refund_in_escrow() on a v3 chain could not read the escrow state.
+
+    The getHash / paymentState read that comes before void() failed: a rate
+    limit, a JSON-RPC error, a connection that never opened. Retryable: nothing
+    was decided about the amount, so this is neither the partial-amount
+    ``ValueError`` nor :class:`EscrowNothingToVoidError`. No transaction was
+    sent. The original error is ``__cause__``.
+    """
+
+
 # ============================================================
 # Client
 # ============================================================
@@ -544,7 +724,9 @@ class AdvancedEscrowClient:
 
         Raises:
             ValueError: If neither ``private_key`` nor ``wallet`` is provided,
-                        or if both are provided simultaneously.
+                        or if both are provided simultaneously, or if
+                        ``chain_id`` is not in the registry and no
+                        ``contracts`` dict was passed.
         """
         # ------------------------------------------------------------------
         # Resolve signing strategy: raw key vs WalletAdapter
@@ -588,6 +770,10 @@ class AdvancedEscrowClient:
             if operator_address is None and chain_id == 1187947933:
                 # SKALE Base: EM PaymentOperator Fase 5 (1300bps fee, facilitator-as-arbiter)
                 operator_address = "0x43E46d4587fCCc382285C52012227555ed78D183"
+            if operator_address is None and chain_id in (5042, 5042002):
+                # Arc / Arc Testnet: EM PaymentOperator, same address on both
+                # (computeAddress on the v1.0.2 factory, tests/fixtures/arc-escrow-d.json)
+                operator_address = "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D"
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
@@ -605,13 +791,22 @@ class AdvancedEscrowClient:
                 "refund_request": registry["refund_request"],
                 "usdc": registry["usdc"],
             }
-        else:
-            # Fall back to the legacy Base Mainnet default.
+        elif chain_id == 8453:
+            # Legacy Base Mainnet default (reached only if 8453 left the registry).
             self.contracts = BASE_MAINNET_CONTRACTS
+        else:
+            # Base's addresses are not this chain's: falling back to them would
+            # aim every call at contracts that do not exist here.
+            raise ValueError(
+                f"No escrow contracts for chain {chain_id}: pass contracts= "
+                f"explicitly. Registered chains: "
+                f"{', '.join(str(c) for c in get_supported_escrow_chains())}"
+            )
 
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
 
-        self._is_create3 = chain_id in CREATE3_CHAIN_IDS
+        self.generation = get_escrow_generation(chain_id)
+        self._is_create3 = self.generation == "v2"
         self.operator_contract = self.w3.eth.contract(
             address=Web3.to_checksum_address(self.contracts["operator"]),
             abi=get_operator_abi(chain_id),
@@ -927,6 +1122,7 @@ class AdvancedEscrowClient:
         RELEASE: Capture escrowed funds to receiver (worker gets paid).
 
         Calls PaymentOperator.release() -> escrow.capture()
+        On a "v3" chain: PaymentOperator.capture(pi, amount, b"") -> escrow.capture()
 
         Args:
             payment_info: PaymentInfo from the authorize step
@@ -934,6 +1130,8 @@ class AdvancedEscrowClient:
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
+        if self.generation == "v3":
+            return self._send_tx(self.operator_contract.functions.capture(pt, amt, b""))
         if self._is_create3:
             return self._send_tx(self.operator_contract.functions.release(pt, amt, b""))
         return self._send_tx(self.operator_contract.functions.release(pt, amt))
@@ -944,15 +1142,64 @@ class AdvancedEscrowClient:
 
         Calls PaymentOperator.refundInEscrow() -> escrow.partialVoid()
 
+        On a "v3" chain the operator only has void(pi, b""), which returns the
+        WHOLE capturableAmount. The client reads that amount from the escrow
+        first (getHash + paymentState, as void() does) and sends void() only
+        when ``amount`` equals it. Otherwise nothing is sent:
+
+        * capturableAmount == 0 -> :class:`EscrowNothingToVoidError`
+        * any other amount      -> ``ValueError`` (a partial void does not
+          exist; release() part of it first, then void the rest)
+        * the state cannot be read -> :class:`EscrowStateUnavailableError`
+          (retryable)
+
         Args:
             payment_info: PaymentInfo from the authorize step
             amount: Amount to refund (defaults to max_amount)
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
+        if self.generation == "v3":
+            chain_name = ESCROW_CHAIN_NAMES.get(self.chain_id, str(self.chain_id))
+            try:
+                payment_info_hash, capturable = self._capturable_amount(pt)
+            except Exception as exc:
+                # web3 raises a different class per version and failure (HTTP
+                # error, connection error, Web3RPCError, or a plain ValueError
+                # in web3 6): one retryable class, and never the partial one.
+                # Only the type name: the RPC URL and bodies stay out.
+                raise EscrowStateUnavailableError(
+                    f"Could not read the escrow state on {chain_name} before "
+                    f"void() ({type(exc).__name__}). No transaction was sent; "
+                    f"retry later."
+                ) from exc
+            if capturable == 0:
+                raise EscrowNothingToVoidError(
+                    f"Nothing to void on {chain_name}: capturableAmount is 0 for "
+                    f"payment {payment_info_hash}. No transaction was sent.",
+                    payment_info_hash,
+                )
+            if amt != capturable:
+                raise ValueError(
+                    f"refund_in_escrow(amount={amt}) on {chain_name}: this operator "
+                    f"can only void the whole capturableAmount ({capturable}). Pass "
+                    f"amount={capturable}, or release() part of it first. No "
+                    f"transaction was sent."
+                )
+            return self._send_tx(self.operator_contract.functions.void(pt, b""))
         if self._is_create3:
             return self._send_tx(self.operator_contract.functions.refundInEscrow(pt, amt, b""))
         return self._send_tx(self.operator_contract.functions.refundInEscrow(pt, amt))
+
+    def _capturable_amount(self, pt: tuple) -> tuple[str, int]:
+        """Read (paymentInfoHash, capturableAmount) from the escrow, as void() reads it."""
+        escrow = self.w3.eth.contract(
+            address=Web3.to_checksum_address(self.contracts["escrow"]),
+            abi=ESCROW_STATE_ABI,
+        )
+        raw_hash = escrow.functions.getHash(pt).call()
+        _, capturable, _ = escrow.functions.paymentState(raw_hash).call()
+        return "0x" + bytes(raw_hash).hex(), int(capturable)
 
     # ----------------------------------------------------------------
     # Gasless facilitator-proxied methods (v1.32.0+)
@@ -1128,7 +1375,8 @@ class AdvancedEscrowClient:
                 PAYER or the operator owner (`FEE_RECIPIENT()`) — never the
                 receiver, because paying yourself out of an escrow is the thing
                 escrow exists to stop. Omitted -> no order is sent, which the
-                facilitator's `off` and `log` modes still accept.
+                facilitator's `off` and `log` modes still accept. On a "v3"
+                chain the operator owner reads as `FEE_RECEIVER()` instead.
             lifecycle_auth: An order ALREADY signed by someone else — the wire
                 block ``{signer, deadline, nonce, signature}``. This is the
                 whole point when the payer signs in a browser and this process
@@ -1236,10 +1484,18 @@ class AdvancedEscrowClient:
         Calls PaymentOperator.charge() -> escrow.charge()
         Funds go directly from payer to receiver.
 
+        Not mapped on a "v3" chain (its operator's charge takes six arguments):
+        raises ``ValueError`` there before signing anything.
+
         Args:
             payment_info: PaymentInfo with receiver and amount
             amount: Amount to charge (defaults to max_amount)
         """
+        if self.generation == "v3":
+            raise ValueError(
+                f"charge() is not available for the v3 operator on chain "
+                f"{self.chain_id}. Nothing was signed or sent."
+            )
         nonce = self._compute_nonce(payment_info)
         amt = amount or payment_info.max_amount
 
@@ -1285,6 +1541,9 @@ class AdvancedEscrowClient:
 
         Kept for future use when tokenCollector is implemented.
 
+        On a "v3" chain: PaymentOperator.refund() -> escrow.refund(), same
+        arguments.
+
         Args:
             payment_info: PaymentInfo from the original authorization
             amount: Amount to refund (defaults to max_amount)
@@ -1293,6 +1552,14 @@ class AdvancedEscrowClient:
         """
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
+        if self.generation == "v3":
+            return self._send_tx(
+                self.operator_contract.functions.refund(
+                    pt, amt,
+                    Web3.to_checksum_address(token_collector),
+                    collector_data,
+                )
+            )
         return self._send_tx(
             self.operator_contract.functions.refundPostEscrow(
                 pt, amt,

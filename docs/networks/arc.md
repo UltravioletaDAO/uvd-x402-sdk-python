@@ -14,7 +14,7 @@ Both networks use USDC `0x3600000000000000000000000000000000000000` with EIP-712
 
 The chain ID is part of the signature domain. An authorization signed on mainnet cannot be reused on testnet. The SDK preserves their distinct registry entries and CAIP-2 identifiers.
 
-The facilitator URL is `https://facilitator.ultravioletadao.xyz`. Check `/supported` at runtime when using another facilitator. USYC, Gateway, contract-wallet signatures/EIP-6492, `upto` and escrow are outside this Arc release. ERC-8004 identity and reputation are covered since 0.90.0: see [ERC-8004 on Arc](#erc-8004-on-arc-0900).
+The facilitator URL is `https://facilitator.ultravioletadao.xyz`. Check `/supported` at runtime when using another facilitator. USYC, Gateway, contract-wallet signatures/EIP-6492 and `upto` are outside this Arc release. ERC-8004 identity and reputation are covered since 0.90.0: see [ERC-8004 on Arc](#erc-8004-on-arc-0900). The escrow client is covered since 0.91.0: see [Escrow on Arc](#escrow-on-arc-0910).
 
 ## EURC: prices in euros
 
@@ -227,3 +227,59 @@ supports_relayed_feedback("arc-testnet")  # False -> no delegate on testnet
 
 Gas on Arc is USDC. The facilitator pays it for the relayed rating, as it does
 for payments.
+
+## Escrow on Arc (0.91.0)
+
+`ESCROW_CONTRACTS` registers both networks with the canonical x402r deployment.
+The addresses are the same on both:
+
+| Registry key | Contract | Address |
+|---|---|---|
+| `escrow` | AuthCaptureEscrow (commerce-payments v1.0.0) | `0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff` |
+| `operator_factory` | PaymentOperatorFactory v1.0.2 | `0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716` |
+| `token_collector` | ERC3009PaymentCollector | `0x0E3dF9510de65469C4518D7843919c0b8C7A7757` |
+| `protocol_fee_config` | ProtocolFeeConfig | `0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc` |
+| `refund_request` | RefundRequestFactory v1.0.1 | `0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC` |
+| `usdc` | USDC | `0x3600000000000000000000000000000000000000` |
+
+`AdvancedEscrowClient` defaults the operator to
+`0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D` on both networks. Pass
+`operator_address=` to use another one.
+
+These chains are escrow generation `"v3"` (`get_escrow_generation()`). Their
+operator has `capture`, `void` and `refund`, not `release` / `refundInEscrow`,
+and the client maps its methods onto them:
+
+| Client method | v3 operator call |
+|---|---|
+| `release(pi, amount)` | `capture(pi, amount, b"")` |
+| `refund_in_escrow(pi, amount)` | `void(pi, b"")`, only when `amount` is the whole `capturableAmount` |
+| `refund_post_escrow(...)` | `refund(pi, amount, tokenCollector, collectorData)` |
+| `charge(...)` | not available: raises `ValueError` before signing |
+
+`void()` takes no amount: it returns everything still capturable. Before
+sending it, the client reads `capturableAmount` from the escrow (`getHash` +
+`paymentState`). Any other `amount` raises `ValueError`, and a capturable
+amount of 0 raises `EscrowNothingToVoidError`. If that read fails, it raises
+`EscrowStateUnavailableError`, which is retryable. None of them sends a
+transaction. To
+pay part and return the rest, call `release(pi, part)` and then
+`refund_in_escrow(pi, rest)`.
+
+`build_escrow_pre_auth` accepts both networks with the verified USDC domain
+(`USDC` / `2`). The facilitator-proxied calls (`authorize()`,
+`release_via_facilitator()`, `refund_via_facilitator()`,
+`query_escrow_state()`) are unchanged and need a facilitator that supports
+escrow on Arc.
+
+Measured on 2026-09-24 (`scripts/arc_escrow_record.py`, reads only, recorded in
+`tests/fixtures/arc-escrow-d.json`):
+
+- Every registered address has code on both RPCs, with the same code hash on
+  mainnet and testnet.
+- `computeAddress` on the factory returns the default operator on both
+  networks. The operator had no code yet on either.
+- The factory's code holds every selector of `OPERATOR_ABI_V3` and none of
+  `release`, `refundInEscrow`, `refundPostEscrow` or the 4-argument `charge`.
+- `AuthCaptureEscrow.getHash` on each network equals the nonce this SDK
+  computes for the same `PaymentInfo`.
