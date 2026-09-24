@@ -15,6 +15,7 @@ import asyncio
 import json
 from decimal import Decimal
 from typing import Any, Optional
+from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -25,7 +26,12 @@ from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.receipts import PurchaseContext
 
 PRICE = Decimal("0.01")
-PROTECTED = ("/paid", "/other", "/api/paid")
+#: Paths the middleware protects, decoded: the ones below and the paths of
+#: ``TARGETS`` as a server decodes them.
+PROTECTED = (
+    "/paid", "/other", "/api/paid",
+    "/x[1]", "/a|b", "/a^b", "/a\\b", "/p%q", "/a%41", "/plain",
+)
 
 
 def _config(rail: Facilitator) -> X402Config:
@@ -115,13 +121,19 @@ def _context(url: str) -> str:
 
 def _get(
     app: Any,
-    path: str,
+    target: str,
     context: str,
     *,
     host: Optional[str] = "testserver",
     root_path: str = "",
     server: Optional[tuple] = ("testserver", 80),
+    scheme: str = "http",
 ) -> tuple:
+    """One GET of ``target`` (path and query) as an HTTP client sends it:
+    ``raw_path`` and ``query_string`` are what httpx puts on the wire, and
+    ``path`` is ``raw_path`` decoded, as an ASGI server hands it on."""
+    raw = httpx.Request("GET", f"{scheme}://testserver{target}").url.raw_path
+    raw_path, _, query = raw.partition(b"?")
     headers = [(b"x-payment", x_payment().encode()), (b"x-uvd-purchase", context.encode())]
     if host is not None:
         headers.append((b"host", host.encode("latin-1")))
@@ -130,11 +142,11 @@ def _get(
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
         "method": "GET",
-        "scheme": "http",
-        "path": path,
-        "raw_path": path.encode("utf-8"),
+        "scheme": scheme,
+        "path": unquote(raw_path.decode("ascii")),
+        "raw_path": raw_path,
         "root_path": root_path,
-        "query_string": b"",
+        "query_string": query,
         "headers": headers,
         "server": server,
         "client": ("127.0.0.1", 50000),
@@ -195,6 +207,8 @@ NOT_BARE = [
     "testserver:99999",
     "testserver:80/x",
     "[zz::1]",
+    "[1::2::3]",
+    "1.2.3.999",
     "test server",
 ]
 
@@ -254,6 +268,49 @@ def test_without_a_host_or_a_server_address_no_context_matches(rail):
     status, body = _get(
         dependency(rail), "/paid", _context("http://testserver/paid"), host=None, server=None
     )
+
+    assert (status, _mismatch(body)) == (400, True), body
+    assert rail.calls == []
+
+
+#: Paths and queries an HTTP client writes as they are: characters it leaves
+#: literal (``[ ] \\ ^ |``, a stray ``%``), escapes it keeps (``%5B``,
+#: ``%2541``) and a query with a ``/`` in it.
+TARGETS = [
+    "/x[1]",
+    "/a|b",
+    "/a^b",
+    "/a\\b",
+    "/p%q",
+    "/x%5B1%5D",
+    "/a%2541",
+    "/plain?q=1&r=/s",
+]
+
+
+@mounts
+@pytest.mark.parametrize("target", TARGETS, ids=repr)
+def test_the_context_a_client_wrote_for_this_url_is_accepted(rail, mount, target):
+    """The URL compared is the one the client sent (``raw_path`` when it
+    decodes to the path the app routes on), not a re-encoding of it."""
+    status, body = _get(mount(rail), target, _context(f"http://testserver{target}"))
+
+    assert status == 200, body
+    assert rail.executed == 1
+
+
+@mounts
+def test_the_scheme_is_the_requests(rail, mount):
+    status, body = _get(
+        mount(rail), "/paid", _context("https://testserver/paid"),
+        scheme="https", server=("testserver", 443),
+    )
+    assert status == 200, body
+
+
+@mounts
+def test_the_query_is_part_of_the_url(rail, mount):
+    status, body = _get(mount(rail), "/plain?q=1", _context("http://testserver/plain?q=2"))
 
     assert (status, _mismatch(body)) == (400, True), body
     assert rail.calls == []

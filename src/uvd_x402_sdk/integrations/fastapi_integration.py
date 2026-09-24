@@ -12,7 +12,9 @@ from decimal import Decimal
 from functools import wraps
 from ipaddress import AddressValueError, IPv6Address
 from typing import Any, Callable, Optional, TypeVar, Union
-from urllib.parse import quote
+from urllib.parse import quote, unquote
+
+import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
@@ -46,9 +48,14 @@ F = TypeVar("F", bound=Callable[..., Any])
 _AUTHORITY = re.compile(
     r"(?:[A-Za-z0-9._~%!$&'()*+,;=-]+|\[(?P<ipv6>[0-9A-Fa-f:.]+)\])(?::(?P<port>[0-9]{1,5}))?"
 )
-#: What stays literal in the path of the URL compared; the rest is
-#: percent-encoded, as the buyer's HTTP client sent it.
+#: What stays literal when the path of the URL compared has to be re-encoded
+#: (no usable ``raw_path``); the rest is percent-encoded.
 _PATH_SAFE = "/!$&'()*+,;=:@-._~"
+#: A ``raw_path`` that can stand for the path as the buyer's client sent it:
+#: the characters HTTP clients leave literal in a path (``[ ] \ ^ |`` and a
+#: stray ``%`` included) and percent escapes; never ``?``, ``#``, a space or a
+#: control character, which would end the path or change the request.
+_RAW_PATH = re.compile(r"[A-Za-z0-9\-._~!$&'()*+,;=:@/\[\]\\^|%]*")
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -88,14 +95,31 @@ def _authority(scope: Any) -> Optional[str]:
 def _request_url(scope: Any) -> Optional[str]:
     """The URL of this request as the buyer's client wrote it, from the ASGI scope.
 
-    Scheme, a bare authority (:func:`_authority`), the full path, mount
-    included (:func:`_requested_paths`), percent-encoded, and the query as
-    received. ``None`` when the authority is not a bare ``host[:port]``.
+    Scheme, a bare authority (:func:`_authority`), the full path with its
+    mount (:func:`_full_request_path`, the same path the binding store's
+    resource uses), and the query as received. ``None`` when the authority is
+    not a bare ``host[:port]``.
+
+    The path is written as the client sent it: ``scope["raw_path"]`` (or the
+    mount followed by it, when the server leaves the mount out), used only when
+    it decodes to exactly the full path, which keeps it tied to the path the
+    app routes on, and only when it holds nothing that could end the path
+    (``_RAW_PATH``: no ``?``, ``#``, space or control character). Otherwise the
+    full path is percent-encoded, ``_PATH_SAFE`` left literal.
     """
     authority = _authority(scope)
     if authority is None:
         return None
-    path = quote(_requested_paths(scope)[0], safe=_PATH_SAFE)
+    full = _full_request_path(scope)
+    path = quote(full, safe=_PATH_SAFE)
+    raw = scope.get("raw_path")
+    if isinstance(raw, bytes):
+        text = raw.decode("latin-1")
+        mount = quote(scope.get("root_path") or "", safe=_PATH_SAFE)
+        for candidate in (text, mount + text):
+            if _RAW_PATH.fullmatch(candidate) and unquote(candidate) == full:
+                path = candidate
+                break
     url = f"{scope.get('scheme', 'http')}://{authority}{path}"
     query = (scope.get("query_string") or b"").decode("latin-1")
     return f"{url}?{query}" if query else url
@@ -117,7 +141,10 @@ async def _receipt_context(request: Request) -> Optional[str]:
         if url is None:
             raise ValueError("the request's authority is not a bare host[:port]")
         return validate_purchase_context(header, request.method, url, await request.body())
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, httpx.InvalidURL):
+        # `httpx.InvalidURL` is not a ValueError: an authority that passes
+        # `_AUTHORITY` but that httpx cannot parse (an IPv4 with an octet
+        # above 255) was a 500.
         raise HTTPException(status_code=400, detail="receipt_context_mismatch")
 
 
