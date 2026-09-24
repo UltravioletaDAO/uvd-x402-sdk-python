@@ -1,0 +1,239 @@
+diff --git a/pa/src/chain/evm.rs b/pb/src/chain/evm.rs
+index fe77b32..7ad6083 100644
+--- a/pa/src/chain/evm.rs
++++ b/pb/src/chain/evm.rs
+@@ -7183,6 +7183,7 @@ mod proof_of_payment_tests {
+             .proof_of_payment
+             .clone()
+             .expect("the settle asked for a proof and the chain answered every read");
++        sdk_capture_settle("settle_success_with_proof", confirmed(&settled));
+ 
+         assert_eq!(
+             verify(&settled.url, &proof).await,
+@@ -7216,6 +7217,25 @@ mod proof_of_payment_tests {
+         let settled = settle(BlockRead::Serve, false, false).await;
+         assert!(confirmed(&settled).proof_of_payment.is_none());
+         assert_eq!(settled.block_reads, 0);
++        sdk_capture_settle("settle_success_without_proof", confirmed(&settled));
++    }
++
++    /// Scratch-only: the exact bytes `post_settle` sends for a success
++    /// (`serde_json::to_string(&valid_response)`, its cache-and-wire path).
++    fn sdk_capture_settle(name: &str, response: &SettleResponse) {
++        let dir = std::env::var("SDK_CAPTURE_DIR").expect("SDK_CAPTURE_DIR");
++        let record = serde_json::json!({
++            "source": "x402-rs 8ee44114 (2.40.0), src/chain/evm.rs proof_of_payment_tests",
++            "case": name,
++            "status": 200,
++            "retryAfter": null,
++            "body": serde_json::to_string(response).expect("settle response serializes"),
++        });
++        std::fs::write(
++            format!("{dir}/{name}.json"),
++            serde_json::to_string_pretty(&record).expect("json"),
++        )
++        .expect("write");
+     }
+ 
+     /// A proof the verifier is bound to reject is worse than none: without one
+diff --git a/pa/src/handlers.rs b/pb/src/handlers.rs
+index 07c3983..7314b5f 100644
+--- a/pa/src/handlers.rs
++++ b/pb/src/handlers.rs
+@@ -19410,3 +19410,7 @@ mod erc8004_register_recipient_tests {
+         );
+     }
+ }
++
++#[cfg(test)]
++#[path = "sdk_capture_handlers.rs"]
++mod sdk_capture;
+diff --git a/pa/src/receipts/mod.rs b/pb/src/receipts/mod.rs
+index 17212c7..5cf8536 100644
+--- a/pa/src/receipts/mod.rs
++++ b/pb/src/receipts/mod.rs
+@@ -1548,3 +1548,7 @@ pub(crate) async fn with_test_admission<F: Future>(f: F) -> TestAdmission<F::Out
+ 
+ #[cfg(test)]
+ mod tests;
++
++#[cfg(test)]
++#[path = "sdk_capture.rs"]
++mod sdk_capture;
+diff --git a/pb/src/receipts/sdk_capture.rs b/pb/src/receipts/sdk_capture.rs
+new file mode 100644
+index 0000000..afff454
+--- /dev/null
++++ b/pb/src/receipts/sdk_capture.rs
+@@ -0,0 +1,29 @@
++//! Scratch-only capture for the Python SDK fixtures. Never committed to x402-rs.
++use super::*;
++
++#[tokio::test]
++async fn capture_receipt_rail_unavailable_for_the_python_sdk() {
++    let response = unavailable("receipt_store_unavailable");
++    let status = response.status().as_u16();
++    let retry_after = response
++        .headers()
++        .get(RETRY_AFTER)
++        .map(|v| v.to_str().expect("ascii").to_string());
++    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
++        .await
++        .expect("body");
++    let body = String::from_utf8(bytes.to_vec()).expect("utf8");
++    let dir = std::env::var("SDK_CAPTURE_DIR").expect("SDK_CAPTURE_DIR");
++    let record = serde_json::json!({
++        "source": "x402-rs 8ee44114 (2.40.0), src/receipts/mod.rs",
++        "case": "receipt_store_unavailable",
++        "status": status,
++        "retryAfter": retry_after,
++        "body": body,
++    });
++    std::fs::write(
++        format!("{dir}/receipt_store_unavailable.json"),
++        serde_json::to_string_pretty(&record).expect("json"),
++    )
++    .expect("write");
++}
+diff --git a/pb/src/sdk_capture_handlers.rs b/pb/src/sdk_capture_handlers.rs
+new file mode 100644
+index 0000000..9a2e2d5
+--- /dev/null
++++ b/pb/src/sdk_capture_handlers.rs
+@@ -0,0 +1,136 @@
++//! Scratch-only capture for the Python SDK fixtures. Never committed to x402-rs.
++//! Every response below is produced by the facilitator's own response code at
++//! 8ee44114; the inputs are the fixtures its own tests already use.
++use super::*;
++use crate::network::Network;
++use crate::types::TransactionHash;
++
++const TX: [u8; 32] = [0x11; 32];
++
++async fn dump(name: &str, response: Response) {
++    let status = response.status().as_u16();
++    let retry_after = response
++        .headers()
++        .get(axum::http::header::RETRY_AFTER)
++        .map(|v| v.to_str().expect("ascii").to_string());
++    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
++        .await
++        .expect("body");
++    let body = String::from_utf8(bytes.to_vec()).expect("utf8");
++    let dir = std::env::var("SDK_CAPTURE_DIR").expect("SDK_CAPTURE_DIR");
++    let record = serde_json::json!({
++        "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
++        "case": name,
++        "status": status,
++        "retryAfter": retry_after,
++        "body": body,
++    });
++    std::fs::write(
++        format!("{dir}/{name}.json"),
++        serde_json::to_string_pretty(&record).expect("json"),
++    )
++    .expect("write");
++}
++
++fn payer() -> MixedAddress {
++    "0x0000000000000000000000000000000000000001"
++        .parse::<crate::types::EvmAddress>()
++        .expect("test address")
++        .into()
++}
++
++#[tokio::test]
++async fn capture_settle_answers_for_the_python_sdk() {
++    // forward_failure_response: the hop never reached the holder / it did.
++    dump(
++        "forward_failed",
++        forward_failure_response(&ForwardFailure::before_sending(
++            "connection refused".to_string(),
++        )),
++    )
++    .await;
++    dump(
++        "forward_unconfirmed",
++        forward_failure_response(&ForwardFailure {
++            reason: "timed out".to_string(),
++            delivered: true,
++        }),
++    )
++    .await;
++
++    // The ContractCall arm, with the fixtures of chain_failure_response_tests.
++    dump(
++        "upstream_rpc_unavailable",
++        FacilitatorLocalError::ContractCall(
++            r#"ContractCall("ErrorResp(ErrorPayload { code: -32000, message: \"header not found\" })")"#
++                .to_string(),
++        )
++        .into_response(),
++    )
++    .await;
++    dump(
++        "facilitator_signer_unfunded",
++        FacilitatorLocalError::ContractCall(
++            r#"ContractCall("ErrorResp(ErrorPayload { code: -32000, message: \"insufficient funds for gas * price + value: balance 82861633384675957709, queued cost 82799377752610042973, tx cost 78463640160630732, overshot 16208008094715996\", data: None })")"#
++                .to_string(),
++        )
++        .into_response(),
++    )
++    .await;
++    dump(
++        "broadcast_uncertain",
++        FacilitatorLocalError::ContractCall(
++            r#"ContractCall("SettlementUnconfirmed(Evm(0x1111111111111111111111111111111111111111111111111111111111111111), Polygon) (operator=0x0000000000000000000000000000000000000002, selector=0xa9059cbb)")"#
++                .to_string(),
++        )
++        .into_response(),
++    )
++    .await;
++    dump(
++        "contract_call_failed",
++        FacilitatorLocalError::ContractCall(
++            r#"ErrorResp(ErrorPayload { code: 3, message: "execution reverted: FiatTokenV2: invalid signature" })"#
++                .to_string(),
++        )
++        .into_response(),
++    )
++    .await;
++
++    // settlement_unconfirmed_response_tests: the hash and its paymentId.
++    dump(
++        "settlement_unconfirmed",
++        FacilitatorLocalError::SettlementUnconfirmed(TransactionHash::Evm(TX), Network::Base)
++            .into_response(),
++    )
++    .await;
++
++    // A settle mined and reverted (chain/evm.rs, the `else` of receipt.status()).
++    dump(
++        "settle_mined_reverted",
++        (
++            StatusCode::OK,
++            Json(SettleResponse {
++                success: false,
++                error_reason: Some(FacilitatorErrorReason::InvalidScheme),
++                payer: payer(),
++                transaction: Some(TransactionHash::Evm(TX)),
++                network: Network::Base,
++                proof_of_payment: None,
++                extensions: None,
++            }),
++        )
++            .into_response(),
++    )
++    .await;
++
++    // A /verify rejection (IntoResponse for FacilitatorLocalError::InvalidSignature).
++    dump(
++        "verify_invalid_signature",
++        (
++            StatusCode::OK,
++            Json(invalid_because(payer(), "invalid_signature")),
++        )
++            .into_response(),
++    )
++    .await;
++}

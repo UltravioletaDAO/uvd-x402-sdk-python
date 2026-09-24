@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"upstream_rpc_unavailable (ref: 1dd444b8-de4f-4593-826c-bced7b3f7005)\"}",
+  "case": "upstream_rpc_unavailable",
+  "retryAfter": "30",
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 502
+}

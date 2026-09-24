@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"settlement_unconfirmed\",\"transaction\":\"0x1111111111111111111111111111111111111111111111111111111111111111\",\"paymentId\":\"0x411fe7c2e9a1b4fbecf94b48cc628d9c69c0752b90bfd313965a3607d322d466\",\"retryable\":false}",
+  "case": "settlement_unconfirmed",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 502
+}

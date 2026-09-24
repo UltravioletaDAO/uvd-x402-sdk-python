@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"receipt_store_unavailable\",\"retryable\":true,\"safeToReplay\":false,\"safeToRetry\":true,\"success\":false}",
+  "case": "receipt_store_unavailable",
+  "retryAfter": "2",
+  "source": "x402-rs 8ee44114 (2.40.0), src/receipts/mod.rs",
+  "status": 503
+}

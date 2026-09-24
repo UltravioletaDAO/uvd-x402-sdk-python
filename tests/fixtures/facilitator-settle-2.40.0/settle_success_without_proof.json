@@ -1,0 +1,7 @@
+{
+  "body": "{\"success\":true,\"payer\":\"0xB621D450d1dB3E8c71647163c0261Dd4647E75C8\",\"transaction\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"transactionHash\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"transaction_hash\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"paymentId\":\"0x18eb7aebc6cb09506aaca9a9990d71d5f305938373d36747acd163888e514d52\",\"network\":\"base\"}",
+  "case": "settle_success_without_proof",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/chain/evm.rs proof_of_payment_tests",
+  "status": 200
+}

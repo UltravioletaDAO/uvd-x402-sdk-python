@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"contract_call_failed (ref: f5f4093e-0d65-4638-9b52-4385b7241678)\"}",
+  "case": "contract_call_failed",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 400
+}

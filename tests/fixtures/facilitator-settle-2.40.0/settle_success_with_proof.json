@@ -1,0 +1,7 @@
+{
+  "body": "{\"success\":true,\"payer\":\"0x774A351d1AA8cd221a1B87da639EFcc5A56cd9ce\",\"transaction\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"transactionHash\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"transaction_hash\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"paymentId\":\"0x18eb7aebc6cb09506aaca9a9990d71d5f305938373d36747acd163888e514d52\",\"network\":\"base\",\"proofOfPayment\":{\"transactionHash\":\"0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e\",\"blockNumber\":1048576,\"network\":\"base\",\"payer\":\"0x774A351d1AA8cd221a1B87da639EFcc5A56cd9ce\",\"payee\":\"0x2222222222222222222222222222222222222222\",\"amount\":\"1000000\",\"token\":\"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\",\"timestamp\":1790211219,\"paymentHash\":\"0xd8937deee9a7053e6755cb6ac315a876e59301edd19fe8571a341f02523cb563\"}}",
+  "case": "settle_success_with_proof",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/chain/evm.rs proof_of_payment_tests",
+  "status": 200
+}
