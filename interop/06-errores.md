@@ -19,13 +19,15 @@ se quita.
 
 ## R6.2 · `uvd_error` nunca usa ni pisa `error` ni `detail`
 
-El sobre vive solo bajo su clave. Una app no mueve `error` ni `detail` para hacerle lugar.
+El sobre vive solo bajo su clave. Una app no mueve `error` ni `detail` para hacerle lugar. Y una
+respuesta cuya **forma** es la marca de un perfil legado no lleva el sobre: el cuerpo de un bloqueo
+de IP del perfil [L9](10-perfiles-legados.md#l9--bloqueo-de-ip-marcado-por-error-en-la-raíz) se
+queda con su única clave, `error`.
 
-- **Por qué:** en al menos una API del stack, `error` en la raíz es la marca de un bloqueo de IP y un
-  cliente distingue el bloqueo justamente por esa clave frente a `detail` (perfil legado
-  [L9](10-perfiles-legados.md#l9--bloqueo-de-ip-marcado-por-error-en-la-raíz)); otras apps usan
-  `error` en la raíz para cualquier falla. La regla no prohíbe `error` en el stack: prohíbe que el
-  sobre lo toque.
+- **Por qué:** en al menos una API del stack, un 403 cuyo cuerpo tiene solo `error` es la marca de un
+  bloqueo de IP (L9); agregarle `uvd_error` le cambiaría la forma y el bloqueo dejaría de
+  reconocerse. Otras apps usan `error` en la raíz para cualquier falla. La regla no prohíbe `error`
+  en el stack: prohíbe que el sobre lo toque.
 
 ## R6.3 · Los campos
 
@@ -60,12 +62,18 @@ Dentro de `uvd_error` no hay más claves (`additionalProperties: false`): lo pro
 
 ## R6.5 · Solo se reintenta con `retryable` verdadero, y el esquema hace imposible contradecirlo
 
-`retryable: true` significa: repetir **la misma petición**, más tarde, es seguro y puede funcionar.
-El esquema exige que `retryable: true` vaya con `next_action: "retry"`, y que `next_action: "retry"`
-vaya con `retryable: true` y `spent: "no"`.
+`retryable` describe el **reintento ciego**: `retryable: true` significa que repetir **la misma
+petición**, más tarde, sin mirar nada más, es seguro y puede funcionar. El esquema exige que
+`retryable: true` vaya con `next_action: "retry"`, y que `next_action: "retry"` vaya con
+`retryable: true` y `spent: "no"`.
 
-Un cliente **DEBE** reintentar solo si `retryable` es verdadero **y** `spent` es `no`. Con el esquema
-cumplido, basta con mirar `retryable`.
+Un cliente **DEBE** reintentar a ciegas solo si `retryable` es verdadero **y** `spent` es `no`. Con
+el esquema cumplido, basta con mirar `retryable`.
+
+La excepción es explícita y tiene nombre: `next_action: "resend_same_payment"` (con `retryable:
+false` y `spent: "maybe"`) pide volver a presentar **el mismo** pago, no firmar otro. No es un
+reintento ciego: es una instrucción que el cliente sigue solo si la entiende, y que no puede cobrar
+dos veces porque la autorización es la misma (el caso «pago en curso» de la tabla de abajo).
 
 - **Por qué:** un cliente que solo mira `retryable` no puede cobrar dos veces, porque un emisor no
   puede escribir `retryable: true` junto a `spent: "maybe"`.

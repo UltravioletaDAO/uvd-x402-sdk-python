@@ -43,7 +43,7 @@ de Emporium:
 
 | Clase | Qué hace la tool |
 |---|---|
-| `lectura` | Lee y devuelve; no escribe ni cobra |
+| `lectura` | Lee, no cobra y no pide credencial |
 | `escribe` | Cambia estado |
 | `mueve_dinero` | Mueve plata |
 | `riel_de_pago` | Es parte de un riel de pago (verify, settle, autorizaciones) |

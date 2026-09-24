@@ -60,9 +60,16 @@ eventos y de errores**. Entre las apps de la casa no hay un servicio en el medio
   documento ignora las claves que no conoce y trata un valor desconocido de un vocabulario cerrado
   como el más conservador (un `next_action` desconocido es `stop`; un modo de `auth` desconocido no se
   usa).
-- **Patrones portables.** Las expresiones regulares usan el subconjunto común de ECMA-262, de `re` de
-  Python y del crate `regex` de Rust: `[0-9]` en lugar de `\d`, `[.]` en lugar de `\.`, sin
-  lookaround. Ninguna regla depende de `format`, que en draft 2020-12 es solo una anotación.
+- **Patrones portables.** `pattern` significa lo que dice JSON Schema: una expresión ECMA-262, la
+  que aplican Ajv y el crate `regex` de Rust. Las de estos esquemas usan el subconjunto que además
+  `re` de Python lee igual: `[0-9]` en lugar de `\d`, `[.]` en lugar de `\.`, sin lookaround, y las
+  únicas barras son `\n` y `\r`. Una diferencia no se puede evitar con el subconjunto: el `$` de
+  Python también acepta un salto de línea **final**, así que en Python `"0x" + 40 hex + "\n"`
+  pasaría `^0x[0-9a-f]{40}$`. Por eso cada esquema tiene `$defs/una_linea` (ningún `\n` ni `\r`), y
+  todo string con patrón anclado la referencia: el documento se rechaza en cualquier motor.
+- **Fechas.** Los patrones de fecha acotan mes, día (01 a 31), hora, minuto y segundo; que la fecha
+  exista (un 30 de febrero) no se puede decir con una expresión regular y lo verifica el runner.
+- Ninguna regla depende de `format`, que en draft 2020-12 es solo una anotación.
 
 ## Fixtures
 
@@ -94,14 +101,21 @@ no adivina carpetas.
 }
 ```
 
-Un caso inválido falla con **exactamente** los errores que lista: la palabra clave de JSON Schema, el
-JSON Pointer de la instancia y, para `required`, la propiedad que falta. Así un fixture no puede
-romper dos reglas y esconder una tercera. Un validador que se detiene en el primer error (Ajv sin
-`allErrors`) comprueba al menos el primero.
+**Cómo se compara, en cualquier lenguaje.** Se valida con todos los errores (en Ajv,
+`allErrors: true`). Cada error se reduce a su palabra clave de JSON Schema, el JSON Pointer de la
+instancia y, para `required`, la propiedad que falta. Se **descartan** los errores de las palabras
+que solo envuelven el veredicto de otra: `if`, `then`, `else`, `allOf`, `anyOf`, `oneOf`, `$ref` y
+`propertyNames` (un validador los informa y otro no: Ajv informa el `if` que falló, `jsonschema`
+informa solo la palabra de adentro). Lo que queda tiene que ser **igual al conjunto** que lista el
+caso: ni uno más, ni uno menos. Así un fixture no puede romper dos reglas y esconder una tercera.
+Ningún caso lista una palabra envoltorio.
 
-En este repo los corre [`tests/test_interop_schemas.py`](../tests/test_interop_schemas.py), que además
-**borra cada restricción de cada esquema, una por vez, y exige que algún fixture se ponga rojo**: una
-restricción sin fixture que la cuide no entra.
+En el repo de origen (`uvd-x402-sdk-python`) los corre `tests/test_interop_schemas.py`, que además:
+
+- **borra cada restricción de cada esquema, una por vez, y exige que algún fixture se ponga rojo**:
+  una restricción sin fixture que la cuide no entra;
+- corre `pattern` con la semántica de ECMA-262 y, aparte, comprueba que `jsonschema` de fábrica (con
+  el `$` de Python) da el mismo veredicto válido o inválido en todos los casos.
 
 ```bash
 pip install -e ".[dev]"
@@ -121,6 +135,7 @@ reglas las verifica el runner de conformidad del SDK, no el esquema:
 | [R3.3](03-autenticacion.md) | Cada authority de una puerta es el host de alguna puerta del mismo manifiesto |
 | [R5.2](05-eventos.md) | El primer segmento de `type` es `source` |
 | [R5.3](05-eventos.md) | `sequence` crece por `(source, subject.kind, subject.id)` |
+| [R5.5](05-eventos.md) | La fecha de `occurred_at` (y de `generated_at`) existe: no hay 30 de febrero |
 | [R5.9](05-eventos.md) | Un reintento de un evento ya procesado recibe 200 `already_processed`, no 409 |
 | [R3.7](03-autenticacion.md) | Un reintento de entrega lleva un nonce nuevo y no es rechazado como repetido |
 | [R6.6](06-errores.md) | `retry_after_s` es igual a la cabecera `Retry-After` cuando las dos están |

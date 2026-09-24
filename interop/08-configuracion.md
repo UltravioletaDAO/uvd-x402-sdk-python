@@ -20,8 +20,9 @@ ni en una constante suelta en el código.
 ## R8.2 · Cada app tiene un solo secreto de interop: `<app>/service-signer`
 
 La llave de la wallet de servicio ([R2.1](02-identidad.md)) vive en el gestor de secretos de la app
-con el nombre `<app>/service-signer` y se carga con `ServiceSigner.from_secret("<app>/service-signer")`
-del SDK. El nombre que ya usan las apps partner de describe-net, `<app>/describenet-partner-signer`,
+con el nombre `<app>/service-signer` y se carga con el cargador del SDK:
+`ServiceSigner.from_secret("<app>/service-signer")` en Python; el SDK de TypeScript y el crate de Rust
+exponen su par. El nombre que ya usan las apps partner de describe-net, `<app>/describenet-partner-signer`,
 queda como alias: es la misma llave. El valor nunca se imprime ni se registra.
 
 - **Por qué:** cuatro partners resolvieron la misma carga de cuatro formas, con cuatro nombres de

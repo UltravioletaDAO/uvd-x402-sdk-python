@@ -11,6 +11,7 @@ que este SDK ya hace y lo que describe-net y meshrelay resolvieron primero.
 
 Vender: `X402Client.process_payment()` o las integraciones (FastAPI, Flask, Django, Lambda).
 Pagar: `X402Client.create_authorization()` / `fetch()`. Nadie arma `/verify` ni `/settle` a mano.
+(Los nombres son de Python; el SDK de TypeScript y el crate de Rust exponen su par.)
 
 - **Por qué:** las invariantes de la plata (no reintentar una autorización enviada, una clave por
   pago, el veredicto de tres estados, nunca 402 sobre un pago que pudo moverse) se escriben y se
@@ -18,7 +19,8 @@ Pagar: `X402Client.create_authorization()` / `fetch()`. Nadie arma `/verify` ni 
 
 ## R4.2 · La `Idempotency-Key` se acuña y se persiste antes de la primera llamada, y es la misma en todo el manejo del pago
 
-El vendedor acuña la clave (`new_idempotency_key()`, `x402-<64 hex>`), **la guarda** junto al pago y
+El vendedor acuña la clave (`x402-<64 hex>`; `new_idempotency_key()` en Python, su par en el SDK de
+TypeScript y en el crate), **la guarda** junto al pago y
 recién entonces llama al facilitador. La misma clave va en `/verify`, en `/settle`, en cada reintento
 y en el reenvío tras un timeout.
 

@@ -68,8 +68,8 @@ claves opcionales.
 ## R1.5 · Solo puertas públicas, en `https`, y nada que salga de un secreto
 
 Toda URL del manifiesto es `https://`, sin credenciales en la URL, y **nunca** una ruta interna (el
-esquema rechaza cualquier segmento `/internal`). El manifiesto no publica nada que se derive de un
-secreto.
+esquema rechaza un segmento `/internal`, en mayúsculas o minúsculas). El manifiesto no publica nada
+que se derive de un secreto.
 
 - **Por qué:** el manifiesto es público y lo leen agentes de afuera; una ruta interna publicada es una
   invitación, y un valor derivado de un secreto ayuda a adivinarlo.

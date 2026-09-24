@@ -54,12 +54,22 @@ la anterior. Puede haber huecos. Es un entero seguro en JavaScript (≤ 2⁵³ �
 
 `economic.amount` es un string (`"0.100000"`), nunca un número JSON; `currency` es el símbolo en
 mayúsculas (`USDC`); `network` es CAIP-2 (`eip155:8453`); `tx_hash`, si ya lo hay, es el sello
-(R5.15).
+(R5.15), con la forma de la familia de la red:
+
+| `network` | `tx_hash` |
+|---|---|
+| `eip155:*` | `0x` + 64 hex en minúsculas |
+| `solana:*` | La firma, en base58 (64 a 128 caracteres) |
+| Cualquier otra familia (Stellar, NEAR, Sui, Algorand, Hedera, XRPL...) | Una sola línea de `[A-Za-z0-9._:@/+=-]`, de 8 a 128 caracteres, en la forma nativa de esa cadena |
 
 - **Por qué:** un float pierde precisión en el camino, y un monto que llega distinto de como salió es
-  un error de plata.
+  un error de plata. Y un sello con la forma de otra familia (una firma de Solana en una red EVM) es
+  un sello que no se puede verificar.
 
 ### R5.5 · `occurred_at` es RFC 3339 en UTC, con `Z`
+
+El esquema acota mes, día, hora, minuto y segundo; que la fecha exista (no hay 30 de febrero) lo
+verifica el runner.
 
 - **Por qué:** comparar fechas con offsets distintos obliga a normalizar en cada consumidor; con una
   sola forma se comparan como texto.

@@ -24,9 +24,9 @@ sondeo, ni una lectura de catálogo.
 ## R3.2 · Firma la wallet de servicio de quien llama, con la authority del receptor
 
 Quien llama firma con **su** wallet de servicio ([R2.1](02-identidad.md)) y cubre `@authority` con el
-host del receptor. El receptor verifica con el SDK (`uvd_x402_sdk.erc8128.verify_request`) **o con un
-verificador que pase los mismos vectores**, y admite la dirección solo si está en su allowlist de
-direcciones públicas.
+host del receptor. El receptor verifica con el SDK (`uvd_x402_sdk.erc8128.verify_request` en Python;
+el SDK de TypeScript y el crate de Rust exponen su par) **o con un verificador que pase los mismos
+vectores**, y admite la dirección solo si está en su allowlist de direcciones públicas.
 
 - **Por qué:** una llave sirve para todos los receptores sin que una firma valga en otro, porque la
   firma ata la petición a la authority del receptor. Y una allowlist de direcciones públicas no es
@@ -55,7 +55,8 @@ llama la lee de ahí. Una puerta sin `erc8128` en `auth` no publica política.
 
 Un preset reproduce, perilla por perilla, la postura de un verificador; adoptar el SDK no cambia el
 comportamiento de nadie. Los valores de `meshrelay-strict`, `em-lenient` y `canonical-strict` están
-fijados en `uvd_x402_sdk/erc8128/presets.py` y en los vectores de conformidad (`erc8128.f3-*.json`).
+fijados en los vectores de conformidad (`erc8128.f3-*.json`) y, en Python, en
+`uvd_x402_sdk/erc8128/presets.py`; el SDK de TypeScript y el crate de Rust exponen su par.
 
 | Preset | `accept` | `components` | `content_digest` | Cadenas | Validez máx. | Tolerancia futura / pasada | Consumo del nonce |
 |---|---|---|---|---|---|---|---|

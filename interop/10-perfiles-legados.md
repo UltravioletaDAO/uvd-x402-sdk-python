@@ -238,14 +238,22 @@ viaja como string y se autentica con ERC-8128.
 **Quién:** la API de Execution Market.
 **Lugar:** se respeta: `uvd_error` no toca `error` ni `detail` ([R6.2](06-errores.md)).
 
-- Un bloqueo de IP se contesta `403 {"error": "<texto>"}`: `error` en la raíz y sin `detail`.
-- Un error normal de la misma API usa `detail`: `{"detail": "<texto>"}` o `{"detail": {"error"?,
+Tres respuestas de la misma API llevan `error` en la raíz y ninguna lleva `detail`:
+
+| Respuesta | Cuerpo |
+|---|---|
+| Bloqueo de IP | `403 {"error": "<texto>"}`: **solo** la clave `error` |
+| Permiso denegado | `403 {"error": "forbidden", "message": "<texto>", "timestamp": "<RFC 3339>"}` |
+| Límite de tasa | `429 {"error": "rate_limit_exceeded", "message": "<texto>", "retry_after": <s>}`, con `Retry-After` |
+
+- **Regla del perfil:** una respuesta es un bloqueo de IP si es un 403 y su cuerpo tiene
+  **exactamente una** clave, `error`. Un 403 que trae además `message` y `timestamp` es un permiso
+  denegado, no un bloqueo.
+- Los demás errores de la API usan `detail`: `{"detail": "<texto>"}` o `{"detail": {"error"?,
   "code", "retryable"?, "message"}}`; un 422, `{"detail", "errors": [{"field", "message",
   "type"}]}`.
-- Un límite de tasa es `429 {"error": "rate_limit_exceeded", "message", "retry_after"}` con
-  `Retry-After`.
-- Un cliente distingue el bloqueo por la forma del cuerpo. Por eso el sobre común vive en su propia
-  clave.
+- Como la regla mira qué claves hay en la raíz, el sobre común vive en su propia clave y no agrega
+  nada a un cuerpo de bloqueo.
 
 ## L10 · `X-Idempotency-Key` como alias
 

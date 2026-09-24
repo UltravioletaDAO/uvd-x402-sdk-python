@@ -29,17 +29,25 @@ wallet**: la dirección no cambia y la allowlist de describe-net tampoco.
   a mano, y una app que emite sin estar en esa lista pasa desapercibida. Declararlo en un lugar
   permite contrastar la lista con lo declarado.
 
-## R2.3 · Las direcciones EVM van en minúsculas
+## R2.3 · Las direcciones EVM van en minúsculas; las de otras familias, en su forma nativa
 
-`service_signer` (y toda dirección EVM del contrato) es `0x` + 40 hex en minúsculas.
+`service_signer` firma ERC-8128 (EIP-191), así que es EVM: `0x` + 40 hex en minúsculas. Una wallet
+que aparece en un evento (`actor.id` con `kind: "wallet"`) puede ser de cualquier familia: una sola
+línea de `[A-Za-z0-9._:@/+=-]`; si empieza con `0x`, es hex en minúsculas (40 caracteres en EVM, 64
+en las cadenas de direcciones de 32 bytes); si no, va en la forma nativa de su cadena (base58 en
+Solana, `0.0.<n>` en Hedera, etc.).
 
-- **Por qué:** es la forma del keyid de ERC-8128 canónico y la que comparan las allowlists; un
-  checksum mixto obliga a normalizar en cada comparación, y quien se olvida compara mal.
+- **Por qué:** en minúsculas es la forma del keyid de ERC-8128 canónico y la que comparan las
+  allowlists; un checksum mixto obliga a normalizar en cada comparación, y quien se olvida compara
+  mal. Y el SDK liquida en familias que no son EVM ni Solana: una wallet de Stellar o de Hedera
+  también tiene que caber.
 
 ## R2.4 · A lo sumo un `agentId` por red
 
 `erc8004` es un mapa por red CAIP-2, así que una app no puede declarar dos identidades en la misma
-red. El valor es un entero en EVM y la clave base58 en Solana.
+red. El tipo va atado a la familia: en `eip155:*` el `agentId` es un entero; en `solana:*`, la clave
+base58. En v1 no hay ERC-8004 en otras familias, y el esquema rechaza una red de otra familia en este
+mapa (se agrega en una versión menor cuando exista).
 
 - **Por qué:** dos identidades de la misma app en la misma red parten su reputación en dos, y nadie
   sabe cuál es la buena.
@@ -74,6 +82,7 @@ declara es un error; un host declarado que todavía no aparece en los datos del 
 
 ## R2.8 · La wallet de servicio no se carga con `EnvKeyAdapter()` sin argumentos
 
+(Los nombres son de Python; el SDK de TypeScript y el crate de Rust exponen su par.)
 `EnvKeyAdapter()` sin argumentos lee `WALLET_PRIVATE_KEY` y después `PRIVATE_KEY`: es el valor por
 omisión del **pagador**. La wallet de servicio se carga desde su propio secreto
 ([R8.2](08-configuracion.md)) o con `EnvKeyAdapter(private_key=...)` y una variable propia.
