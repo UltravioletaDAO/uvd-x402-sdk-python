@@ -654,14 +654,21 @@ def test_the_body_is_part_of_what_is_bought(rails, mount):
     assert rail.moved == 1
 
 
-@entry_points
+@pytest.mark.parametrize(
+    "mount",
+    [mount for mount in ENTRY_POINTS if mount is not fastapi_middleware],
+    ids=lambda mount: mount.__name__,
+)
 @pytest.mark.parametrize("mode", ["receipts", "receipts-2.38", "legacy"])
 @pytest.mark.parametrize("path", ["/gen/cats%23other", "/gen/cats%23", "/gen/cats%3Fx=1"])
 def test_an_encoded_hash_or_question_mark_in_the_path_is_another_resource(rails, mount, mode, path):
     """Starlette rebuilds ``request.url`` from the DECODED path, where a ``%23``
     becomes a ``#`` that cuts it: ``/gen/cats%23other`` read as ``/gen/cats``,
     and the route ran for the topic ``cats#other`` on the replay of the first
-    purchase. The resource comes from what the app routes on instead."""
+    purchase. The resource comes from what the app routes on instead.
+    (``X402Middleware`` charges its ``protected_paths`` exactly as decoded,
+    so ``/gen/cats#other`` is not ``/gen/cats`` there and is not charged:
+    ``tests/test_middleware_scope_path.py``.)"""
     rail = rails(mode)
     site = mount(rail, InMemoryBindingStore())
     assert site.get(x_payment(), path="/gen/cats")[0] == 200
