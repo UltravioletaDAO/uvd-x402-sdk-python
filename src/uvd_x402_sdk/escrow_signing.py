@@ -109,6 +109,8 @@ VERIFIED_USDC_DOMAINS: dict[int, tuple[str, str]] = {
     43114: ("USD Coin", "2"),                         # avalanche
     10: ("USD Coin", "2"),                            # optimism
     1187947933: ("Bridged USDC (SKALE Bridge)", "2"),  # skale
+    5042: ("USDC", "2"),                              # arc (networks/evm.py ARC)
+    5042002: ("USDC", "2"),                           # arc-testnet (networks/evm.py)
 }
 
 

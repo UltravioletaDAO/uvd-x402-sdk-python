@@ -431,3 +431,141 @@ def test_charge_is_refused_before_signing(chain_id):
     with pytest.raises(ValueError, match="not available for the v3 operator"):
         client.charge(_client_pi())
     assert sent == [] and chain.methods == []
+
+
+# ---------------------------------------------------------------------------
+# Pre-auth (sign-on-assignment): build_escrow_pre_auth / compute_escrow_nonce
+# ---------------------------------------------------------------------------
+
+import logging  # noqa: E402
+from unittest import mock  # noqa: E402
+
+from eth_account import Account  # noqa: E402
+from eth_account.messages import encode_typed_data  # noqa: E402
+
+import uvd_x402_sdk.escrow_signing as es  # noqa: E402
+from uvd_x402_sdk.networks import get_network_by_chain_id  # noqa: E402
+from uvd_x402_sdk.wallet import EnvKeyAdapter  # noqa: E402
+
+PRE_AUTH = FIXTURE["pre_auth"]
+PRE_AUTH_KEY = "0x" + "42" * 32  # synthetic, never held funds (as recorded)
+
+
+class _RecordingWallet:
+    """EnvKeyAdapter that keeps the typed data it was asked to sign."""
+
+    def __init__(self):
+        self.inner = EnvKeyAdapter(private_key=PRE_AUTH_KEY)
+        self.typed = []
+
+    def get_address(self):
+        return self.inner.get_address()
+
+    def sign_message(self, message):
+        return self.inner.sign_message(message)
+
+    def sign_typed_data(self, typed_data):
+        self.typed.append(typed_data)
+        return self.inner.sign_typed_data(typed_data)
+
+
+def _arc_payment_config(chain_id: int, domain=None) -> dict:
+    """The escrow payment config for Arc, built from this SDK's own registry."""
+    contracts = ae.get_escrow_contracts(chain_id)
+    network = get_network_by_chain_id(chain_id)
+    name, version = domain or (network.usdc_domain_name, network.usdc_domain_version)
+    return {
+        "escrow": {
+            "payment_info_typehash": "0x" + ae.PAYMENT_INFO_TYPEHASH.hex(),
+            "networks": {
+                network.name: {
+                    "chain_id": chain_id,
+                    "operator": _client(chain_id).contracts["operator"],
+                    "escrow": contracts["escrow"],
+                    "token_collector": contracts["token_collector"],
+                    "usdc": contracts["usdc"],
+                    "usdc_domain_name": name,
+                    "usdc_domain_version": version,
+                }
+            },
+        }
+    }
+
+
+def _build_frozen(wallet, config, network="arc") -> dict:
+    with mock.patch.object(es.time, "time", lambda: PRE_AUTH["now"]), mock.patch.object(
+        es.secrets, "token_hex", lambda n=32: PRE_AUTH["salt"].removeprefix("0x")
+    ):
+        header = es.build_escrow_pre_auth(
+            config,
+            network,
+            wallet.get_address(),
+            PRE_AUTH["worker"],
+            PRE_AUTH["bounty_usd"],
+            None,
+            wallet,
+            tier=PRE_AUTH["tier"],
+        )
+    return json.loads(header)
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_arc_usdc_domain_is_verified(chain_id):
+    network = get_network_by_chain_id(chain_id)
+    assert es.VERIFIED_USDC_DOMAINS[chain_id] == ("USDC", "2")
+    assert es.VERIFIED_USDC_DOMAINS[chain_id] == (
+        network.usdc_domain_name,
+        network.usdc_domain_version,
+    )
+
+
+def test_pre_auth_on_arc_signs_the_nonce_the_arc_escrow_computes(caplog):
+    wallet = _RecordingWallet()
+
+    with caplog.at_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing"):
+        header = _build_frozen(wallet, _arc_payment_config(5042))
+
+    payload = header["payload"]
+    assert payload["paymentInfo"] == PRE_AUTH["payment_info"]
+    assert payload["authorization"]["nonce"] == (
+        FIXTURE["chains"]["5042"]["pre_auth_get_hash"]["result"]
+    )
+    assert payload["authorization"]["to"] == FIXTURE["contracts"]["token_collector"]
+    assert header["paymentRequirements"]["network"] == "eip155:5042"
+    # Verified domain: no "signing escrow on UNVERIFIED chain" warning.
+    assert not [r for r in caplog.records if "UNVERIFIED" in r.getMessage()]
+
+    [typed] = wallet.typed
+    assert typed["domain"] == {
+        "name": "USDC",
+        "version": "2",
+        "chainId": 5042,
+        "verifyingContract": FIXTURE["contracts"]["usdc"],
+    }
+    signable = encode_typed_data(
+        domain_data=typed["domain"],
+        message_types=typed["types"],
+        message_data=typed["message"],
+    )
+    assert Account.recover_message(signable, signature=payload["signature"]) == (
+        wallet.get_address()
+    )
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_compute_escrow_nonce_equals_the_escrow_get_hash(chain_id):
+    nonce = es.compute_escrow_nonce(
+        chain_id,
+        ae.ESCROW_CONTRACTS[chain_id]["escrow"],
+        "0x" + ae.PAYMENT_INFO_TYPEHASH.hex(),
+        PRE_AUTH["payment_info"],
+    )
+    assert nonce == FIXTURE["chains"][str(chain_id)]["pre_auth_get_hash"]["result"]
+
+
+def test_a_wrong_domain_for_arc_is_refused_before_signing():
+    wallet = _RecordingWallet()
+
+    with pytest.raises(ValueError, match="EIP-712 domain mismatch"):
+        _build_frozen(wallet, _arc_payment_config(5042, domain=("USD Coin", "2")))
+    assert wallet.typed == []
