@@ -216,6 +216,7 @@ payment_requirements = {
 - Every vector `kind` has a case check in `_KINDS`; `tests/interop/test_conformance.py` flips every expectation of every case (`TestEveryCaseIsLive`) and runs a list of plausible wrong implementations that must each go red (`WRONG`). A new kind or case needs both, or it guards nothing
 - A VALID fixture must also pass the runner rules the schema cannot see: `en-migracion.json` declared an authority no endpoint served (R3.3) and was green in the schema suite for a whole PR
 - `publish.yml` runs `python -m pytest -q tests/interop` (schemas + runner + vectors) in its own `interop` job (read-only, no token) that `publish` needs; it triggers on tags and by hand only
+- R3.1 decides by OPERATION, not by method: an MCP `tools/list` or public read tool travels by POST and is a public read (never signed). The `request-signing` vector carries `operation`; a StackClient that signs every POST fails it
 - An event inbox decides in this order: signature (401), nonce (409 `nonce_replayed`), duplicate (200 `already_processed`), `stale_sequence`, accept. R5.9's "never 409" is about duplicates; the vector pins the order
 
 ### Settle Overrides, Retry & Non-Raising Settle (client.py, v0.36.0)

@@ -137,7 +137,7 @@ superficie viva tienen un [vector](#vectores); las demás lo suman cuando se imp
 |---|---|---|
 | [R1.3](01-descubrimiento.md) | El manifiesto se sirve como `application/json` y su cuerpo es distinto del de `/` | — (en línea) |
 | [R1.10](01-descubrimiento.md) | El mismo id de app en el manifiesto, en `source` y en el prefijo de `type` | `manifiesto-reglas-del-runner.json` (en `events.emits`) |
-| [R3.1](03-autenticacion.md) | Ningún GET a una ruta pública sale firmado | `r3-1-que-se-firma.json` |
+| [R3.1](03-autenticacion.md) | Ninguna lectura pública sale firmada, tampoco una lectura MCP por POST | `r3-1-que-se-firma.json` |
 | [R3.3](03-autenticacion.md) | Cada authority de una puerta es el host de alguna puerta del mismo manifiesto | `manifiesto-reglas-del-runner.json` |
 | [R5.2](05-eventos.md) | El primer segmento de `type` es `source` | — |
 | [R5.3](05-eventos.md) | `sequence` crece por `(source, subject.kind, subject.id)` | — |
@@ -161,7 +161,7 @@ del índice no lista, si una regla listada no la fija ningún caso, o si un caso
 | Archivo | `kind` | Reglas | Qué fija |
 |---|---|---|---|
 | [`l9-bloqueo-de-ip.json`](vectors/l9-bloqueo-de-ip.json) | `ip-ban` | L9 | Cuándo una respuesta de la API que habla L9 es su bloqueo de IP, y los vecinos que no lo son: la misma forma en otra API, el permiso denegado, el límite de tasa, `error` sin 403, `detail`, el cuerpo con `uvd_error` al lado |
-| [`r3-1-que-se-firma.json`](vectors/r3-1-que-se-firma.json) | `request-signing` | R3.1 | Qué petición sale firmada: toda escritura y toda lectura que necesita la identidad; ninguna lectura pública |
+| [`r3-1-que-se-firma.json`](vectors/r3-1-que-se-firma.json) | `request-signing` | R3.1 | Qué petición sale firmada: toda escritura y toda lectura que necesita la identidad; ninguna lectura pública, tampoco la de MCP que viaja por POST (decide la operación, no el método) |
 | [`r5-9-reintento-de-entrega.json`](vectors/r5-9-reintento-de-entrega.json) | `event-redelivery` | R5.9, R3.6, R3.7 | El reintento tras una respuesta perdida recibe 200 `already_processed`, no 409, porque cada intento lleva un nonce nuevo |
 | [`manifiesto-reglas-del-runner.json`](vectors/manifiesto-reglas-del-runner.json) | `manifest-rules` | R1.10, R3.3, R5.5 | Las reglas de un manifiesto que el esquema no ve |
 
