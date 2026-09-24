@@ -1375,7 +1375,8 @@ class AdvancedEscrowClient:
                 PAYER or the operator owner (`FEE_RECIPIENT()`) — never the
                 receiver, because paying yourself out of an escrow is the thing
                 escrow exists to stop. Omitted -> no order is sent, which the
-                facilitator's `off` and `log` modes still accept.
+                facilitator's `off` and `log` modes still accept. On a "v3"
+                chain the operator owner reads as `FEE_RECEIVER()` instead.
             lifecycle_auth: An order ALREADY signed by someone else — the wire
                 block ``{signer, deadline, nonce, signature}``. This is the
                 whole point when the payer signs in a browser and this process

@@ -513,6 +513,9 @@ def build_escrow_pre_auth(
 #   | refundInEscrow   | el receiver; el dueno del operador; el payer, pero solo  |
 #   |                  | pasado `authorizationExpiry`                             |
 #
+# El dueno del operador se lee con `FEE_RECIPIENT()` en los operadores v1/v2 y con
+# `FEE_RECEIVER()` en los v3 (Arc; `advanced_escrow.ESCROW_GENERATIONS`).
+#
 # El receiver NUNCA puede hacer release (auto-pagarse es justo lo que el escrow
 # existe para impedir) y el payer NUNCA puede refundear antes del vencimiento
 # (eso es el chargeback).
