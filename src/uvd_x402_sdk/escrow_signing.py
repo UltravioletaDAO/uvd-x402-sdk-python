@@ -80,6 +80,7 @@ if TYPE_CHECKING:
 import logging
 
 from . import erc7702 as _erc7702
+from .networks.base import to_base_units
 
 _log = logging.getLogger("uvd_x402_sdk.escrow_signing")
 
@@ -291,8 +292,9 @@ def build_escrow_pre_auth(
 
     Raises:
         ValueError: Unknown/incomplete network config, unknown tier, bounty
-            outside (0, $100], or a ``maxFeeBps`` that cannot cover the
-            operator's 1300 bps static fee.
+            outside (0, $100] or with a real digit below one base unit (float
+            noise is rounded, as the settle rounds it), or a ``maxFeeBps``
+            that cannot cover the operator's 1300 bps static fee.
     """
     _, _, to_checksum_address = _require_eth_libs()
 
@@ -377,7 +379,9 @@ def build_escrow_pre_auth(
         )
 
     now = int(time.time())
-    atomic = int(amount * (10**USDC_DECIMALS))
+    # The settle's conversion: float noise rounds, a real digit below one base
+    # unit raises before signing (int() truncated 0.3 - 0.1 to 199999).
+    atomic = to_base_units(amount, USDC_DECIMALS, unit=f"USDC on {network}")
 
     # The release window must outlast the human review. Base it on the task
     # deadline (the worker delivers near it) plus a generous buffer, and

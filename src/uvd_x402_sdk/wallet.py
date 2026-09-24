@@ -368,9 +368,16 @@ class EnvKeyAdapter:
             EIP3009Authorization.
 
         Raises:
-            ValueError: If required params are missing or network is invalid.
+            ValueError: If required params are missing or network is invalid,
+                or if ``amount_usdc`` has a real digit below one base unit
+                (float noise is rounded, as the settle rounds it).
         """
-        from uvd_x402_sdk.networks.base import get_network, get_token_config, normalize_network
+        from uvd_x402_sdk.networks.base import (
+            get_network,
+            get_token_config,
+            normalize_network,
+            to_base_units,
+        )
 
         # Validate required params
         to = params.get("to")
@@ -404,10 +411,11 @@ class EnvKeyAdapter:
         chain_id = params.get("chain_id") or network_config.chain_id
         usdc_contract = params.get("usdc_contract") or token_config.address
 
-        # Convert amount to base units
-        from decimal import Decimal
-
-        amount_base = int(Decimal(str(amount_usdc)) * (10 ** token_config.decimals))
+        # Convert amount to base units the way the settle does: float noise
+        # rounds, a real digit below one base unit raises before signing.
+        amount_base = to_base_units(
+            amount_usdc, token_config.decimals, unit=f"{token_type.upper()} on {normalized}"
+        )
 
         # Time parameters
         now = int(time.time())
@@ -590,7 +598,12 @@ class OWSWalletAdapter:
 
         Uses the OWS MCP server's ows_sign_eip3009 capability.
         """
-        from uvd_x402_sdk.networks.base import get_network, get_token_config, normalize_network
+        from uvd_x402_sdk.networks.base import (
+            get_network,
+            get_token_config,
+            normalize_network,
+            to_base_units,
+        )
 
         # Validate required params
         to = params.get("to")
@@ -619,9 +632,10 @@ class OWSWalletAdapter:
         if token_config is None:
             raise ValueError(f"Token '{token_type}' not supported on {normalized}")
 
-        from decimal import Decimal
-
-        amount_base = int(Decimal(str(amount_usdc)) * (10 ** token_config.decimals))
+        # Same conversion as the settle (see EnvKeyAdapter.sign_eip3009).
+        amount_base = to_base_units(
+            amount_usdc, token_config.decimals, unit=f"{token_type.upper()} on {normalized}"
+        )
 
         now = int(time.time())
         valid_after = params.get("valid_after", 0)
