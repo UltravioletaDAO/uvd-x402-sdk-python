@@ -42,7 +42,7 @@
       "schema": "manifest",
       "valid": true,
       "rule": "R5.16",
-      "why": "Buzón que acepta HMAC legado y ERC-8128 a la vez, con los dos sobres; API em-lenient con cualquier cadena."
+      "why": "Buzón que acepta HMAC legado y ERC-8128 a la vez, con los dos sobres; API em-lenient con cualquier cadena, que acepta también la authority de su puerta MCP (R3.3: toda authority es el host de una puerta del manifiesto)."
     },
     {
       "file": "uvd-stack/invalid/falta-schema.json",
