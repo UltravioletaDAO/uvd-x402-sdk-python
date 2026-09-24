@@ -709,7 +709,9 @@ class AdvancedEscrowClient:
 
         Raises:
             ValueError: If neither ``private_key`` nor ``wallet`` is provided,
-                        or if both are provided simultaneously.
+                        or if both are provided simultaneously, or if
+                        ``chain_id`` is not in the registry and no
+                        ``contracts`` dict was passed.
         """
         # ------------------------------------------------------------------
         # Resolve signing strategy: raw key vs WalletAdapter
@@ -774,9 +776,17 @@ class AdvancedEscrowClient:
                 "refund_request": registry["refund_request"],
                 "usdc": registry["usdc"],
             }
-        else:
-            # Fall back to the legacy Base Mainnet default.
+        elif chain_id == 8453:
+            # Legacy Base Mainnet default (reached only if 8453 left the registry).
             self.contracts = BASE_MAINNET_CONTRACTS
+        else:
+            # Base's addresses are not this chain's: falling back to them would
+            # aim every call at contracts that do not exist here.
+            raise ValueError(
+                f"No escrow contracts for chain {chain_id}: pass contracts= "
+                f"explicitly. Registered chains: "
+                f"{', '.join(str(c) for c in get_supported_escrow_chains())}"
+            )
 
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
 
