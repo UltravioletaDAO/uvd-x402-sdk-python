@@ -1,0 +1,212 @@
+{
+  "spec": "uvd-interop/1",
+  "kind": "request-signing",
+  "about": "R3.1 en el cable: se firma toda escritura y toda lectura cuyo receptor necesita la identidad; una lectura pública no se firma. Entrada: una petición saliente de una app hacia otra (request.method, request.url y request.headers, tal como salen) y needs_identity, que dice si el receptor decide algo por la identidad de quien llama (un cursor autenticado, una exención de pago por allowlist). Salida: expect.must_sign, la decisión (verdadera si el método es POST, PUT, PATCH o DELETE, o si needs_identity es verdadero; cualquier otro método es una lectura), y expect.conforms, si la petición la cumple. Una petición lleva firma si trae la cabecera Signature o la cabecera Signature-Input; la firma está completa si trae las dos. Los nombres de cabecera se comparan sin distinguir mayúsculas, como en HTTP. Cumple si debe firmarse y la firma está completa, o si no debe firmarse y no lleva firma. Los valores de las cabeceras tienen la forma de ERC-8128 pero no verifican: el veredicto no los lee.",
+  "cases": [
+    {
+      "id": "sondeo-de-salud-sin-firma",
+      "rule": "R3.1",
+      "why": "Un sondeo de salud es una lectura pública: sale sin firma.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/health/live",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": true}
+    },
+    {
+      "id": "head-publico-sin-firma",
+      "rule": "R3.1",
+      "why": "Todo lo que no es POST, PUT, PATCH ni DELETE es una lectura: un HEAD a una ruta pública tampoco se firma.",
+      "request": {
+        "method": "HEAD",
+        "url": "https://api.mercado.example/catalog",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": true}
+    },
+    {
+      "id": "lectura-publica-firmada",
+      "rule": "R3.1",
+      "why": "Una lectura de catálogo firmada gasta una firma por sondeo y, contra una API que emite nonces, pedidos de nonce y respuestas 401: no cumple.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/catalog",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\");created=1790000000;expires=1790000300;nonce=\"C1CZEy1O14Hm_AU4IgcpLg\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": false}
+    },
+    {
+      "id": "lectura-publica-firmada-con-cabeceras-en-minusculas",
+      "rule": "R3.1",
+      "why": "Los nombres de cabecera no distinguen mayúsculas: `signature-input` y `signature` también son una firma.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/catalog",
+        "headers": {
+          "user-agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "signature-input": "eth=(\"@method\" \"@authority\" \"@path\");created=1790000000;expires=1790000300;nonce=\"OAt1wSOl_bYQtHEWk2A6yA\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": false}
+    },
+    {
+      "id": "lectura-publica-con-signature-input-sola",
+      "rule": "R3.1",
+      "why": "Una firma a medias también es una firma: una lectura pública no lleva ninguna de las dos cabeceras.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/catalog",
+        "headers": {
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\");created=1790000000;expires=1790000300;nonce=\"7vqskXxFsFc3nyWahnuV3Q\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\""
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": false}
+    },
+    {
+      "id": "cursor-firmado",
+      "rule": "R3.1",
+      "why": "El cursor de eventos es una lectura que necesita la identidad (R5.11): sale firmado, con @query entre los componentes.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/events?after=184467&limit=100",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"@query\");created=1790000000;expires=1790000300;nonce=\"gmzj55QvoMqMymznR9iJng\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": true,
+      "expect": {"must_sign": true, "conforms": true}
+    },
+    {
+      "id": "cursor-sin-firma",
+      "rule": "R3.1",
+      "why": "Una lectura que necesita la identidad y sale sin firma no cumple: el receptor no puede decidir.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/events?after=184467&limit=100",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)"
+        }
+      },
+      "needs_identity": true,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "exencion-por-allowlist-firmada",
+      "rule": "R3.1",
+      "why": "Una lectura de pago que el receptor exime por allowlist necesita la identidad de quien llama: sale firmada.",
+      "request": {
+        "method": "GET",
+        "url": "https://api.mercado.example/reports/latest",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\");created=1790000000;expires=1790000300;nonce=\"sTRNLAjI06BP_hGKD1h4-A\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": true,
+      "expect": {"must_sign": true, "conforms": true}
+    },
+    {
+      "id": "escritura-firmada",
+      "rule": "R3.1",
+      "why": "Toda escritura entre apps se firma, necesite o no el receptor la identidad para otra cosa.",
+      "request": {
+        "method": "POST",
+        "url": "https://api.mercado.example/orders",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Content-Type": "application/json",
+          "Content-Digest": "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1790000000;expires=1790000300;nonce=\"8w-Oh98nCcSMhVFwt-bq6Q\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": true}
+    },
+    {
+      "id": "escritura-sin-firma",
+      "rule": "R3.1",
+      "why": "Un POST entre apps sin firma no cumple.",
+      "request": {
+        "method": "POST",
+        "url": "https://api.mercado.example/orders",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Content-Type": "application/json"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "escritura-con-signature-sola",
+      "rule": "R3.1",
+      "why": "Una firma sin Signature-Input está incompleta: el receptor no sabe qué cubre ni con qué llave.",
+      "request": {
+        "method": "POST",
+        "url": "https://api.mercado.example/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "reemplazo-sin-firma",
+      "rule": "R3.1",
+      "why": "PUT es una escritura.",
+      "request": {
+        "method": "PUT",
+        "url": "https://api.mercado.example/orders/ord-0001",
+        "headers": {"Content-Type": "application/json"}
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "actualizacion-sin-firma",
+      "rule": "R3.1",
+      "why": "PATCH es una escritura.",
+      "request": {
+        "method": "PATCH",
+        "url": "https://api.mercado.example/orders/ord-0001",
+        "headers": {"Content-Type": "application/json"}
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "borrado-sin-firma",
+      "rule": "R3.1",
+      "why": "DELETE es una escritura, aunque no lleve cuerpo.",
+      "request": {
+        "method": "DELETE",
+        "url": "https://api.mercado.example/orders/ord-0001",
+        "headers": {}
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    }
+  ]
+}

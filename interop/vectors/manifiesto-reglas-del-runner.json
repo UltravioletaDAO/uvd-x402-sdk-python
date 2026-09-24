@@ -1,0 +1,213 @@
+{
+  "spec": "uvd-interop/1",
+  "kind": "manifest-rules",
+  "about": "Las reglas de un manifiesto que el esquema no puede expresar. Cada caso es el manifiesto base con su patch aplicado como JSON Merge Patch (RFC 7396: un objeto se mezcla clave por clave, null borra la clave y cualquier otro valor la reemplaza, arrays incluidos); el resultado valida contra schemas/manifest.schema.json. Salida: expect.findings, el conjunto exacto de hallazgos, cada uno con la regla y el JSON Pointer del valor que la rompe. R1.10: el primer segmento de cada tipo de events.emits (hasta el primer punto) es igual a app. R3.3: cada valor de endpoints.<puerta>.erc8128.authorities es igual a la authority de la url de alguna puerta del mismo manifiesto. La authority de una url es su host en minúsculas y, si la url trae puerto, el puerto leído como número, como lo lee un parser de URL (WHATWG): se omite si está vacío o vale 443, el de omisión de https, y si no se escribe en decimal sin ceros a la izquierda, después de dos puntos. R5.5: la fecha de generated_at existe en el calendario gregoriano proléptico (el año 0000 incluido; un año es bisiesto si es divisible por 4 y no por 100, o si es divisible por 400); la hora no se mira, y un segundo 60 (segundo intercalar) es válido. expect.findings se compara sin importar el orden.",
+  "base": {
+    "schema": "uvd.stack/1",
+    "app": "mercado-ejemplo",
+    "version": "1.4.0",
+    "git_sha": "3f9c2ab",
+    "generated_at": "2026-09-24T02:00:00Z",
+    "endpoints": {
+      "api": {
+        "url": "https://api.mercado.example",
+        "auth": ["none", "erc8128"],
+        "erc8128": {
+          "authorities": ["api.mercado.example"],
+          "chain_ids": [8453],
+          "preset": "canonical-strict",
+          "nonce": {"source": "issued", "endpoint": "https://api.mercado.example/auth/erc8128/nonce"}
+        }
+      },
+      "mcp": {
+        "url": "https://mcp.mercado.example/mcp",
+        "auth": ["none", "oauth2.1"]
+      },
+      "event_inbox": {
+        "url": "https://events.mercado.example/inbox",
+        "auth": ["erc8128"],
+        "erc8128": {
+          "authorities": ["events.mercado.example"],
+          "chain_ids": [8453],
+          "preset": "evento-s2s",
+          "nonce": {"source": "unseen"}
+        }
+      }
+    },
+    "identity": {"service_signer": "0x5eed00000000000000000000000000000000cafe"},
+    "payments": {"charges": false},
+    "rate_limits": [],
+    "events": {
+      "emits": ["mercado-ejemplo.order.paid"],
+      "consumes": [],
+      "envelopes": ["uvd.event/1"]
+    },
+    "health": {
+      "live": "https://api.mercado.example/health/live",
+      "ready": "https://api.mercado.example/health/ready"
+    }
+  },
+  "cases": [
+    {
+      "id": "base",
+      "rule": "R3.3",
+      "why": "Cada authority es el host de su propia puerta, el tipo emitido empieza por la app y la fecha existe.",
+      "patch": {},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "authority-de-otra-puerta-propia",
+      "rule": "R3.3",
+      "why": "La authority puede ser el host de cualquier puerta del mismo manifiesto, no solo el de la suya.",
+      "patch": {"endpoints": {"api": {"erc8128": {"authorities": ["mcp.mercado.example"]}}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "authority-ajena",
+      "rule": "R3.3",
+      "why": "Aceptar la authority de otra app deja repetir en esta puerta una firma capturada en la otra.",
+      "patch": {"endpoints": {"api": {"erc8128": {"authorities": ["api.otra-app.example"]}}}},
+      "expect": {"findings": [{"rule": "R3.3", "instance_path": "/endpoints/api/erc8128/authorities/0"}]}
+    },
+    {
+      "id": "una-propia-y-una-ajena",
+      "rule": "R3.3",
+      "why": "El hallazgo apunta a la authority ajena, no a la lista entera.",
+      "patch": {"endpoints": {"api": {"erc8128": {"authorities": ["api.mercado.example", "api.otra-app.example"]}}}},
+      "expect": {"findings": [{"rule": "R3.3", "instance_path": "/endpoints/api/erc8128/authorities/1"}]}
+    },
+    {
+      "id": "authority-ajena-en-el-buzon",
+      "rule": "R3.3",
+      "why": "La regla se aplica a todas las puertas que publican una política, no solo a api.",
+      "patch": {"endpoints": {"event_inbox": {"erc8128": {"authorities": ["inbox.otra-app.example"]}}}},
+      "expect": {"findings": [{"rule": "R3.3", "instance_path": "/endpoints/event_inbox/erc8128/authorities/0"}]}
+    },
+    {
+      "id": "url-con-el-puerto-443",
+      "rule": "R3.3",
+      "why": "El puerto 443 de una url https es el de omisión: su authority no lo lleva.",
+      "patch": {"endpoints": {"api": {"url": "https://api.mercado.example:443"}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "url-con-el-puerto-0443",
+      "rule": "R3.3",
+      "why": "El puerto se lee como número: 0443 es 443, el de omisión.",
+      "patch": {"endpoints": {"api": {"url": "https://api.mercado.example:0443"}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "url-con-el-puerto-vacio",
+      "rule": "R3.3",
+      "why": "Los dos puntos sin puerto dejan el de omisión.",
+      "patch": {"endpoints": {"api": {"url": "https://api.mercado.example:/"}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "url-con-el-host-en-mayusculas",
+      "rule": "R3.3",
+      "why": "El host no distingue mayúsculas; la authority publicada va en minúsculas.",
+      "patch": {"endpoints": {"api": {"url": "https://API.Mercado.Example"}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "url-con-un-puerto-propio",
+      "rule": "R3.3",
+      "why": "Un puerto que no es el de omisión es parte de la authority, en la url y en la lista.",
+      "patch": {"endpoints": {"api": {"url": "https://api.mercado.example:8443", "erc8128": {"authorities": ["api.mercado.example:8443"]}}}},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "authority-sin-el-puerto-de-la-puerta",
+      "rule": "R3.3",
+      "why": "Si la puerta atiende en un puerto propio, la authority sin puerto no es la suya: el cliente firma host y puerto.",
+      "patch": {"endpoints": {"api": {"url": "https://api.mercado.example:8443"}}},
+      "expect": {"findings": [{"rule": "R3.3", "instance_path": "/endpoints/api/erc8128/authorities/0"}]}
+    },
+    {
+      "id": "emite-un-tipo-de-otra-app",
+      "rule": "R1.10",
+      "why": "Un tipo emitido empieza por el id de la app que lo emite.",
+      "patch": {"events": {"emits": ["otra-app.order.paid"]}},
+      "expect": {"findings": [{"rule": "R1.10", "instance_path": "/events/emits/0"}]}
+    },
+    {
+      "id": "emite-uno-propio-y-uno-ajeno",
+      "rule": "R1.10",
+      "why": "El hallazgo apunta al tipo ajeno.",
+      "patch": {"events": {"emits": ["mercado-ejemplo.order.paid", "lector-ejemplo.review.created"]}},
+      "expect": {"findings": [{"rule": "R1.10", "instance_path": "/events/emits/1"}]}
+    },
+    {
+      "id": "prefijo-de-texto-que-no-es-el-segmento",
+      "rule": "R1.10",
+      "why": "Se compara el primer segmento, no un prefijo de texto: mercado-ejemplo-dos no es mercado-ejemplo.",
+      "patch": {"events": {"emits": ["mercado-ejemplo-dos.order.paid"]}},
+      "expect": {"findings": [{"rule": "R1.10", "instance_path": "/events/emits/0"}]}
+    },
+    {
+      "id": "treinta-de-febrero",
+      "rule": "R5.5",
+      "why": "El esquema deja pasar el día 30 en cualquier mes; febrero no lo tiene.",
+      "patch": {"generated_at": "2026-02-30T00:00:00Z"},
+      "expect": {"findings": [{"rule": "R5.5", "instance_path": "/generated_at"}]}
+    },
+    {
+      "id": "treinta-y-uno-de-abril",
+      "rule": "R5.5",
+      "why": "Abril tiene 30 días.",
+      "patch": {"generated_at": "2026-04-31T00:00:00Z"},
+      "expect": {"findings": [{"rule": "R5.5", "instance_path": "/generated_at"}]}
+    },
+    {
+      "id": "veintinueve-de-febrero-de-un-anio-bisiesto",
+      "rule": "R5.5",
+      "why": "2028 es bisiesto.",
+      "patch": {"generated_at": "2028-02-29T12:00:00Z"},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "veintinueve-de-febrero-de-un-anio-comun",
+      "rule": "R5.5",
+      "why": "2026 no es bisiesto.",
+      "patch": {"generated_at": "2026-02-29T12:00:00Z"},
+      "expect": {"findings": [{"rule": "R5.5", "instance_path": "/generated_at"}]}
+    },
+    {
+      "id": "veintinueve-de-febrero-de-2100",
+      "rule": "R5.5",
+      "why": "Un año divisible por 100 y no por 400 no es bisiesto.",
+      "patch": {"generated_at": "2100-02-29T00:00:00Z"},
+      "expect": {"findings": [{"rule": "R5.5", "instance_path": "/generated_at"}]}
+    },
+    {
+      "id": "veintinueve-de-febrero-de-2000",
+      "rule": "R5.5",
+      "why": "Un año divisible por 400 es bisiesto.",
+      "patch": {"generated_at": "2000-02-29T00:00:00Z"},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "veintinueve-de-febrero-del-anio-cero",
+      "rule": "R5.5",
+      "why": "RFC 3339 admite el año 0000, y en el calendario gregoriano proléptico es bisiesto (divisible por 400).",
+      "patch": {"generated_at": "0000-02-29T00:00:00Z"},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "segundo-intercalar",
+      "rule": "R5.5",
+      "why": "RFC 3339 admite el segundo 60, y la regla mira la fecha, no la hora.",
+      "patch": {"generated_at": "2026-12-31T23:59:60Z"},
+      "expect": {"findings": []}
+    },
+    {
+      "id": "sin-generated-at",
+      "rule": "R5.5",
+      "why": "generated_at es opcional: sin él, no hay fecha que verificar.",
+      "patch": {"generated_at": null},
+      "expect": {"findings": []}
+    }
+  ]
+}

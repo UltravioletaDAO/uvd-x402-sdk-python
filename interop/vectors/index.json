@@ -1,0 +1,22 @@
+{
+  "spec": "uvd-interop/1",
+  "about": "Vectores de conformidad de las reglas que JSON Schema no puede expresar. Cada vector es un archivo con un kind; este índice dice qué archivo tiene cada kind y qué reglas fija. Un runner corre todos los archivos listados contra su implementación y falla si un archivo de esta carpeta no está listado, si no conoce un kind, si un archivo no tiene casos, si un caso cita una regla que su entrada de este índice no lista, si una regla listada no la fija ningún caso, o si un caso no da lo que dice expect. El formato de cada kind está en el about de su archivo.",
+  "vectors": {
+    "ip-ban": {
+      "file": "l9-bloqueo-de-ip.json",
+      "rules": ["L9"]
+    },
+    "request-signing": {
+      "file": "r3-1-que-se-firma.json",
+      "rules": ["R3.1"]
+    },
+    "event-redelivery": {
+      "file": "r5-9-reintento-de-entrega.json",
+      "rules": ["R5.9", "R3.6", "R3.7"]
+    },
+    "manifest-rules": {
+      "file": "manifiesto-reglas-del-runner.json",
+      "rules": ["R1.10", "R3.3", "R5.5"]
+    }
+  }
+}
