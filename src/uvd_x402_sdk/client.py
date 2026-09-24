@@ -76,6 +76,7 @@ from uvd_x402_sdk.networks import (
     is_caip2_format,
     parse_caip2_network,
 )
+from uvd_x402_sdk.networks.base import to_base_units
 
 logger = logging.getLogger(__name__)
 
@@ -1667,13 +1668,14 @@ class X402Client:
                     )
 
         # Convert USD to token amount. With an explicit decimals the conversion
-        # stays in Decimal: float(Decimal("0.07")) is 0.070000000000000007, and
+        # stays exact: float(Decimal("0.07")) is 0.070000000000000007, and
         # at 18 decimals that rounds into a different amount than the payer
-        # signed, which the facilitator rejects.
+        # signed, which the facilitator rejects. Digits below one base unit
+        # raise on both paths instead of being truncated.
         if token_decimals is not None:
             if token_decimals < 0:
                 raise ValueError(f"token_decimals must be non-negative, got {token_decimals}")
-            expected_amount_wei = int(expected_amount_usd * (Decimal(10) ** token_decimals))
+            expected_amount_wei = to_base_units(expected_amount_usd, token_decimals)
         else:
             expected_amount_wei = network_config.get_token_amount(expected_amount_usd)
 

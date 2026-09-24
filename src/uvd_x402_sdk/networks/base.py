@@ -11,6 +11,7 @@ This module provides the foundation for network configuration, including:
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
+from fractions import Fraction
 from typing import Dict, List, Literal, Optional, Any, Union
 
 
@@ -87,6 +88,53 @@ class NetworkType(Enum):
         return network_type == cls.SUI
 
 
+def to_base_units(
+    amount: Union[Decimal, float, int, str],
+    decimals: int,
+    *,
+    unit: str = "the token",
+) -> int:
+    """
+    Convert an amount in whole tokens into base units, exactly or not at all.
+
+    A payer signs a whole number of base units. An amount with digits below
+    one base unit cannot be signed as written: ``0.0000015`` or ``5E-7`` with
+    6 decimals, a float sum read as ``0.30000000000000004``, a ``Decimal``
+    built from the binary float ``2.01``. It raises instead of being
+    truncated, because truncating charges an amount nobody wrote (``5E-7``
+    became a price of 0). Trailing zeros are not such digits: ``2.010`` is
+    ``2010000`` with 6 decimals.
+
+    The product is exact at any length (``Fraction``): a ``Decimal`` product
+    rounds to the context's 28 digits first, which can turn a sub-unit digit
+    into a whole number. A float or a string is read through its decimal form
+    (``str``).
+
+    Args:
+        amount: Amount in whole tokens (e.g. ``Decimal("10.50")``)
+        decimals: Decimals of the token
+        unit: What the base units belong to, for the error message
+
+    Returns:
+        The amount in base units (e.g. 10500000 for 6 decimals)
+
+    Raises:
+        ValueError: If the amount is not finite, or has digits below one base
+            unit of a token with ``decimals`` decimals.
+    """
+    value = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+    if not value.is_finite():
+        raise ValueError(f"amount must be a finite number, got {value}")
+    scaled = Fraction(value) * Fraction(10) ** decimals
+    if scaled.denominator != 1:
+        raise ValueError(
+            f"{format(value, 'f')} is not a whole number of base units of {unit} "
+            f"({decimals} decimals), so no payer can sign it exactly. Write the "
+            f"price with at most {decimals} decimal places."
+        )
+    return scaled.numerator
+
+
 @dataclass
 class NetworkConfig:
     """
@@ -148,8 +196,9 @@ class NetworkConfig:
         shortest decimal form (``str``), never scaled as a binary float. Scaled
         as a float, 151 of the 9,999 prices from $0.01 to $99.99 came out one
         base unit short (``int(2.01 * 10**6)`` is ``2009999``) while the payer
-        signed the exact amount. A fraction below one base unit is still
-        dropped (``int``), as before.
+        signed the exact amount. A fraction below one base unit raises (see
+        :func:`to_base_units`); it used to be dropped, so the seller required
+        an amount it never wrote.
 
         Args:
             usd_amount: Amount in USD (e.g., ``Decimal("10.50")``, ``10.50``
@@ -163,11 +212,14 @@ class NetworkConfig:
                 pegged to the dollar. Scaling by the decimals only turns
                 dollars into base units when one whole unit IS one dollar;
                 on XRPL it would charge 1 XRP for a price written as $1.00.
+                Also if the amount is not finite, or has digits below one base
+                unit (``0.0000015`` with 6 decimals).
         """
         if not self.usd_pegged:
             raise ValueError(self.usd_conversion_error())
-        amount = usd_amount if isinstance(usd_amount, Decimal) else Decimal(str(usd_amount))
-        return int(amount * (Decimal(10) ** self.usdc_decimals))
+        return to_base_units(
+            usd_amount, self.usdc_decimals, unit=f"{self.default_token.upper()} on {self.name}"
+        )
 
     def usd_conversion_error(self) -> str:
         """The message for refusing to price this network in dollars.
