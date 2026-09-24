@@ -88,6 +88,18 @@
       "expect": {"ip_ban": false}
     },
     {
+      "id": "429-con-solo-error",
+      "rule": "L9",
+      "why": "Un 429 con solo `error` y Retry-After es un límite de tasa, no el bloqueo: la marca de L9 es el 403. Confundirlos hace esperar una hora donde bastaba Retry-After, o martillar donde había que parar.",
+      "profile": "L9",
+      "response": {
+        "status": 429,
+        "headers": {"Content-Type": "application/json", "Retry-After": "60"},
+        "body": "{\"error\": \"rate_limit_exceeded\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
       "id": "solo-error-pero-no-403",
       "rule": "L9",
       "why": "El 409 de una clave de idempotencia usada con otro cuerpo (perfil L10) tiene solo `error`, y no es un bloqueo: el status tiene que ser 403.",
@@ -144,6 +156,18 @@
         "status": 403,
         "headers": {"Content-Type": "text/html"},
         "body": "<html><body><h1>403 Forbidden</h1></body></html>"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "cuerpo-json-que-no-es-objeto",
+      "rule": "L9",
+      "why": "Un array JSON con el texto \"error\" no tiene claves: la regla pide un objeto.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "[\"error\"]"
       },
       "expect": {"ip_ban": false}
     },
