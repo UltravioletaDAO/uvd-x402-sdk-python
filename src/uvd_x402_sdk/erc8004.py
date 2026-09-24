@@ -1,6 +1,3 @@
-import re
-
-from uvd_x402_sdk.networks.base import to_base_units
 """
 ERC-8004 Trustless Agents client for x402 SDK.
 
@@ -36,6 +33,7 @@ Example:
     ... )
 """
 
+import re
 from enum import Enum
 from typing import Any, Literal, Optional, Union
 
@@ -43,6 +41,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
+from uvd_x402_sdk.networks.base import to_base_units
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"

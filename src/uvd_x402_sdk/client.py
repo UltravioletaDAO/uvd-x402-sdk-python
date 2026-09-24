@@ -3096,6 +3096,11 @@ class X402Client:
                 chains), the signature will not verify unless the caller
                 injects the domain the verifier expects.
 
+        The amount is converted as the settle converts it
+        (:func:`~uvd_x402_sdk.networks.base.to_base_units`): float noise is
+        rounded to the nearest base unit (``0.3 - 0.1`` signs 200000 at 6
+        decimals), so the payer signs what the seller's requirements ask for.
+
         Returns:
             Base64-encoded X-PAYMENT header value
 
@@ -3103,6 +3108,9 @@ class X402Client:
             RuntimeError: If no signer is connected
             ImportError: If eth-account is not installed
             UnsupportedNetworkError: If chain is invalid
+            ValueError: If the amount has a real digit below one base unit
+                (``0.0000015`` at 6 decimals), is negative or is not finite,
+                before anything is signed
 
         Example:
             >>> header = client.create_authorization(
@@ -3174,13 +3182,22 @@ class X402Client:
                 f"Token '{token_type}' not supported on {normalized}"
             )
 
-        # Convert amount to base units
-        atomic = Decimal(str(amount_usd)) * (10 ** token_config.decimals)
-        if token_type == "eurc" and (
-            not atomic.is_finite() or atomic <= 0 or atomic != atomic.to_integral_value()
-        ):
-            raise ValueError("EURC amount must be positive euros with at most 6 decimal places")
-        amount_base = int(atomic)
+        # Convert amount to base units with the settle's own conversion: float
+        # noise rounds to the nearest base unit as the seller's requirements
+        # round it, and a real digit below one base unit raises here, before
+        # anything is signed. int() truncated: 0.3 - 0.1 signed 199999 where
+        # the settle requires 200000, which the facilitator refuses.
+        eurc_error = "EURC amount must be positive euros with at most 6 decimal places"
+        try:
+            amount_base = to_base_units(
+                amount_usd, token_config.decimals, unit=f"{token_type.upper()} on {normalized}"
+            )
+        except ValueError as exc:
+            if token_type == "eurc":
+                raise ValueError(eurc_error) from exc
+            raise
+        if token_type == "eurc" and amount_base <= 0:
+            raise ValueError(eurc_error)
 
         # Build EIP-3009 TransferWithAuthorization
         now = int(time.time())

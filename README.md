@@ -309,6 +309,19 @@ async def generate(
     return {"result": "generated", "payer": payment.payer_address}
 ```
 
+To charge by path instead, add `X402Middleware`. Its `protected_paths` are full request paths,
+mount included, matched against the ASGI scope path (the one the app routes on), independent of the
+`Host` header:
+
+```python
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
+
+app.add_middleware(X402Middleware, config=config, protected_paths={"/api/premium": Decimal("5.00")})
+# Good practice for any public app: answer only for the hosts you serve.
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["api.example.com"])
+```
+
 ### Django
 
 ```python
