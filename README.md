@@ -1222,6 +1222,12 @@ result = client.process_payment(
 against the domain the verifier resolves. A partial domain (missing `name` or `version`)
 raises `ValueError` before anything is signed or sent.
 
+`maxTimeoutSeconds` of the requirements the client sends is `X402Config.max_timeout_seconds`
+(default `60`; `X402Client(..., max_timeout_seconds=300)` passes it through). Native Hedera
+keeps its 180. The USD amount is converted in `Decimal` (`Decimal("2.01")` is `2010000` base
+units of USDC); pass `token_decimals` with an `asset` whose decimals are not the network's
+USDC's.
+
 ### Extra requirements and the proof of payment
 
 ```python
@@ -1261,9 +1267,14 @@ client = X402Client(
 ```
 
 Every facilitator call of the client (`/verify`, `/settle` and its timeout fallback,
-`/supported`, ...) goes through the `httpx.Client` passed as `http_client`. It stays the
-caller's: `client.close()` does not close it. The SDK still sets its own timeout on each
-request.
+`/supported`, ...) goes through the `httpx.Client` passed as `http_client`, and so do the
+requests of the buyer's `fetch()`, the paid one included, unless `fetch()` gets an
+`http_client` of its own. It stays the caller's: `client.close()` does not close it.
+
+The SDK sets its own timeout on `/verify`, `/settle` and its timeout fallback, `/accepts`
+and the `/supported` of route validation. `get_version()`, `get_supported()`,
+`get_blacklist()`, `health_check()`, the other GETs and `fetch()` use the timeout of the
+client passed in.
 
 ### Opt-in settle retry (anti-double-settle guard)
 
@@ -1511,14 +1522,17 @@ reaches the buyer.
 
 ```python
 result = client.try_settle_payment(payload, Decimal("0.10"), retry=True)
-# {"success": True, "tx_hash": "0x...", "payment_id": None, "error_code": None, "error": None}
+# {"success": True, "tx_hash": "0x...", "payment_id": None, "error_code": None, "error": None,
+#  "proof_of_payment": None, "safe_to_retry": None}
 ```
 
 Same arguments as `settle_payment()`, but payment-flow errors come back as data instead of
 exceptions. **`success=False` with `tx_hash` set is the double-settle warning shape**: the
 facilitator returned an error status AFTER broadcasting — verify on-chain, do not re-send.
-`payment_id` and `error_code` come back alongside it; both keys are always present (`None`
-on the happy path) so reading them never depends on whether the settle worked.
+`payment_id`, `error_code` and `safe_to_retry` (`FacilitatorError.safe_to_retry`) come back
+alongside it. On success, `proof_of_payment` is the facilitator's proof as its own camelCase
+dict when `extra` asked for one. Every key is always present (`None` when it does not apply),
+so reading one never depends on whether the settle worked.
 
 ---
 
