@@ -1222,6 +1222,49 @@ result = client.process_payment(
 against the domain the verifier resolves. A partial domain (missing `name` or `version`)
 raises `ValueError` before anything is signed or sent.
 
+### Extra requirements and the proof of payment
+
+```python
+from uvd_x402_sdk import ERC8004_EXTENSION_ID
+
+response = client.settle_payment(
+    payload,
+    Decimal("0.10"),
+    extra={ERC8004_EXTENSION_ID: {"includeProof": True}},   # "8004-reputation"
+)
+proof = response.proof_of_payment          # ProofOfPayment, or None
+if proof is not None:
+    wire_proof = proof.model_dump(by_alias=True)   # the facilitator's own object
+```
+
+`extra` (on `settle_payment()` and `try_settle_payment()`) is merged into
+`paymentRequirements.extra`, values of any JSON type, on every attempt and in both envelopes.
+An entry the SDK already set (the EIP-712 `name` / `version`, Hedera's `feePayer`) may be
+repeated with the same value; another value raises `ValueError` before anything is sent (use
+`eip712_domain`). With the `8004-reputation` extension, x402-rs returns `proofOfPayment` on a
+network with ERC-8004, and `SettleResponse.proof_of_payment` carries it. It is `None` without
+one, and `None` when the one sent does not parse: the settle still succeeds.
+
+### Seeing the facilitator's raw answers (`http_client`)
+
+```python
+import httpx
+
+def keep(response: httpx.Response) -> None:
+    response.read()
+    audit_log.write(response.request.url.path, response.status_code, response.text)
+
+client = X402Client(
+    recipient_address="0xYourWallet...",
+    http_client=httpx.Client(event_hooks={"response": [keep]}),
+)
+```
+
+Every facilitator call of the client (`/verify`, `/settle` and its timeout fallback,
+`/supported`, ...) goes through the `httpx.Client` passed as `http_client`. It stays the
+caller's: `client.close()` does not close it. The SDK still sets its own timeout on each
+request.
+
 ### Opt-in settle retry (anti-double-settle guard)
 
 ```python
@@ -1433,6 +1476,36 @@ remedy on offer.
 `exc.retryable` is the verdict: **the status is the ceiling and the body can only lower
 it**, never raise it. A body claiming `retryable: true` on a `400` will not make the SDK
 re-send a credential the facilitator genuinely rejected.
+
+`exc.safe_to_retry` answers the question x402-rs answers per failure in its
+`docs/settle-errors.md`: was anything sent?
+
+| `safe_to_retry` | When | What to do |
+|---|---|---|
+| `True` | a `5xx` with `safeToRetry: true` (the receipt rail), or a writer-lease `reason` in `WRITE_NOT_ATTEMPTED_REASONS` | resend the same request, same `Idempotency-Key` |
+| `False` | `retryable: false`, a `transaction`, a receipt `pending` / `unknown`, an `error` in `SETTLE_MAY_HAVE_SENT_ERRORS` (`settlement_unconfirmed`, `broadcast_uncertain`, `receipt_pending`, `receipt_response_unreadable`, `idempotency_cache_corrupt`), a `reason` in `WRITE_AMBIGUOUS_REASONS` (`forward_unconfirmed`, `forward_failed`), `202 settlement_in_progress`, an admitted authorization's `409` | the payment may be on chain: look it up, never sign again |
+| `None` | anything else: a refusal, no answer at all, `upstream_rpc_unavailable`, `upstream_nonce_or_mempool`, `upstream_rate_limited`, `facilitator_signer_unfunded` | the facilitator did not say; `retryable` still says whether it is transient |
+
+`forward_failed` and the four tokens of the last row mean "nothing was sent" from x402-rs
+2.39.6 on. Up to 2.39.5 the same answers, with the same status and `Retry-After`, also covered
+a transaction whose send answer was lost, and nothing in the answer says which version sent
+it. `safe_to_retry` never licenses signing a new authorization: resending the same one cannot
+move the money twice, because the token's own nonce stops it.
+
+### What a failed settle or verify carries
+
+```python
+try:
+    client.settle_payment(payload, Decimal("0.10"))
+except PaymentSettlementError as exc:
+    exc.status_code     # 200 for success: false or a failed re-validation
+    exc.error_reason    # the facilitator's errorReason (invalidReason on a re-validation)
+    exc.response_body   # its body, at most MAX_ERROR_BODY_BYTES (4096 bytes)
+```
+
+`PaymentVerificationError` carries the same three (`error_reason` is `/verify`'s
+`invalidReason`). The message, `reason` and `to_dict()` are what they were, so nothing new
+reaches the buyer.
 
 ### Non-raising settle
 
