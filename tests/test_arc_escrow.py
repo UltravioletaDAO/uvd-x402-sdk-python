@@ -183,3 +183,251 @@ def test_client_nonce_equals_the_escrow_get_hash(chain_id):
 
     assert recorded["to"] == ae.ESCROW_CONTRACTS[chain_id]["escrow"]
     assert _client(chain_id)._compute_nonce(_pre_auth_payment_info()) == recorded["result"]
+
+
+# ---------------------------------------------------------------------------
+# Generation and operator ABI
+# ---------------------------------------------------------------------------
+
+PI_ABI = "(address,address,address,address,uint120,uint48,uint48,uint48,uint16,uint16,address,uint256)"
+FACTORY_CODE = bytes.fromhex(FIXTURE["operator_factory_code_5042"].removeprefix("0x"))
+PUSH4 = bytes([0x63])
+
+
+def _selector(entry: dict) -> bytes:
+    def canonical(param: dict) -> str:
+        if param["type"] == "tuple":
+            return "(" + ",".join(canonical(c) for c in param["components"]) + ")"
+        return param["type"]
+
+    signature = entry["name"] + "(" + ",".join(canonical(p) for p in entry["inputs"]) + ")"
+    return keccak(text=signature)[:4]
+
+
+def test_every_escrow_chain_has_an_explicit_generation():
+    assert set(ae.ESCROW_GENERATIONS) == set(ae.ESCROW_CONTRACTS)
+    assert set(ae.ESCROW_GENERATIONS.values()) <= {"v1", "v2", "v3"}
+
+
+def test_generations_and_the_abi_each_one_gets():
+    for chain_id in ARC_CHAINS:
+        assert ae.get_escrow_generation(chain_id) == "v3"
+        assert ae.get_operator_abi(chain_id) is ae.OPERATOR_ABI_V3
+        assert _client(chain_id).generation == "v3"
+    assert ae.get_escrow_generation(1187947933) == "v2"
+    assert ae.get_operator_abi(1187947933) is ae.OPERATOR_ABI_V2
+    assert ae.get_escrow_generation(8453) == "v1"
+    assert ae.get_operator_abi(8453) is ae.OPERATOR_ABI
+    # A chain outside the registry (explicit contracts) keeps the legacy ABI.
+    assert ae.get_escrow_generation(999999) == "v1"
+    # Kept for importers, and derived: only the "v2" chains.
+    assert ae.CREATE3_CHAIN_IDS == {1187947933}
+    assert ae.CREATE3_CHAIN_IDS == {
+        c for c, g in ae.ESCROW_GENERATIONS.items() if g == "v2"
+    }
+
+
+def test_v3_selectors_are_the_ones_measured():
+    by_name = {entry["name"]: _selector(entry).hex() for entry in ae.OPERATOR_ABI_V3}
+    assert by_name["capture"] == "f12b86f6"
+    assert by_name["void"] == "c3c5090e"
+    assert by_name["FEE_RECEIVER"] == "d3e78e4d"
+
+
+@pytest.mark.parametrize("entry", ae.OPERATOR_ABI_V3, ids=lambda e: e["name"])
+def test_every_v3_function_is_in_the_recorded_factory_code(entry):
+    assert PUSH4 + _selector(entry) in FACTORY_CODE, entry["name"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [e for e in ae.OPERATOR_ABI + ae.OPERATOR_ABI_V2],
+    ids=lambda e: f"{e['name']}/{len(e['inputs'])}",
+)
+def test_no_legacy_operator_function_is_in_that_code(entry):
+    # release / refundInEscrow / refundPostEscrow / the 4-argument charge:
+    # a call built from either legacy ABI would hit no function on Arc.
+    assert _selector(entry) not in FACTORY_CODE, entry["name"]
+
+
+def test_the_v3_error_for_nothing_to_void_is_not_the_partial_one():
+    assert not issubclass(ae.EscrowNothingToVoidError, ValueError)
+
+
+# ---------------------------------------------------------------------------
+# v3 calls
+# ---------------------------------------------------------------------------
+
+from web3 import Web3  # noqa: E402
+from web3.providers.base import BaseProvider  # noqa: E402
+
+
+class _RecordedChain(BaseProvider):
+    """Answers eth_call only for the given (to, data); any other RPC fails.
+
+    A send needs eth_getTransactionCount / eth_gasPrice /
+    eth_sendRawTransaction first, so a refusal that let one through fails here
+    even if ``_send_tx`` were not replaced.
+    """
+
+    def __init__(self, chain_id: int, answers: dict):
+        super().__init__()
+        self.chain_id = chain_id
+        self.answers = {(to.lower(), data.lower()): res for (to, data), res in answers.items()}
+        self.methods: list[str] = []
+
+    def make_request(self, method, params):
+        self.methods.append(method)
+        if method == "eth_chainId":
+            result = hex(self.chain_id)
+        elif method == "eth_call":
+            key = (params[0]["to"].lower(), params[0]["data"].lower())
+            if key not in self.answers:
+                raise AssertionError(f"eth_call not recorded: {key}")
+            result = self.answers[key]
+        else:
+            raise AssertionError(f"unexpected RPC {method}")
+        return {"jsonrpc": "2.0", "id": len(self.methods), "result": result}
+
+
+def _state_word(capturable: int, refundable: int = 0) -> str:
+    """A paymentState answer for a test double (the recorded one is all zeros)."""
+    return "0x" + encode(["bool", "uint120", "uint120"], [True, capturable, refundable]).hex()
+
+
+def _arc_client(chain_id: int, payment_state: str | None = None):
+    """Client on ``chain_id`` whose chain answers getHash / paymentState only.
+
+    getHash is the answer recorded from Arc for the fixture's client
+    PaymentInfo; paymentState is the recorded one unless the test gives its own.
+    """
+    recorded = FIXTURE["chains"][str(chain_id)]
+    get_hash, state = recorded["client_get_hash"], recorded["client_payment_state"]
+    chain = _RecordedChain(
+        chain_id,
+        {
+            (get_hash["to"], get_hash["data"]): get_hash["result"],
+            (state["to"], state["data"]): payment_state or state["result"],
+        },
+    )
+    client = _client(chain_id)
+    assert client.payer == FIXTURE["client"]["payer"]
+    client.w3 = Web3(chain)
+    sent: list[str] = []
+
+    def record_tx(func_call):
+        sent.append(func_call._encode_transaction_data())
+        return ae.TransactionResult(success=True)
+
+    client._send_tx = record_tx
+    return client, chain, sent
+
+
+def _client_pi() -> ae.PaymentInfo:
+    return ae.PaymentInfo(**FIXTURE["client"]["payment_info"])
+
+
+def _calldata(name: str, types: list, values: list) -> str:
+    entry = next(e for e in ae.OPERATOR_ABI_V3 if e["name"] == name)
+    return "0x" + (_selector(entry) + encode(types, values)).hex()
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+@pytest.mark.parametrize("amount", [None, 2_000_000])
+def test_release_is_capture_with_empty_data(chain_id, amount):
+    client, _, sent = _arc_client(chain_id)
+    pi = _client_pi()
+
+    client.release(pi, amount)
+
+    expected_amount = amount or pi.max_amount
+    assert sent == [
+        _calldata("capture", [PI_ABI, "uint256", "bytes"],
+                  [client._build_tuple(pi), expected_amount, b""])
+    ]
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_nothing_to_void_reads_the_real_state_and_sends_nothing(chain_id):
+    client, chain, sent = _arc_client(chain_id)  # recorded paymentState: zeros
+
+    with pytest.raises(ae.EscrowNothingToVoidError) as caught:
+        client.refund_in_escrow(_client_pi())
+
+    assert caught.value.payment_info_hash == (
+        FIXTURE["chains"][str(chain_id)]["client_get_hash"]["result"]
+    )
+    assert sent == []
+    assert set(chain.methods) <= {"eth_call", "eth_chainId"}
+    assert chain.methods.count("eth_call") == 2
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+@pytest.mark.parametrize("amount", [2_000_000, 6_000_000, 4_999_999])
+def test_an_amount_other_than_the_capturable_one_is_refused_without_tx(chain_id, amount):
+    client, chain, sent = _arc_client(chain_id, _state_word(5_000_000))
+
+    with pytest.raises(ValueError, match="whole capturableAmount"):
+        client.refund_in_escrow(_client_pi(), amount)
+
+    assert sent == []
+    assert set(chain.methods) <= {"eth_call", "eth_chainId"}
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+@pytest.mark.parametrize("amount", [None, 5_000_000])
+def test_the_whole_capturable_amount_is_a_void(chain_id, amount):
+    client, _, sent = _arc_client(chain_id, _state_word(5_000_000))
+    pi = _client_pi()
+
+    result = client.refund_in_escrow(pi, amount)
+
+    assert result.success
+    assert sent == [
+        _calldata("void", [PI_ABI, "bytes"], [client._build_tuple(pi), b""])
+    ]
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_partial_release_then_void_of_the_rest(chain_id):
+    """The partial-release flow: capture part, then void what remains."""
+    pi = _client_pi()
+    client, _, sent = _arc_client(chain_id, _state_word(5_000_000))
+    client.release(pi, 3_000_000)
+
+    after, _, sent_after = _arc_client(chain_id, _state_word(2_000_000, 3_000_000))
+    after.refund_in_escrow(pi, 2_000_000)
+
+    pt = client._build_tuple(pi)
+    assert sent == [_calldata("capture", [PI_ABI, "uint256", "bytes"], [pt, 3_000_000, b""])]
+    assert sent_after == [_calldata("void", [PI_ABI, "bytes"], [pt, b""])]
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_refund_post_escrow_is_refund(chain_id):
+    client, _, sent = _arc_client(chain_id)
+    pi = _client_pi()
+    collector = "0x" + "0c" * 20
+
+    client.refund_post_escrow(pi, 1_000_000, token_collector=collector, collector_data=b"\x01")
+
+    assert sent == [
+        _calldata(
+            "refund",
+            [PI_ABI, "uint256", "address", "bytes"],
+            [client._build_tuple(pi), 1_000_000, to_checksum_address(collector), b"\x01"],
+        )
+    ]
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_charge_is_refused_before_signing(chain_id):
+    client, chain, sent = _arc_client(chain_id)
+
+    def must_not_sign(auth):
+        raise AssertionError("charge() signed on a v3 chain")
+
+    client._sign_erc3009 = must_not_sign
+    with pytest.raises(ValueError, match="not available for the v3 operator"):
+        client.charge(_client_pi())
+    assert sent == [] and chain.methods == []
