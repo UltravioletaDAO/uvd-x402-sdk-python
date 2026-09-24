@@ -44,6 +44,7 @@ eventos y de errores**. Entre las apps de la casa no hay un servicio en el medio
 | [11-alta-de-una-app.md](11-alta-de-una-app.md) | — | El recorrido de una app nueva, paso por paso |
 | [`schemas/`](schemas/) | — | JSON Schema del manifiesto, de `uvd.event/1` y de `uvd_error` |
 | [`fixtures/`](fixtures/) | — | Documentos válidos e inválidos por esquema, y [`cases.json`](fixtures/cases.json) con lo que se espera de cada uno |
+| [`vectors/`](vectors/) | — | Vectores de conformidad de las reglas que un esquema no puede expresar, y [`index.json`](vectors/index.json) con el archivo de cada `kind` |
 
 ## Esquemas
 
@@ -110,7 +111,8 @@ informa solo la palabra de adentro). Lo que queda tiene que ser **igual al conju
 caso: ni uno más, ni uno menos. Así un fixture no puede romper dos reglas y esconder una tercera.
 Ningún caso lista una palabra envoltorio.
 
-En el repo de origen (`uvd-x402-sdk-python`) los corre `tests/test_interop_schemas.py`, que además:
+En el repo de origen (`uvd-x402-sdk-python`) los corre el [runner](#el-runner), y además
+`tests/interop/test_schemas.py`, que:
 
 - **borra cada restricción de cada esquema, una por vez, y exige que algún fixture se ponga rojo**:
   una restricción sin fixture que la cuide no entra;
@@ -119,27 +121,77 @@ En el repo de origen (`uvd-x402-sdk-python`) los corre `tests/test_interop_schem
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q tests/test_interop_schemas.py
+python -m pytest -q tests/interop
 ```
+
+`tests/interop` también prueba el runner y los vectores, y el workflow de publicación lo corre antes de
+construir el paquete: una versión cuyo contrato está en rojo no se publica.
 
 ## Reglas que los esquemas no pueden expresar
 
 JSON Schema no compara un campo con otro documento, ni con una cabecera, ni con el pasado. Estas
-reglas las verifica el runner de conformidad del SDK, no el esquema:
+reglas las verifica el runner de conformidad del SDK, no el esquema. Las que no dependen de una
+superficie viva tienen un [vector](#vectores); las demás lo suman cuando se implementan.
 
-| Regla | Qué verifica |
-|---|---|
-| [R1.3](01-descubrimiento.md) | El manifiesto se sirve como `application/json` y su cuerpo es distinto del de `/` |
-| [R1.10](01-descubrimiento.md) | El mismo id de app en el manifiesto, en `source` y en el prefijo de `type` |
-| [R3.1](03-autenticacion.md) | Ningún GET a una ruta pública sale firmado |
-| [R3.3](03-autenticacion.md) | Cada authority de una puerta es el host de alguna puerta del mismo manifiesto |
-| [R5.2](05-eventos.md) | El primer segmento de `type` es `source` |
-| [R5.3](05-eventos.md) | `sequence` crece por `(source, subject.kind, subject.id)` |
-| [R5.5](05-eventos.md) | La fecha de `occurred_at` (y de `generated_at`) existe: no hay 30 de febrero |
-| [R5.9](05-eventos.md) | Un reintento de un evento ya procesado recibe 200 `already_processed`, no 409 |
-| [R3.7](03-autenticacion.md) | Un reintento de entrega lleva un nonce nuevo y no es rechazado como repetido |
-| [R6.6](06-errores.md) | `retry_after_s` es igual a la cabecera `Retry-After` cuando las dos están |
-| [R7.6](07-observabilidad.md) | Un sondeo contra producción corre en serie, con ≥ 1 s de pausa, y corta en el primer 429 o en el tercer 401 |
+| Regla | Qué verifica | Vector |
+|---|---|---|
+| [R1.3](01-descubrimiento.md) | El manifiesto se sirve como `application/json` y su cuerpo es distinto del de `/` | — (en línea) |
+| [R1.10](01-descubrimiento.md) | El mismo id de app en el manifiesto, en `source` y en el prefijo de `type` | `manifiesto-reglas-del-runner.json` (en `events.emits`) |
+| [R3.1](03-autenticacion.md) | Ningún GET a una ruta pública sale firmado | `r3-1-que-se-firma.json` |
+| [R3.3](03-autenticacion.md) | Cada authority de una puerta es el host de alguna puerta del mismo manifiesto | `manifiesto-reglas-del-runner.json` |
+| [R5.2](05-eventos.md) | El primer segmento de `type` es `source` | — |
+| [R5.3](05-eventos.md) | `sequence` crece por `(source, subject.kind, subject.id)` | — |
+| [R5.5](05-eventos.md) | La fecha de `occurred_at` (y de `generated_at`) existe: no hay 30 de febrero | `manifiesto-reglas-del-runner.json` (en `generated_at`) |
+| [R5.9](05-eventos.md) | Un reintento de un evento ya procesado recibe 200 `already_processed`, no 409 | `r5-9-reintento-de-entrega.json` |
+| [R3.7](03-autenticacion.md) | Un reintento de entrega lleva un nonce nuevo y no es rechazado como repetido | `r5-9-reintento-de-entrega.json` |
+| [R6.6](06-errores.md) | `retry_after_s` es igual a la cabecera `Retry-After` cuando las dos están | — |
+| [R7.6](07-observabilidad.md) | Un sondeo contra producción corre en serie, con ≥ 1 s de pausa, y corta en el primer 429 o en el tercer 401 | — (en línea) |
+| [L9](10-perfiles-legados.md) | Un bloqueo de IP del perfil es un 403 cuyo cuerpo tiene solo la clave `error` | `l9-bloqueo-de-ip.json` |
+
+## Vectores
+
+[`vectors/`](vectors/) fija como datos las reglas de la tabla de arriba que no dependen de una
+superficie viva. [`vectors/index.json`](vectors/index.json) dice qué archivo tiene cada `kind` y qué
+reglas fija, y cada archivo explica en su `about` la entrada, la salida y cómo se compara. Un runner
+corre todos los archivos listados contra su implementación, y falla si un archivo de la carpeta no está
+listado, si no conoce un `kind`, si un archivo no tiene casos, si un caso cita una regla que su entrada
+del índice no lista, si una regla listada no la fija ningún caso, o si un caso no da lo que dice su
+`expect`. Los vectores describen formas en el cable: respuestas, peticiones y entregas tal como viajan.
+
+| Archivo | `kind` | Reglas | Qué fija |
+|---|---|---|---|
+| [`l9-bloqueo-de-ip.json`](vectors/l9-bloqueo-de-ip.json) | `ip-ban` | L9 | Cuándo una respuesta de la API que habla L9 es su bloqueo de IP, y los vecinos que no lo son: la misma forma en otra API, el permiso denegado, el límite de tasa, `error` sin 403, `detail`, el cuerpo con `uvd_error` al lado |
+| [`r3-1-que-se-firma.json`](vectors/r3-1-que-se-firma.json) | `request-signing` | R3.1 | Qué petición sale firmada: toda escritura y toda lectura que necesita la identidad; ninguna lectura pública |
+| [`r5-9-reintento-de-entrega.json`](vectors/r5-9-reintento-de-entrega.json) | `event-redelivery` | R5.9, R3.6, R3.7 | El reintento tras una respuesta perdida recibe 200 `already_processed`, no 409, porque cada intento lleva un nonce nuevo |
+| [`manifiesto-reglas-del-runner.json`](vectors/manifiesto-reglas-del-runner.json) | `manifest-rules` | R1.10, R3.3, R5.5 | Las reglas de un manifiesto que el esquema no ve |
+
+## El runner
+
+`uvd_x402_sdk.interop` tiene la implementación de referencia; el contrato son los JSON. Corre sin
+red:
+
+```bash
+pip install -e ".[interop]"
+python -m uvd_x402_sdk.interop check [--interop DIR] [MANIFIESTO ...]   # o: uvd-interop check
+```
+
+- Corre los fixtures de `fixtures/cases.json` con la comparación de arriba y los vectores de
+  `vectors/index.json` contra la implementación de referencia. Un fixture válido del manifiesto
+  tiene que cumplir además R1.10, R3.3 y R5.5: un ejemplo que copia la gente cumple el contrato
+  entero, no solo lo que ve su esquema. Después revisa cada MANIFIESTO (el
+  `/.well-known/uvd-stack.json` de una app, guardado en un archivo) contra su esquema y contra R1.10,
+  R3.3 y R5.5.
+- Sale con 0 en verde, 1 en rojo (un fixture, un vector o un manifiesto no cumple) y 2 si no pudo
+  correr (no hay `interop/`, falta un manifiesto, falta `jsonschema` o el runner mismo falló). Un
+  archivo roto es rojo con su nombre, nunca una traza.
+- No usa la red: un `$ref` a otro documento es un error, nunca una descarga.
+- Sin `--interop` usa el `interop/` del checkout desde el que corre el SDK. El paquete publicado no
+  trae `interop/`: se le pasa la copia vendoreada.
+- Desde Python: `run()`, `check_manifest()` y `evaluate_vector()` de
+  `uvd_x402_sdk.interop.conformance`. `evaluate_vector()` recibe una `Implementation` para correr los
+  vectores contra otro código.
+
+El SDK de TypeScript y el crate de Rust corren los mismos archivos contra su propio código.
 
 ## Vendoreo
 

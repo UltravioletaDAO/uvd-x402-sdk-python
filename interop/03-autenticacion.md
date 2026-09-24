@@ -20,6 +20,7 @@ sondeo, ni una lectura de catálogo.
   también cuentan para los bloqueos de IP. Lo que no necesita identidad no la manda.
 - **Sale de:** KarmaKadabra, regla del dueño desde 2026-07-23 («SIGN ONLY WRITES, NEVER A READ»), y
   el partner gate de describe-net (la lectura que se firma es la que decide si se cobra).
+- **Vector:** [`vectors/r3-1-que-se-firma.json`](vectors/r3-1-que-se-firma.json).
 
 ## R3.2 · Firma la wallet de servicio de quien llama, con la authority del receptor
 
@@ -93,6 +94,8 @@ aplicación y va por `event_id` ([R5.9](05-eventos.md)).
   recibe 409 `nonce_replayed`, que no se reintenta: el evento terminaría en dead-letter o se daría
   por entregado sin haberse procesado. Con consumo antes de verificar, además, quien conozca un
   `event_id` quemaría el nonce de un reintento con una firma basura.
+- **Vector:** [`vectors/r5-9-reintento-de-entrega.json`](vectors/r5-9-reintento-de-entrega.json),
+  con R3.6 y R5.9.
 
 ## R3.8 · Un buzón de eventos que acepta ERC-8128 lo hace con `evento-s2s`
 

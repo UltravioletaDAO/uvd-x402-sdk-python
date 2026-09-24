@@ -254,6 +254,9 @@ Tres respuestas de la misma API llevan `error` en la raíz y ninguna lleva `deta
   "type"}]}`.
 - Como la regla mira qué claves hay en la raíz, el sobre común vive en su propia clave y no agrega
   nada a un cuerpo de bloqueo.
+- La regla es de este perfil y de esta API: otras apps del stack usan `error` en la raíz para
+  cualquier falla, así que un cliente no la aplica a sus respuestas.
+- **Vector:** [`vectors/l9-bloqueo-de-ip.json`](vectors/l9-bloqueo-de-ip.json).
 
 ## L10 · `X-Idempotency-Key` como alias
 
