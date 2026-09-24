@@ -33,9 +33,11 @@ from uvd_x402_sdk.exceptions import (
     ADMITTED_AUTHORIZATION_CODES,
     AUTHORIZATION_ALREADY_SETTLED,
     AUTHORIZATION_IN_FLIGHT,
+    PAYMENT_STORE_UNAVAILABLE,
     SETTLEMENT_IN_PROGRESS,
     X402Error,
     InvalidPayloadError,
+    PaymentBindingError,
     PaymentVerificationError,
     PaymentSettlementError,
     UnsupportedNetworkError,
@@ -1056,11 +1058,37 @@ def _spent_authorization_response(
     return 409, body, _with_receipt({"Content-Type": "application/json"}, exc)
 
 
+def _binding_refusal_response(
+    exc: PaymentBindingError,
+) -> Tuple[int, Dict[str, Any], Dict[str, str]]:
+    """What the seller's purchase binding answers instead of the facilitator.
+
+    ``payment_store_unavailable`` is ``503`` + ``Retry-After``: present the same
+    ``X-PAYMENT`` later. Not :func:`transient_503_response`, whose
+    ``safeToRetry`` reads a facilitator ``reason`` this is not. The other two
+    are ``409``, with the facilitator's receipt when the refusal carried one.
+    """
+    body: Dict[str, Any] = dict(exc.to_dict())
+    body["reason"] = exc.reason
+    body["safeToReplay"] = False
+    if exc.reason == PAYMENT_STORE_UNAVAILABLE:
+        retry_after = int(DEFAULT_TRANSIENT_RETRY_AFTER_SECONDS)
+        body["retryable"] = True
+        body["retryAfter"] = retry_after
+        return 503, body, {"Content-Type": "application/json", "Retry-After": str(retry_after)}
+    body["retryable"] = False
+    return 409, body, _with_receipt({"Content-Type": "application/json"}, exc)
+
+
 def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any], Dict[str, str]]]:
     """What the SDK's middlewares and decorators answer for a payment that is
     neither delivered nor rejected, or ``None`` for a rejection (each keeps its
     own 402 or 400). First match wins:
 
+    0. A :class:`~uvd_x402_sdk.exceptions.PaymentBindingError` (only with a
+       :mod:`~uvd_x402_sdk.bindings` store configured): 503 when the store
+       could not answer, 409 for a payment bought for another resource or
+       refused after this seller had already seen it.
     1. :func:`payment_conflict_response`: 409, or 503 while in flight.
     2. A transaction on a failure that is not transient (``502
        settlement_unconfirmed``, any other ``5xx`` with a hash): 500, with
@@ -1082,6 +1110,8 @@ def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any],
     the SDK still does not re-send any of them. The receipt, when there is one,
     travels in ``PAYMENT-RESPONSE``.
     """
+    if isinstance(exc, PaymentBindingError):
+        return _binding_refusal_response(exc)
     conflict = payment_conflict_response(exc)
     if conflict is not None:
         return conflict
@@ -2429,7 +2459,28 @@ class X402Client:
         payload = self.extract_payload(x_payment_header)
         logger.info(f"Processing payment: network={payload.network}, amount=${expected_amount_usd}")
         binding = self._binding(payload, idempotency_key, idempotency_scope, receipt_context)
+        return self._handle_payment(
+            payload, expected_amount_usd, pay_to, asset=asset,
+            eip712_domain=eip712_domain, token_decimals=token_decimals, binding=binding,
+        )
 
+    def _handle_payment(
+        self,
+        payload: PaymentPayload,
+        expected_amount_usd: Decimal,
+        pay_to: Optional[str],
+        *,
+        asset: Optional[str],
+        eip712_domain: Optional[Dict[str, str]],
+        token_decimals: Optional[int],
+        binding: "_Binding",
+    ) -> PaymentResult:
+        """The verify and the settle of :meth:`process_payment`, under ``binding``.
+
+        Also what :func:`~uvd_x402_sdk.bindings.process_payment_bound` runs, with
+        the key its store persisted: a key the store minted for THIS request
+        keeps the fresh key's guard against a replay nobody here admitted.
+        """
         # Verify payment
         verify_response = self._verify(
             payload, expected_amount_usd, pay_to, asset=asset,
