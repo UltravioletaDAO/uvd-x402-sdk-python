@@ -1139,7 +1139,9 @@ def _merge_caller_extra(
         raise TypeError("extra must be a mapping with string keys")
     caller = dict(extra)
     try:
-        json.dumps(caller)
+        # allow_nan=False: NaN / Infinity are not JSON, and some httpx
+        # versions within the supported range would send them as bare tokens.
+        json.dumps(caller, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"extra must be JSON-serialisable: {exc}") from None
     merged: Dict[str, Any] = dict(requirements.extra or {})
@@ -1212,8 +1214,14 @@ class X402Client:
                 it open. It is the public way to see the facilitator's raw
                 answers, through httpx's own response hooks:
                 `httpx.Client(event_hooks={"response": [hook]})`, where the
-                hook calls `response.read()` before reading the body. The SDK
-                still passes its own timeout on each request.
+                hook calls `response.read()` before reading the body. The
+                requests of `fetch()`, the paid one included, go through it
+                too unless `fetch()` gets its own `http_client`. The SDK sets
+                its own timeout on `/verify`, `/settle` and its timeout
+                fallback, `/accepts` and the `/supported` of route
+                validation; `get_version()`, `get_supported()`,
+                `get_blacklist()`, `health_check()`, the other GETs and
+                `fetch()` use the timeout of the client passed here.
             **kwargs: Additional config parameters passed to X402Config —
                 including `facilitator_by_network`, the `network -> facilitator
                 URL` routing table (see X402Config).
@@ -1667,7 +1675,7 @@ class X402Client:
                 raise ValueError(f"token_decimals must be non-negative, got {token_decimals}")
             expected_amount_wei = int(expected_amount_usd * (Decimal(10) ** token_decimals))
         else:
-            expected_amount_wei = network_config.get_token_amount(float(expected_amount_usd))
+            expected_amount_wei = network_config.get_token_amount(expected_amount_usd)
 
         # Get recipient for this network (allow per-call override)
         recipient = pay_to or self.config.get_recipient(normalized_network)
@@ -1682,7 +1690,7 @@ class X402Client:
             description=self.config.description,
             mimeType="application/json",
             payTo=recipient,
-            maxTimeoutSeconds=60,
+            maxTimeoutSeconds=self.config.max_timeout_seconds,
             asset=asset if asset is not None else network_config.usdc_address,
         )
 
@@ -2042,11 +2050,19 @@ class X402Client:
               - ``error_code`` (Optional[str]): its machine-readable ``error``,
                 e.g. ``settlement_unconfirmed``.
               - ``error`` (Optional[str]): error message when failed
+              - ``proof_of_payment`` (Optional[dict]): on success, the
+                facilitator's ``proofOfPayment`` as its own camelCase object
+                (``SettleResponse.proof_of_payment`` dumped by alias), or
+                ``None`` without one.
+              - ``safe_to_retry`` (Optional[bool]): on failure,
+                ``FacilitatorError.safe_to_retry``; ``None`` for any other
+                error and on success.
 
             ``tx_hash``, ``payment_id`` and ``error_code`` are what turns a
             refusal to retry into something the caller can act on: without
             them the answer is "do not re-send" with nowhere to look, and
-            whoever paid cannot find out whether their money moved.
+            whoever paid cannot find out whether their money moved. Every key
+            is always present, so reading one never depends on the outcome.
         """
         try:
             response = self.settle_payment(
@@ -2060,10 +2076,12 @@ class X402Client:
             tx_hash: Optional[str] = None
             payment_id: Optional[str] = None
             error_code: Optional[str] = None
+            safe_to_retry: Optional[bool] = None
             if isinstance(exc, FacilitatorError):
                 tx_hash = exc.transaction
                 payment_id = exc.payment_id
                 error_code = exc.error_code
+                safe_to_retry = exc.safe_to_retry
             elif isinstance(exc, PaymentSettlementError):
                 tx_hash = exc.tx_hash
             return {
@@ -2072,13 +2090,18 @@ class X402Client:
                 "payment_id": payment_id,
                 "error_code": error_code,
                 "error": exc.message,
+                "proof_of_payment": None,
+                "safe_to_retry": safe_to_retry,
             }
+        proof = response.proof_of_payment
         return {
             "success": True,
             "tx_hash": response.get_transaction_hash(),
             "payment_id": None,
             "error_code": None,
             "error": None,
+            "proof_of_payment": proof.model_dump(by_alias=True) if proof is not None else None,
+            "safe_to_retry": None,
         }
 
     def _settle_once(

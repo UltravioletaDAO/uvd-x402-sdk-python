@@ -20,6 +20,10 @@ ignored the injected transport fails here instead of reaching a real facilitator
    nothing was sent, ``False`` when the payment may be on chain, else ``None``.
 5. ``forward_unconfirmed`` is ambiguous; ``forward_failed`` stays ambiguous.
 6. ``http_client=``: the caller's client, whose response hooks see raw answers.
+7. ``try_settle_payment()`` returns ``proof_of_payment`` and ``safe_to_retry``.
+8. The default USD amount is converted in ``Decimal``, in the settle and in the
+   402 that advertises it.
+9. ``X402Config.max_timeout_seconds`` is the requirements' ``maxTimeoutSeconds``.
 """
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ import pytest
 from tests.receipt_rail import _receipt
 from uvd_x402_sdk import X402Client
 from uvd_x402_sdk.client import _undelivered_response, is_spent_nonce_error
+from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.erc8004 import ERC8004_EXTENSION_ID
 from uvd_x402_sdk.exceptions import (
     MAX_ERROR_BODY_BYTES,
@@ -46,6 +51,8 @@ from uvd_x402_sdk.exceptions import (
     write_retry_is_safe,
 )
 from uvd_x402_sdk.models import PaymentPayload, PaymentRequirements, SettleResponse
+from uvd_x402_sdk.networks import get_network
+from uvd_x402_sdk.response import create_402_response_v2
 
 FIXTURES = Path(__file__).parent / "fixtures" / "facilitator-settle-2.40.0"
 FACILITATOR = "http://facilitator.invalid"
@@ -95,11 +102,15 @@ class Facilitator:
         return json.loads(self.requests[index].content)
 
 
-def client_for(facilitator: Facilitator, **kwargs: Any) -> X402Client:
+def client_for(
+    facilitator: Facilitator, *, http: dict[str, Any] | None = None, **config: Any
+) -> X402Client:
+    """A client on ``facilitator``; ``http`` goes to httpx, ``config`` to X402Config."""
     return X402Client(
         recipient_address=RECIPIENT,
         facilitator_url=FACILITATOR,
-        http_client=facilitator.http_client(**kwargs),
+        http_client=facilitator.http_client(**(http or {})),
+        **config,
     )
 
 
@@ -201,6 +212,15 @@ class TestExtraReachesTheRequirements:
         facilitator = Facilitator()
         with pytest.raises(error):
             settle(facilitator, extra=extra)
+        assert facilitator.requests == []
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_nan_and_infinity_are_refused_by_the_sdk(self, value: float) -> None:
+        """Not JSON. The SDK refuses them itself: the message is its own, not the
+        one some httpx versions raise, and others send them as bare tokens."""
+        facilitator = Facilitator()
+        with pytest.raises(ValueError, match="extra must be JSON-serialisable"):
+            settle(facilitator, extra={"x": value})
         assert facilitator.requests == []
 
     def test_the_callers_dict_is_not_changed(self) -> None:
@@ -339,15 +359,21 @@ class TestSettlementErrorCarriesTheAnswer:
         }
 
     def test_the_body_is_cut_at_4096_bytes_never_mid_character(self) -> None:
-        """Derived: the recorded reverted settle with a long non-ASCII ``message``."""
-        answer = with_body("settle_mined_reverted", message="ñ" * 3000)
-        assert len(answer["body"].encode("utf-8")) > MAX_ERROR_BODY_BYTES
+        """Derived: the recorded reverted settle with a long ``message`` of two-byte
+        characters, written as UTF-8 (not ``\\u`` escapes), padded so that byte
+        4096 falls inside one of them."""
+        answer = recorded("settle_mined_reverted")
+        body = json.loads(answer["body"])
+        body["message"] = ""
+        start = len(json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) - 2
+        pad = "a" * ((MAX_ERROR_BODY_BYTES - 1 - start) % 2)
+        body["message"] = pad + "ñ" * 3000
+        answer["body"] = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+        raw = answer["body"].encode("utf-8")
+        assert 0xC0 <= raw[MAX_ERROR_BODY_BYTES - 1] and 0x80 <= raw[MAX_ERROR_BODY_BYTES] < 0xC0
         with pytest.raises(PaymentSettlementError) as caught:
             settle(Facilitator(answer))
-        kept = caught.value.response_body
-        assert kept is not None
-        assert MAX_ERROR_BODY_BYTES - 1 <= len(kept.encode("utf-8")) <= MAX_ERROR_BODY_BYTES
-        assert answer["body"].startswith(kept)
+        assert caught.value.response_body == raw[: MAX_ERROR_BODY_BYTES - 1].decode("utf-8")
 
     def test_constructed_by_hand_they_carry_none(self) -> None:
         for exc in (PaymentSettlementError("x"), PaymentVerificationError("x")):
@@ -394,10 +420,24 @@ class TestSafeToRetry:
         answer = with_body("forward_unconfirmed", retryable=None)
         assert settle_failure(answer).safe_to_retry is False
 
-    @pytest.mark.parametrize("name", ["broadcast_uncertain", "settlement_unconfirmed"])
-    def test_the_2_39_5_shape_without_retryable_false_is_still_false(self, name: str) -> None:
-        """Derived: up to 2.39.5 ``broadcast_uncertain`` had no ``retryable: false``."""
-        answer = with_body(name, retryable=None, transaction=None, paymentId=None)
+    @pytest.mark.parametrize(
+        "name, error",
+        [
+            ("broadcast_uncertain", None),
+            ("settlement_unconfirmed", None),
+            ("broadcast_uncertain", "receipt_pending (ref: x)"),
+            ("broadcast_uncertain", "receipt_response_unreadable"),
+        ],
+    )
+    def test_the_2_39_5_shape_without_retryable_false_is_still_false(
+        self, name: str, error: str | None
+    ) -> None:
+        """Derived: up to 2.39.5 ``broadcast_uncertain`` and ``receipt_pending`` had
+        no ``retryable: false``. Here nothing but the ``error`` token is left: no
+        ``retryable``, no ``transaction``, no ``paymentId``."""
+        token = {"error": error} if error is not None else {}
+        answer = with_body(name, retryable=None, transaction=None, paymentId=None, **token)
+        assert set(json.loads(answer["body"])) == {"error"}
         assert settle_failure(answer).safe_to_retry is False
 
     def test_a_hash_alone_is_false(self) -> None:
@@ -476,7 +516,7 @@ class TestInjectedHttpClient:
             seen.append(response.content)
 
         facilitator = Facilitator(answer)
-        client = client_for(facilitator, event_hooks={"response": [hook]})
+        client = client_for(facilitator, http={"event_hooks": {"response": [hook]}})
         client.settle_payment(evm_payload(), Decimal("0.01"), extra=PROOF_EXTRA)
         assert seen == [answer["body"].encode("utf-8")]
 
@@ -487,12 +527,14 @@ class TestInjectedHttpClient:
         assert [r.url.path for r in facilitator.requests] == ["/verify"]
 
     def test_close_leaves_the_callers_client_open(self) -> None:
-        facilitator = Facilitator()
+        """A settle goes through it first, so the SDK has used it before closing."""
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
         http = facilitator.http_client()
         client = X402Client(recipient_address=RECIPIENT, facilitator_url=FACILITATOR,
                             http_client=http)
         with client:
-            pass
+            client.settle_payment(evm_payload(), Decimal("0.01"))
+        assert len(facilitator.requests) == 1
         assert http.is_closed is False
         http.close()
 
@@ -501,3 +543,146 @@ class TestInjectedHttpClient:
         own = client._get_http_client()
         client.close()
         assert own.is_closed is True
+
+
+# ── try_settle_payment() carries the proof and safe_to_retry ────────────────
+
+FIVE_KEYS = ("success", "tx_hash", "payment_id", "error_code", "error")
+
+
+def try_settle(answer: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+    return client_for(Facilitator(answer)).try_settle_payment(
+        evm_payload(), Decimal("0.01"), **kwargs
+    )
+
+
+class TestTrySettlePaymentResult:
+    def test_success_returns_the_proof_as_the_facilitators_object(self) -> None:
+        answer = recorded("settle_success_with_proof")
+        body = json.loads(answer["body"])
+        result = try_settle(answer, extra=PROOF_EXTRA)
+        assert result["proof_of_payment"] == body["proofOfPayment"]
+        assert result["safe_to_retry"] is None
+        assert {key: result[key] for key in FIVE_KEYS} == {
+            "success": True,
+            "tx_hash": body["transaction"],
+            "payment_id": None,
+            "error_code": None,
+            "error": None,
+        }
+
+    def test_success_without_a_proof_has_none(self) -> None:
+        result = try_settle(recorded("settle_success_without_proof"))
+        assert result["success"] is True
+        assert result["proof_of_payment"] is None
+
+    @pytest.mark.parametrize(
+        "name, expected",
+        [("forward_unconfirmed", False), ("receipt_store_unavailable", True),
+         ("upstream_rpc_unavailable", None)],
+    )
+    def test_a_facilitator_error_carries_safe_to_retry(
+        self, name: str, expected: bool | None
+    ) -> None:
+        result = try_settle(recorded(name))
+        assert result["success"] is False
+        assert result["safe_to_retry"] is expected
+        assert result["proof_of_payment"] is None
+
+    def test_a_settlement_error_has_none(self) -> None:
+        answer = recorded("settle_mined_reverted")
+        result = try_settle(answer)
+        assert result["success"] is False
+        assert result["tx_hash"] == json.loads(answer["body"])["transaction"]
+        assert result["safe_to_retry"] is None
+
+
+# ── The default USD amount is converted in Decimal ──────────────────────────
+
+CENT_PRICES = range(1, 10_000)  # $0.01 .. $99.99
+LONG_PRICE = Decimal("12345678901.234567")  # 17 significant digits: no float holds it
+
+
+class TestDefaultAmountIsExact:
+    def test_every_cent_price_converts_exactly(self) -> None:
+        """Scaled as a binary float, 151 of these came out one base unit short
+        (``int(2.01 * 10**6)`` is ``2009999``). Decimal, float and str inputs."""
+        base = get_network("base")
+        assert base is not None
+        inputs = (
+            lambda c: Decimal(c) / 100,
+            lambda c: c / 100,
+            lambda c: str(Decimal(c) / 100),
+        )
+        for to_input in inputs:
+            wrong = [c for c in CENT_PRICES if base.get_token_amount(to_input(c)) != c * 10**4]
+            assert wrong == []
+
+    @pytest.mark.parametrize(
+        "price, atomic",
+        [(Decimal("2.01"), "2010000"), (2.01, "2010000"), (Decimal("4.1"), "4100000"),
+         (LONG_PRICE, "12345678901234567")],
+    )
+    def test_the_settle_sends_the_exact_amount(self, price: Any, atomic: str) -> None:
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
+        client_for(facilitator).settle_payment(evm_payload(), price)
+        assert facilitator.sent()["paymentRequirements"]["maxAmountRequired"] == atomic
+
+    @pytest.mark.parametrize("price", [Decimal("2.01"), LONG_PRICE])
+    def test_the_402_and_the_settle_say_the_same_number(self, price: Decimal) -> None:
+        """What a seller advertises is what its settle then requires."""
+        config = X402Config(recipient_evm=RECIPIENT, supported_networks=["base"])
+        offer = create_402_response_v2(price, config)
+        advertised = next(o["amount"] for o in offer["accepts"] if o["network"] == "eip155:8453")
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
+        client_for(facilitator).settle_payment(evm_payload(), price)
+        required = facilitator.sent()["paymentRequirements"]["maxAmountRequired"]
+        assert advertised == required == str(int(price * 10**6))
+
+
+# ── X402Config.max_timeout_seconds ──────────────────────────────────────────
+
+
+class TestMaxTimeoutSeconds:
+    def test_the_default_is_60(self) -> None:
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
+        settle(facilitator)
+        assert facilitator.sent()["paymentRequirements"]["maxTimeoutSeconds"] == 60
+
+    def test_the_configured_value_reaches_verify_and_settle(self) -> None:
+        facilitator = Facilitator(
+            recorded("verify_invalid_signature"), recorded("settle_success_without_proof")
+        )
+        client = client_for(facilitator, max_timeout_seconds=300)
+        with pytest.raises(PaymentVerificationError):
+            client.verify_payment(evm_payload(), Decimal("0.01"))
+        client.settle_payment(evm_payload(), Decimal("0.01"))
+        windows = [facilitator.sent(i)["paymentRequirements"]["maxTimeoutSeconds"] for i in (0, 1)]
+        assert windows == [300, 300]
+
+    def test_it_reaches_the_v2_envelope(self) -> None:
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
+        client_for(facilitator, max_timeout_seconds=300).settle_payment(
+            evm_payload("eip155:8453"), Decimal("0.01")
+        )
+        assert facilitator.sent()["accepted"]["maxTimeoutSeconds"] == 300
+
+    @pytest.mark.parametrize("bad", [0, -1, "300", 1.5, True, None])
+    def test_a_value_that_is_not_a_positive_integer_is_refused(self, bad: Any) -> None:
+        with pytest.raises(ValueError, match="max_timeout_seconds"):
+            X402Config(recipient_evm=RECIPIENT, max_timeout_seconds=bad)
+
+    def test_a_caller_pinning_its_decimals_and_window_needs_no_override(self) -> None:
+        """Its own token decimals and settlement window, both on the wire, through
+        the public API only: no private method replaced."""
+        price = Decimal("0.29")
+        facilitator = Facilitator(recorded("settle_success_without_proof"))
+        client = client_for(facilitator, max_timeout_seconds=300)
+        result = client.try_settle_payment(
+            evm_payload(), price, asset="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            eip712_domain={"name": "USD Coin", "version": "2"}, token_decimals=6, retry=True,
+        )
+        assert result["success"] is True
+        requirements = facilitator.sent()["paymentRequirements"]
+        assert requirements["maxAmountRequired"] == str(int(price * Decimal(10**6)))
+        assert requirements["maxTimeoutSeconds"] == 300

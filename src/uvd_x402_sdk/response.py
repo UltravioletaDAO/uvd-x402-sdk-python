@@ -443,7 +443,7 @@ def create_402_response_v2(
             continue
 
         # Calculate amount in token base units
-        token_amount = network.get_token_amount(float(amount))
+        token_amount = network.get_token_amount(amount)
 
         # `scheme` and `maxTimeoutSeconds` belong to each payment option, not
         # only to the envelope: a client picks one entry out of `accepts` and

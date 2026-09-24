@@ -518,16 +518,18 @@ class FacilitatorError(X402Error):
       authorization (``202 settlement_in_progress``, the three codes of
       :data:`ADMITTED_AUTHORIZATION_CODES`). Look the transaction up; do not
       sign again. This wins over any ``True`` signal in the same body.
+      ``forward_failed`` is here although x402-rs 2.39.6+ lists it under
+      "Nothing was sent": up to 2.39.5 the same ``503`` + ``Retry-After: 5``,
+      with the same body, also answered a hop the lease holder received.
     * ``None``: neither was stated. A refusal (fix the request), a transport
       failure with no answer, and the other rows of the "Nothing was sent"
       table: ``upstream_rpc_unavailable``, ``upstream_nonce_or_mempool``,
-      ``upstream_rate_limited``, ``facilitator_signer_unfunded`` and
-      ``forward_failed``. Up to x402-rs 2.39.5 those same answers, with the
-      same status and ``Retry-After``, also covered a transaction whose send
-      answer was lost, and nothing in the answer says which version sent it.
-      ``retryable`` still reads them as transient, and resending the SAME
-      authorization cannot move the money twice: the token's own nonce stops
-      it.
+      ``upstream_rate_limited`` and ``facilitator_signer_unfunded``. Up to
+      x402-rs 2.39.5 those same answers, with the same status and
+      ``Retry-After``, also covered a transaction whose send answer was lost,
+      and nothing in the answer says which version sent it. ``retryable``
+      still reads them as transient, and resending the SAME authorization
+      cannot move the money twice: the token's own nonce stops it.
     """
 
     @staticmethod
