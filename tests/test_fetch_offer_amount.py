@@ -287,7 +287,7 @@ class TestAnotherAmountIsRefused:
 
     def test_a_refusal_of_the_policy_comes_first(self) -> None:
         """The policy's contract keeps its codes and its order."""
-        purchase = Purchase.of(30_000, 1, budget(20_000))
+        purchase = Purchase.of(30_000, 1, budget(25_000))
         assert refused_by_policy(purchase, token_decimals=4) == "per-payment-limit"
 
 
