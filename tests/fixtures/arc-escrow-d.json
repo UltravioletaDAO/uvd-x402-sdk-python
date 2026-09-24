@@ -4,8 +4,8 @@
     "Real answers, never edited by hand. Reads only; no transaction.",
     "Hex values of 32 bytes or more are stored without the 0x prefix."
   ],
-  "recorded_at": "2026-09-24T00:42:33Z",
-  "requests": 26,
+  "recorded_at": "2026-09-24T01:51:35Z",
+  "requests": 30,
   "contracts": {
     "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
     "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
@@ -58,7 +58,7 @@
     "5042": {
       "rpc": "https://rpc.mainnet.arc.io",
       "chain_id": 5042,
-      "block": 22434086,
+      "block": 22442251,
       "code": {
         "escrow": {
           "address": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
@@ -95,6 +95,16 @@
           "size": 0,
           "keccak": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         }
+      },
+      "collector_escrow": {
+        "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "data": "0x40865734",
+        "result": "000000000000000000000000bdea0d1bcc5966192b070fdf62ab4ef5b4420cff"
+      },
+      "factory_escrow": {
+        "to": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "data": "0xe681c4aa",
+        "result": "000000000000000000000000bdea0d1bcc5966192b070fdf62ab4ef5b4420cff"
       },
       "compute_address": {
         "to": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
@@ -120,7 +130,7 @@
     "5042002": {
       "rpc": "https://rpc.testnet.arc.io",
       "chain_id": 5042002,
-      "block": 63679858,
+      "block": 63688127,
       "code": {
         "escrow": {
           "address": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
@@ -157,6 +167,16 @@
           "size": 0,
           "keccak": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         }
+      },
+      "collector_escrow": {
+        "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "data": "0x40865734",
+        "result": "000000000000000000000000bdea0d1bcc5966192b070fdf62ab4ef5b4420cff"
+      },
+      "factory_escrow": {
+        "to": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "data": "0xe681c4aa",
+        "result": "000000000000000000000000bdea0d1bcc5966192b070fdf62ab4ef5b4420cff"
       },
       "compute_address": {
         "to": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",

@@ -100,6 +100,21 @@ def test_every_registered_address_had_code_on_that_chain(chain_id):
         assert code["size"] > 0, f"{key} {address} had no code on {chain_id}"
 
 
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_collector_and_factory_are_bound_to_the_registered_escrow(chain_id):
+    """The chain, not the recorder's own table: each contract names its escrow."""
+    recorded = FIXTURE["chains"][str(chain_id)]
+    contracts = ae.ESCROW_CONTRACTS[chain_id]
+    collector, factory = recorded["collector_escrow"], recorded["factory_escrow"]
+
+    assert collector["to"] == contracts["token_collector"]
+    assert collector["data"] == "0x" + keccak(text="authCaptureEscrow()")[:4].hex()
+    assert factory["to"] == contracts["operator_factory"]
+    assert factory["data"] == "0x" + keccak(text="ESCROW()")[:4].hex()
+    assert _decode_address(collector["result"]) == contracts["escrow"]
+    assert _decode_address(factory["result"]) == contracts["escrow"]
+
+
 def test_both_arc_chains_are_supported_and_named():
     assert ae.is_escrow_supported(5042) is True
     assert ae.is_escrow_supported(5042002) is True

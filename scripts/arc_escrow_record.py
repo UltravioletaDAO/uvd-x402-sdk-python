@@ -12,6 +12,8 @@ What it records, on ``arc`` (5042) and ``arc-testnet`` (5042002):
   selectors;
 - ``computeAddress(arg)`` on the factory: the calldata sent and the address
   returned;
+- the escrow each deployment is bound to: ``authCaptureEscrow()`` on the
+  ERC3009PaymentCollector and ``ESCROW()`` on the PaymentOperatorFactory;
 - ``AuthCaptureEscrow.getHash`` of the pre-auth vector's ``paymentInfo`` (payer
   zeroed, the EIP-3009 nonce) and of the client vector's (with its payer), and
   ``paymentState`` of the latter: the exact calldata and the raw answers.
@@ -247,6 +249,13 @@ def main() -> None:
                 factory_code_5042 = raw_code
         codes["default_operator"], _ = code_of(url, DEFAULT_OPERATOR)
         entry["code"] = codes
+
+        entry["collector_escrow"] = call(
+            url, CONTRACTS["token_collector"], selector("authCaptureEscrow()")
+        )
+        entry["factory_escrow"] = call(
+            url, CONTRACTS["operator_factory"], selector("ESCROW()")
+        )
 
         entry["compute_address"] = call(
             url,
