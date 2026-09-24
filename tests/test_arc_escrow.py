@@ -189,7 +189,10 @@ def test_client_nonce_equals_the_escrow_get_hash(chain_id):
 # Generation and operator ABI
 # ---------------------------------------------------------------------------
 
-PI_ABI = "(address,address,address,address,uint120,uint48,uint48,uint48,uint16,uint16,address,uint256)"
+PI_ABI = (
+    "(address,address,address,address,uint120,uint48,uint48,uint48,"
+    "uint16,uint16,address,uint256)"
+)
 FACTORY_CODE = bytes.fromhex(FIXTURE["operator_factory_code_5042"].removeprefix("0x"))
 PUSH4 = bytes([0x63])
 

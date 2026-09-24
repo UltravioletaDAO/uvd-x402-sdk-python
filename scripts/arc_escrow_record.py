@@ -75,7 +75,10 @@ COMPUTE_ADDRESS_ARG = (
 )
 COMPUTE_ADDRESS_SIG = "computeAddress((" + ",".join(["address"] * 12) + "))"
 
-PI_ABI = "(address,address,address,address,uint120,uint48,uint48,uint48,uint16,uint16,address,uint256)"
+PI_ABI = (
+    "(address,address,address,address,uint120,uint48,uint48,uint48,"
+    "uint16,uint16,address,uint256)"
+)
 GET_HASH_SIG = f"getHash({PI_ABI})"
 PAYMENT_STATE_SIG = "paymentState(bytes32)"
 
@@ -134,18 +137,23 @@ def selector(signature: str) -> bytes:
 
 
 def pi_tuple(pi: dict, payer: str) -> tuple:
+    """PaymentInfo tuple from the wire dict (camelCase) or the client's fields (snake_case)."""
+
+    def field(camel: str, snake: str):
+        return pi[camel] if camel in pi else pi[snake]
+
     return (
         to_checksum_address(pi["operator"]),
         to_checksum_address(payer),
         to_checksum_address(pi["receiver"]),
         to_checksum_address(pi["token"]),
-        int(pi["maxAmount"] if "maxAmount" in pi else pi["max_amount"]),
-        int(pi["preApprovalExpiry"] if "preApprovalExpiry" in pi else pi["pre_approval_expiry"]),
-        int(pi["authorizationExpiry"] if "authorizationExpiry" in pi else pi["authorization_expiry"]),
-        int(pi["refundExpiry"] if "refundExpiry" in pi else pi["refund_expiry"]),
-        int(pi["minFeeBps"] if "minFeeBps" in pi else pi["min_fee_bps"]),
-        int(pi["maxFeeBps"] if "maxFeeBps" in pi else pi["max_fee_bps"]),
-        to_checksum_address(pi["feeReceiver"] if "feeReceiver" in pi else pi["fee_receiver"]),
+        int(field("maxAmount", "max_amount")),
+        int(field("preApprovalExpiry", "pre_approval_expiry")),
+        int(field("authorizationExpiry", "authorization_expiry")),
+        int(field("refundExpiry", "refund_expiry")),
+        int(field("minFeeBps", "min_fee_bps")),
+        int(field("maxFeeBps", "max_fee_bps")),
+        to_checksum_address(field("feeReceiver", "fee_receiver")),
         int(str(pi["salt"]), 16),
     )
 

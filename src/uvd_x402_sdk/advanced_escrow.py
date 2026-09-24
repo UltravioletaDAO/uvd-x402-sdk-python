@@ -559,7 +559,11 @@ ESCROW_STATE_ABI = [
     },
 ]
 
-_OPERATOR_ABIS = {"v1": OPERATOR_ABI, "v2": OPERATOR_ABI_V2, "v3": OPERATOR_ABI_V3}
+_OPERATOR_ABIS: dict[str, list] = {
+    "v1": OPERATOR_ABI,
+    "v2": OPERATOR_ABI_V2,
+    "v3": OPERATOR_ABI_V3,
+}
 
 
 def get_operator_abi(chain_id: int) -> list:
@@ -644,7 +648,7 @@ class EscrowNothingToVoidError(Exception):
     partial amount: that one is a ``ValueError``. No transaction was sent.
     """
 
-    def __init__(self, message: str, payment_info_hash: str):
+    def __init__(self, message: str, payment_info_hash: str) -> None:
         super().__init__(message)
         self.payment_info_hash = payment_info_hash
 
