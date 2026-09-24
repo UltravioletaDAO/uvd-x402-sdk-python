@@ -308,6 +308,28 @@ def test_the_scheme_is_the_requests(rail, mount):
     assert status == 200, body
 
 
+@pytest.mark.parametrize(
+    "host, url",
+    [
+        ("testserver:8080", "http://testserver:8080/paid"),
+        ("[::1]:8080", "http://[::1]:8080/paid"),
+        ("[1::2::3]", None),
+        ("[12345::1]", None),
+        ("1.2.3.4:99999", None),
+        ("testserver/paid#", None),
+    ],
+)
+def test_the_request_url_has_a_bare_authority_or_none(host, url):
+    """``_request_url`` answers ``None`` for an authority that is not a bare
+    ``host[:port]`` (an IP literal that is not an IPv6 address included),
+    before anything else parses it."""
+    pytest.importorskip("fastapi")
+    from uvd_x402_sdk.integrations.fastapi_integration import _request_url
+
+    scope = {"scheme": "http", "path": "/paid", "headers": [(b"host", host.encode())]}
+    assert _request_url(scope) == url
+
+
 @mounts
 def test_the_query_is_part_of_the_url(rail, mount):
     status, body = _get(mount(rail), "/plain?q=1", _context("http://testserver/plain?q=2"))

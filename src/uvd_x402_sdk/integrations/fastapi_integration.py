@@ -632,7 +632,9 @@ class X402Middleware(BaseHTTPMiddleware):
             # runs outside FastAPI's exception handlers, so it answers the 400
             # itself; left to propagate it was a 500. (A route's own
             # HTTPException never gets here: the app answers it downstream.)
-            return JSONResponse(status_code=e.status_code, content={"detail": e.detail}, headers=e.headers)
+            return JSONResponse(
+                status_code=e.status_code, content={"detail": e.detail}, headers=e.headers
+            )
         except X402Error as e:
             status, content, headers = _payment_error(e)
             return JSONResponse(status_code=status, content=content, headers=headers)
