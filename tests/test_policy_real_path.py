@@ -167,10 +167,14 @@ def test_an_offer_inside_the_policy_is_paid_without_asking_anyone():
 
 def test_no_policy_pays_exactly_what_it_paid_before():
     """A caller who never wrote a policy keeps the behaviour they had: the
-    client holds `permissive()`, so an unlisted asset is not refused."""
+    client holds `permissive()`, so an unlisted asset is not refused.
+
+    It is paid in its own token, which `token_type` names: an offer in another
+    token than `token_type`'s is refused before signing
+    (tests/test_fetch_offer_amount.py)."""
     seller = _Seller(_402(asset=EURC_BASE))
 
-    resp = _fetch(_client(), seller, max_amount="0.05")
+    resp = _fetch(_client(), seller, max_amount="0.05", token_type="eurc")
 
     assert resp.status_code == 200
     assert seller.paid_header is not None
