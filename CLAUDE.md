@@ -27,6 +27,7 @@ src/uvd_x402_sdk/
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
 ├── facilitator.py           # Facilitator addresses and fee payers
+├── interop/                 # Reference runner of the interop spec (interop/ at the repo root)
 ├── networks/
 │   ├── __init__.py          # Network registry
 │   ├── base.py              # NetworkConfig, TokenType, helpers
@@ -208,6 +209,15 @@ payment_requirements = {
 - `fetch_nonce(api_base)` - async, gets the single-use server nonce (5-min TTL, one per signed request including retries)
 - **Wire format is PINNED** — byte-equality enforced in `tests/test_erc8128.py` against `tests/fixtures/erc8128.json` (byte-identical copy of Execution Market's `shared/test-vectors/erc8128.json` F3-1 golden vectors; re-copy from there, never edit here): `alg="eip191"` emitted, keyid ALWAYS lowercase, params order `created;expires;nonce;keyid;alg`
 - Importable on a base install (httpx + stdlib; no eth-account until an adapter is instantiated)
+
+### Interop contract (interop/ + uvd_x402_sdk.interop)
+- `interop/` at the repo root IS the contract of the stack (Markdown + JSON Schema + `fixtures/` + `vectors/`), language-independent: the TS SDK and a Rust crate vendor it from a commit of `main`. `uvd_x402_sdk.interop.conformance` is only its reference implementation
+- Runner: `python -m uvd_x402_sdk.interop check [--interop DIR] [MANIFEST ...]` (or `uvd-interop`), offline. Exit 0 green, 1 red, 2 could not run. Needs `jsonschema` (extra `interop`). **The wheel does not ship `interop/`**: without `--interop` it only finds the source checkout
+- Every vector `kind` has a case check in `_KINDS`; `tests/interop/test_conformance.py` flips every expectation of every case (`TestEveryCaseIsLive`) and runs a list of plausible wrong implementations that must each go red (`WRONG`). A new kind or case needs both, or it guards nothing
+- A VALID fixture must also pass the runner rules the schema cannot see: `en-migracion.json` declared an authority no endpoint served (R3.3) and was green in the schema suite for a whole PR
+- `publish.yml` runs `python -m pytest -q tests/interop` (schemas + runner + vectors) in its own `interop` job (read-only, no token) that `publish` needs; it triggers on tags and by hand only
+- R3.1 decides by OPERATION, not by method: an MCP `tools/list` or public read tool travels by POST and is a public read (never signed). The `request-signing` vector carries `operation`; a StackClient that signs every POST fails it
+- An event inbox decides in this order: signature (401), nonce (409 `nonce_replayed`), duplicate (200 `already_processed`), `stale_sequence`, accept. R5.9's "never 409" is about duplicates; the vector pins the order
 
 ### Settle Overrides, Retry & Non-Raising Settle (client.py, v0.36.0)
 - `settle_payment()` / `verify_payment()` / `process_payment()` accept `asset` (token contract address) and `eip712_domain` (`{"name", "version"}`) overrides — the caller's token registry wins over the SDK's (non-USDC settles, registry drift). Defaults unchanged: network USDC + registry domain

@@ -45,7 +45,7 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator, ValidationError, validators
 
-INTEROP = Path(__file__).resolve().parents[1] / "interop"
+INTEROP = Path(__file__).resolve().parents[2] / "interop"
 SCHEMAS = INTEROP / "schemas"
 FIXTURES = INTEROP / "fixtures"
 

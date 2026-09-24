@@ -1,0 +1,187 @@
+{
+  "spec": "uvd-interop/1",
+  "kind": "ip-ban",
+  "about": "Perfil L9: cuándo una respuesta de la API de Execution Market es su bloqueo de IP. La regla está atada a ese perfil: otras apps del stack usan `error` en la raíz para cualquier falla (el facilitador, por ejemplo), así que no se aplica a sus respuestas. Entrada: profile, el perfil legado que habla la API que contestó (\"L9\" para la API de Execution Market, null para una que no habla ninguno), y la respuesta tal como llega por el cable (response.status, response.headers y response.body, el cuerpo crudo como texto). Salida: expect.ip_ban. La regla: es un bloqueo si y solo si profile es \"L9\", el status es 403 y el cuerpo es un objeto JSON con exactamente una clave, `error`, sea cual sea su valor. El valor de `error`, el formato del JSON y las cabeceras (Content-Type incluida) no cambian el veredicto; un cuerpo que no es un objeto JSON no es un bloqueo. Un cuerpo que lleva `uvd_error` tiene que ser un sobre válido (schemas/uvd-error.schema.json).",
+  "cases": [
+    {
+      "id": "bloqueo",
+      "rule": "L9",
+      "why": "403 con un cuerpo que tiene solo `error`: es el bloqueo.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": \"blocked\"}"
+      },
+      "expect": {"ip_ban": true}
+    },
+    {
+      "id": "bloqueo-con-otro-texto-y-otro-formato",
+      "rule": "L9",
+      "why": "El texto de `error`, los espacios del JSON y las cabeceras (Retry-After incluida) no cambian el veredicto: solo cuentan el status y el conjunto de claves.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json; charset=utf-8", "Retry-After": "3600"},
+        "body": "{\n  \"error\": \"too many requests from this address\"\n}\n"
+      },
+      "expect": {"ip_ban": true}
+    },
+    {
+      "id": "bloqueo-sin-content-type-json",
+      "rule": "L9",
+      "why": "La regla no lee Content-Type: un cuerpo que es un objeto JSON con solo `error` es el bloqueo aunque llegue como text/plain.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "text/plain"},
+        "body": "{\"error\": \"blocked\"}"
+      },
+      "expect": {"ip_ban": true}
+    },
+    {
+      "id": "bloqueo-con-error-que-no-es-texto",
+      "rule": "L9",
+      "why": "La regla mira las claves, no el tipo del valor: un `error` que es un objeto sigue siendo la única clave.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": {\"reason\": \"blocked\"}}"
+      },
+      "expect": {"ip_ban": true}
+    },
+    {
+      "id": "otra-api-que-no-habla-l9",
+      "rule": "L9",
+      "why": "La misma forma de otra API del stack no es la marca de L9: esas apps usan `error` en la raíz para cualquier falla.",
+      "profile": null,
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": \"blocked\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "permiso-denegado",
+      "rule": "L9",
+      "why": "Un 403 con `error`, `message` y `timestamp` es un permiso denegado: `error` en la raíz no alcanza, tiene que ser la única clave.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": \"forbidden\", \"message\": \"Insufficient permissions\", \"timestamp\": \"2026-09-24T02:00:00Z\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "limite-de-tasa",
+      "rule": "L9",
+      "why": "El 429 del límite de tasa lleva `error` en la raíz y no es un bloqueo: el status no es 403, y trae más claves.",
+      "profile": "L9",
+      "response": {
+        "status": 429,
+        "headers": {"Content-Type": "application/json", "Retry-After": "60"},
+        "body": "{\"error\": \"rate_limit_exceeded\", \"message\": \"Rate limit exceeded\", \"retry_after\": 60}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "429-con-solo-error",
+      "rule": "L9",
+      "why": "Un 429 con solo `error` y Retry-After es un límite de tasa, no el bloqueo: la marca de L9 es el 403. Confundirlos hace esperar una hora donde bastaba Retry-After, o martillar donde había que parar.",
+      "profile": "L9",
+      "response": {
+        "status": 429,
+        "headers": {"Content-Type": "application/json", "Retry-After": "60"},
+        "body": "{\"error\": \"rate_limit_exceeded\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "solo-error-pero-no-403",
+      "rule": "L9",
+      "why": "El 409 de una clave de idempotencia usada con otro cuerpo (perfil L10) tiene solo `error`, y no es un bloqueo: el status tiene que ser 403.",
+      "profile": "L9",
+      "response": {
+        "status": 409,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": \"idempotency_key_conflict\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "detail-en-la-raiz",
+      "rule": "L9",
+      "why": "Los demás errores de la API usan `detail`: un 403 con `detail` no es un bloqueo.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"detail\": \"Not authenticated\"}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "error-anidado-en-detail",
+      "rule": "L9",
+      "why": "Un `error` anidado bajo `detail` no es `error` en la raíz.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"detail\": {\"error\": \"forbidden\", \"code\": \"forbidden\", \"message\": \"Insufficient permissions\"}}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "bloqueo-con-uvd-error-al-lado",
+      "rule": "L9",
+      "why": "Con el sobre al lado, el cuerpo ya no tiene una sola clave y el bloqueo deja de reconocerse. Es la razón de R6.2: el sobre no se agrega a un cuerpo de bloqueo.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "{\"error\": \"blocked\", \"uvd_error\": {\"code\": \"ip_blocked\", \"message\": \"Blocked\", \"retryable\": true, \"retry_after_s\": 3600, \"spent\": \"no\", \"next_action\": \"retry\"}}"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "cuerpo-html",
+      "rule": "L9",
+      "why": "Un 403 cuyo cuerpo no es JSON (una página de error de un proxy) no es la marca de L9.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "text/html"},
+        "body": "<html><body><h1>403 Forbidden</h1></body></html>"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "cuerpo-json-que-no-es-objeto",
+      "rule": "L9",
+      "why": "Un array JSON con el texto \"error\" no tiene claves: la regla pide un objeto.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {"Content-Type": "application/json"},
+        "body": "[\"error\"]"
+      },
+      "expect": {"ip_ban": false}
+    },
+    {
+      "id": "cuerpo-vacio",
+      "rule": "L9",
+      "why": "Un 403 sin cuerpo no tiene la clave `error`.",
+      "profile": "L9",
+      "response": {
+        "status": 403,
+        "headers": {},
+        "body": ""
+      },
+      "expect": {"ip_ban": false}
+    }
+  ]
+}

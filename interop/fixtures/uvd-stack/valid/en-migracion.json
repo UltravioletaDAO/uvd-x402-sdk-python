@@ -24,6 +24,12 @@
         }
       }
     },
+    "mcp": {
+      "url": "https://mcp.tablero.example/mcp",
+      "auth": [
+        "oauth2.1"
+      ]
+    },
     "event_inbox": {
       "url": "https://api.tablero.example/hooks/events",
       "auth": [
