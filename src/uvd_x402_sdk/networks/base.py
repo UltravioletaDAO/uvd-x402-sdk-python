@@ -88,6 +88,15 @@ class NetworkType(Enum):
         return network_type == cls.SUI
 
 
+# How far from a whole number of base units an amount may be and still count as
+# float noise. Either bound is enough: 10 ** -6 of a base unit (10 ** -(decimals
+# + 6) whole tokens), or 2 ** -49 of the amount, about eight units in the last
+# place of a double, because float noise grows with the price. They move money,
+# so they live here and not in configuration.
+_FLOAT_NOISE_BASE_UNITS = Fraction(1, 10**6)
+_FLOAT_NOISE_RELATIVE = Fraction(1, 2**49)
+
+
 def to_base_units(
     amount: Union[Decimal, float, int, str],
     decimals: int,
@@ -95,20 +104,31 @@ def to_base_units(
     unit: str = "the token",
 ) -> int:
     """
-    Convert an amount in whole tokens into base units, exactly or not at all.
+    Convert an amount in whole tokens into base units, or refuse.
 
-    A payer signs a whole number of base units. An amount with digits below
-    one base unit cannot be signed as written: ``0.0000015`` or ``5E-7`` with
-    6 decimals, a float sum read as ``0.30000000000000004``, a ``Decimal``
-    built from the binary float ``2.01``. It raises instead of being
-    truncated, because truncating charges an amount nobody wrote (``5E-7``
-    became a price of 0). Trailing zeros are not such digits: ``2.010`` is
-    ``2010000`` with 6 decimals.
+    A payer signs a whole number of base units. An amount with a real digit
+    below one base unit cannot be signed as written: ``0.0000015`` or ``5E-7``
+    with 6 decimals. It raises instead of being truncated, because truncating
+    charges an amount nobody wrote (``5E-7`` became a price of 0). Trailing
+    zeros are not such digits: ``2.010`` is ``2010000`` with 6 decimals.
 
-    The product is exact at any length (``Fraction``): a ``Decimal`` product
-    rounds to the context's 28 digits first, which can turn a sub-unit digit
-    into a whole number. A float or a string is read through its decimal form
-    (``str``).
+    Float noise is not such a digit either. A price computed with floats lands
+    a few units in the last place of a double away from the price meant
+    (``Decimal(str(35 * 0.01))`` is ``0.35000000000000003``, ``Decimal(2.01)``
+    is ``2.00999999999999978...``), and it converts to the nearest whole number
+    of base units, 350000 and 2010000 with 6 decimals. It counts as noise when
+    it is within ``10 ** -(decimals + 6)`` of that number, or within
+    ``abs(amount) * 2 ** -49``. The second bound is needed because the noise
+    grows with the price: ``n * 0.10`` read this way is ``1e-13`` off for n from
+    5123 to 10000, which the first bound alone refuses at 7 decimals. Measured
+    on ``n * 0.01``, ``n * 0.07`` and ``n * 0.10`` for n up to 1,000,000, no
+    price is refused at 6 or 7 decimals. The cost: a real half base unit is
+    rounded too once the price is large enough for the relative bound to
+    reach it, from about $281 million at 6 decimals and $28 million at 7.
+
+    The arithmetic is exact at any length (``Fraction``): a ``Decimal`` product
+    rounds to the context's 28 digits first. A float or a string is read
+    through its decimal form (``str``).
 
     Args:
         amount: Amount in whole tokens (e.g. ``Decimal("10.50")``)
@@ -119,20 +139,25 @@ def to_base_units(
         The amount in base units (e.g. 10500000 for 6 decimals)
 
     Raises:
-        ValueError: If the amount is not finite, or has digits below one base
-            unit of a token with ``decimals`` decimals.
+        ValueError: If the amount is not finite, is negative, or has a digit
+            below one base unit of a token with ``decimals`` decimals that is
+            not float noise.
     """
     value = amount if isinstance(amount, Decimal) else Decimal(str(amount))
     if not value.is_finite():
         raise ValueError(f"amount must be a finite number, got {value}")
+    if value < 0:
+        raise ValueError(f"amount must not be negative, got {format(value, 'f')}")
     scaled = Fraction(value) * Fraction(10) ** decimals
-    if scaled.denominator != 1:
+    units = round(scaled)
+    off = abs(scaled - units)
+    if off and off >= _FLOAT_NOISE_BASE_UNITS and off > scaled * _FLOAT_NOISE_RELATIVE:
         raise ValueError(
             f"{format(value, 'f')} is not a whole number of base units of {unit} "
             f"({decimals} decimals), so no payer can sign it exactly. Write the "
             f"price with at most {decimals} decimal places."
         )
-    return scaled.numerator
+    return units
 
 
 @dataclass
@@ -212,8 +237,9 @@ class NetworkConfig:
                 pegged to the dollar. Scaling by the decimals only turns
                 dollars into base units when one whole unit IS one dollar;
                 on XRPL it would charge 1 XRP for a price written as $1.00.
-                Also if the amount is not finite, or has digits below one base
-                unit (``0.0000015`` with 6 decimals).
+                Also if the amount is not finite, is negative, or has a real
+                digit below one base unit (``0.0000015`` with 6 decimals);
+                float noise is rounded away (see :func:`to_base_units`).
         """
         if not self.usd_pegged:
             raise ValueError(self.usd_conversion_error())
