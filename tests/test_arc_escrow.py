@@ -407,6 +407,21 @@ def test_partial_release_then_void_of_the_rest(chain_id):
 
 
 @pytest.mark.parametrize("chain_id", ARC_CHAINS)
+def test_no_amount_after_a_partial_capture_is_refused_without_tx(chain_id):
+    """No amount means max_amount, as on v1/v2; after a partial capture that is
+    not what is left, so it is refused rather than voiding the remainder."""
+    pi = _client_pi()
+    assert pi.max_amount == 5_000_000
+    client, chain, sent = _arc_client(chain_id, _state_word(2_000_000, 3_000_000))
+
+    with pytest.raises(ValueError, match="whole capturableAmount"):
+        client.refund_in_escrow(pi)
+
+    assert sent == []
+    assert set(chain.methods) <= {"eth_call", "eth_chainId"}
+
+
+@pytest.mark.parametrize("chain_id", ARC_CHAINS)
 def test_refund_post_escrow_is_refund(chain_id):
     client, _, sent = _arc_client(chain_id)
     pi = _client_pi()
