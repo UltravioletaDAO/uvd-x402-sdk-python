@@ -1,0 +1,18 @@
+{
+  "schema": "uvd.event/1",
+  "event_id": "1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d",
+  "source": "describe-net",
+  "type": "describe-net.feedback.indexed",
+  "subject": {
+    "kind": "feedback",
+    "id": "eip155:8453/1234/7"
+  },
+  "sequence": 0,
+  "occurred_at": "2026-09-24T01:11:00Z",
+  "actor": {
+    "kind": "system",
+    "id": ""
+  },
+  "payload": {},
+  "trace_id": "0af7651916cd43dd8448eb211c80319c"
+}

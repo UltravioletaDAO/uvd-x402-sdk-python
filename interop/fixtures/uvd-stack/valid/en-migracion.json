@@ -1,0 +1,78 @@
+{
+  "schema": "uvd.stack/1",
+  "app": "tablero-ejemplo",
+  "version": "13.0.0",
+  "git_sha": "deadbee",
+  "endpoints": {
+    "api": {
+      "url": "https://api.tablero.example/api/v1",
+      "auth": [
+        "none",
+        "erc8128",
+        "oauth2.1"
+      ],
+      "erc8128": {
+        "authorities": [
+          "api.tablero.example",
+          "mcp.tablero.example"
+        ],
+        "chain_ids": null,
+        "preset": "em-lenient",
+        "nonce": {
+          "source": "unseen",
+          "endpoint": "https://api.tablero.example/api/v1/auth/erc8128/nonce"
+        }
+      }
+    },
+    "event_inbox": {
+      "url": "https://api.tablero.example/hooks/events",
+      "auth": [
+        "hmac",
+        "erc8128"
+      ],
+      "erc8128": {
+        "authorities": [
+          "api.tablero.example"
+        ],
+        "chain_ids": [
+          8453
+        ],
+        "preset": "evento-s2s",
+        "nonce": {
+          "source": "unseen"
+        }
+      }
+    }
+  },
+  "identity": {
+    "service_signer": "0x5eed00000000000000000000000000000000cafe",
+    "reputation_hosts": [
+      "tablero.example",
+      "api.tablero.example"
+    ]
+  },
+  "payments": {
+    "charges": false
+  },
+  "rate_limits": [
+    {
+      "scope": "ip",
+      "limit": 60,
+      "window_s": 60
+    }
+  ],
+  "events": {
+    "emits": [
+      "tablero-ejemplo.task.created"
+    ],
+    "consumes": [],
+    "envelopes": [
+      "uvd.event/1",
+      "em.event.v1"
+    ]
+  },
+  "health": {
+    "live": "https://api.tablero.example/health/live",
+    "ready": "https://api.tablero.example/health/ready"
+  }
+}

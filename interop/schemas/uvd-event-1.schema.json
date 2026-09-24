@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ultravioletadao.xyz/interop/v1/uvd-event-1.schema.json",
+  "title": "Sobre de evento uvd.event/1 (interop v1)",
+  "description": "El sobre común de un evento entre apps del stack: quién lo emite, sobre qué sujeto, en qué orden, cuándo, quién lo causó, cuánta plata involucra y la traza. Reglas: interop/05-eventos.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "event_id",
+    "source",
+    "type",
+    "subject",
+    "sequence",
+    "occurred_at",
+    "actor",
+    "payload",
+    "trace_id"
+  ],
+  "properties": {
+    "schema": {
+      "description": "R5.1. Nombre y versión mayor del sobre.",
+      "const": "uvd.event/1"
+    },
+    "event_id": {
+      "description": "R5.1 y R5.9. UUID en minúsculas; con source, la clave de deduplicación del receptor.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "source": {
+      "description": "R1.10. Id de la app que emite.",
+      "$ref": "#/$defs/app_id"
+    },
+    "type": {
+      "description": "R5.2. <app>.<sujeto>.<verbo>; el primer segmento es source.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}[.][a-z][a-z0-9_]{0,31}[.][a-z][a-z0-9_]{0,62}$"
+    },
+    "subject": {
+      "description": "R5.1. Sobre qué es el evento; sequence ordena por este par.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sequence": {
+      "description": "R5.3. Crece por (source, subject.kind, subject.id). Entero seguro en JavaScript.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "occurred_at": {
+      "description": "R5.5. RFC 3339 en UTC, con Z.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$"
+    },
+    "actor": {
+      "description": "R5.1. Quién causó el evento: una wallet, una app o un proceso del sistema.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["wallet", "app", "system"] },
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" }
+      },
+      "allOf": [
+        {
+          "$comment": "R2.3: una wallet EVM va en minúsculas; una de Solana, en base58.",
+          "if": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "wallet" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^(0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$" }
+            }
+          }
+        },
+        {
+          "$comment": "R1.10: una app se nombra con su id.",
+          "if": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "app" } }
+          },
+          "then": {
+            "properties": { "id": { "$ref": "#/$defs/app_id" } }
+          }
+        }
+      ]
+    },
+    "economic": {
+      "description": "R5.4. Opcional: la plata que involucra el evento. Los montos van como string decimal.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency", "network"],
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,30})([.][0-9]{1,18})?$"
+        },
+        "currency": { "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,15}$" },
+        "network": {
+          "description": "CAIP-2.",
+          "type": "string",
+          "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$"
+        },
+        "tx_hash": {
+          "description": "R5.15. El sello, si ya lo hay: 0x + 64 hex en minúsculas (EVM) o base58 (Solana).",
+          "type": "string",
+          "pattern": "^(0x[0-9a-f]{64}|[1-9A-HJ-NP-Za-km-z]{64,128})$"
+        }
+      }
+    },
+    "payload": {
+      "description": "R5.1. El cuerpo propio del tipo de evento.",
+      "type": "object"
+    },
+    "trace_id": {
+      "description": "R5.6. El trace-id W3C de la traza que produjo el evento.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "not": { "const": "00000000000000000000000000000000" }
+    }
+  },
+  "$defs": {
+    "app_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$"
+    }
+  }
+}

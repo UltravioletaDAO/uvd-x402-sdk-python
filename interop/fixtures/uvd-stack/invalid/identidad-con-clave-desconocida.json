@@ -1,0 +1,31 @@
+{
+  "schema": "uvd.stack/1",
+  "app": "lector-ejemplo",
+  "version": "0.1.0",
+  "git_sha": "a1b2c3d",
+  "endpoints": {
+    "api": {
+      "url": "https://api.lector.example",
+      "auth": [
+        "none"
+      ]
+    }
+  },
+  "identity": {
+    "service_signer": null,
+    "wallet": "0x5eed00000000000000000000000000000000cafe"
+  },
+  "payments": {
+    "charges": false
+  },
+  "rate_limits": [],
+  "events": {
+    "emits": [],
+    "consumes": [],
+    "envelopes": []
+  },
+  "health": {
+    "live": "https://api.lector.example/health/live",
+    "ready": "https://api.lector.example/health/ready"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "uvd_error": {
+    "code": "nonce_store_unavailable",
+    "message": "El almacén de nonces no responde; no se aceptó nada. Repetí la petición en 5 s.",
+    "retryable": false,
+    "retry_after_s": 5,
+    "spent": "no",
+    "next_action": "retry",
+    "docs": "https://docs.mercado.example/errores#nonce_store_unavailable"
+  }
+}

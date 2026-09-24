@@ -1,0 +1,57 @@
+{
+  "schema": "uvd.stack/1",
+  "app": "flota-ejemplo",
+  "version": "2026.09.24",
+  "git_sha": "0123456789abcdef0123456789abcdef01234567",
+  "endpoints": {
+    "api": {
+      "url": "https://ventas.flota.example",
+      "auth": [
+        "x402",
+        "none"
+      ]
+    },
+    "mcp": {
+      "url": "https://flota.example/mcp",
+      "auth": [
+        "none"
+      ]
+    }
+  },
+  "snapshots": [
+    {
+      "name": "trades",
+      "url": "https://flota.example/live/trades.json",
+      "schema": "flota-ejemplo.trades/1"
+    }
+  ],
+  "identity": {
+    "service_signer": "0x0b0e000000000000000000000000000000001234",
+    "erc8004": {
+      "eip155:8453": 77,
+      "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "Agente11111111111111111111111111111111111111"
+    }
+  },
+  "payments": {
+    "charges": true,
+    "x402": "https://ventas.flota.example/.well-known/x402"
+  },
+  "rate_limits": [
+    {
+      "scope": "global",
+      "limit": 20,
+      "window_s": 1
+    }
+  ],
+  "events": {
+    "emits": [],
+    "consumes": [
+      "execution-market.task.assigned"
+    ],
+    "envelopes": []
+  },
+  "health": {
+    "live": "https://ventas.flota.example/health/live",
+    "ready": "https://ventas.flota.example/health/ready"
+  }
+}

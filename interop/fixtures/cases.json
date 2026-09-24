@@ -1,0 +1,2157 @@
+{
+  "spec": "uvd-interop/1",
+  "about": "Un caso por fixture. valid: true = el documento DEBE validar. valid: false = DEBE fallar con exactamente los errores de errors (keyword de JSON Schema, JSON Pointer de la instancia y, para required, la propiedad que falta). rule apunta a la regla de la especificación que el caso fija. schemas dice, por esquema, dónde está el archivo (relativo a interop/) y en qué carpeta de fixtures están sus casos.",
+  "schemas": {
+    "manifest": {
+      "schema": "schemas/manifest.schema.json",
+      "fixtures": "uvd-stack"
+    },
+    "uvd-event-1": {
+      "schema": "schemas/uvd-event-1.schema.json",
+      "fixtures": "uvd-event-1"
+    },
+    "uvd-error": {
+      "schema": "schemas/uvd-error.schema.json",
+      "fixtures": "uvd-error"
+    }
+  },
+  "cases": [
+    {
+      "file": "uvd-stack/valid/completo.json",
+      "schema": "manifest",
+      "valid": true,
+      "rule": "R1.4",
+      "why": "Todas las puertas, identidad completa, cobra y emite eventos."
+    },
+    {
+      "file": "uvd-stack/valid/minimo.json",
+      "schema": "manifest",
+      "valid": true,
+      "rule": "R1.4",
+      "why": "Solo lo obligatorio; service_signer null, no cobra, sin límites ni eventos."
+    },
+    {
+      "file": "uvd-stack/valid/emisor-por-instantanea.json",
+      "schema": "manifest",
+      "valid": true,
+      "rule": "R5.14",
+      "why": "Una app sin buzón de eventos que publica una instantánea; agentId en EVM y en Solana."
+    },
+    {
+      "file": "uvd-stack/valid/en-migracion.json",
+      "schema": "manifest",
+      "valid": true,
+      "rule": "R5.16",
+      "why": "Buzón que acepta HMAC legado y ERC-8128 a la vez, con los dos sobres; API em-lenient con cualquier cadena."
+    },
+    {
+      "file": "uvd-stack/invalid/falta-schema.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin schema el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-app.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin app el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "app"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-version.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin version el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "version"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-git-sha.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin git_sha el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "git_sha"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-endpoints.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin endpoints el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "endpoints"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-identity.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin identity el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "identity"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-payments.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin payments el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "payments"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-rate-limits.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin rate_limits el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "rate_limits"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-events.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin events el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "events"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/falta-health.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Sin health el manifiesto no dice lo que una app necesita saber de otra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "health"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/schema-de-otra-version.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Un lector v1 no interpreta otra versión mayor.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/app-con-mayusculas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.10",
+      "why": "El id de la app es uno solo, en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/app"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/nombre-vacio.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Un nombre vacío no nombra nada.",
+      "errors": [
+        {
+          "keyword": "minLength",
+          "instance_path": "/name"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/version-vacia.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "La versión desplegada no puede estar vacía.",
+      "errors": [
+        {
+          "keyword": "minLength",
+          "instance_path": "/version"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/git-sha-en-mayusculas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "El commit va en hex minúscula.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/git_sha"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/generated-at-con-offset.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.2",
+      "why": "Las fechas del contrato van en UTC con Z.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/generated_at"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/clave-desconocida-en-la-raiz.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "El emisor no inventa claves; un typo no pasa en silencio.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": ""
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/endpoints-sin-api.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.4",
+      "why": "Toda app tiene una puerta api.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints",
+          "property": "api"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/puerta-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Solo las cuatro puertas del contrato.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/endpoints"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/puerta-sin-url.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Una puerta sin URL no se puede usar.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api",
+          "property": "url"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/puerta-sin-auth.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.6",
+      "why": "Quien llama tiene que saber cómo entrar.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/mcp",
+          "property": "auth"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/puerta-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Una puerta es url, auth y su política ERC-8128.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/endpoints/api"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/url-en-http.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Solo https.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/endpoints/api/url"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/url-de-ruta-interna.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Nunca una ruta interna en un documento público.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/endpoints/mcp/url"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/auth-vacio.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.6",
+      "why": "Una puerta acepta al menos un modo.",
+      "errors": [
+        {
+          "keyword": "minItems",
+          "instance_path": "/endpoints/mcp/auth"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/auth-repetido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.6",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/endpoints/mcp/auth"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/auth-desconocido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.6",
+      "why": "Vocabulario cerrado de modos de autenticación.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/endpoints/mcp/auth/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8128-sin-politica.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "Una puerta que acepta ERC-8128 publica la política de su verificador.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/mcp",
+          "property": "erc8128"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-sin-erc8128.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "Una puerta que no acepta ERC-8128 no publica política.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/endpoints/mcp"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-sin-authorities.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "La política declara authorities.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128",
+          "property": "authorities"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-sin-chain-ids.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "La política declara chain_ids.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128",
+          "property": "chain_ids"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-sin-nonce.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "La política declara nonce.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128",
+          "property": "nonce"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-sin-preset.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "La postura del verificador se declara como preset.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128",
+          "property": "preset"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/politica-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "La validez la fija el preset.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/endpoints/api/erc8128"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/authorities-vacias.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.3",
+      "why": "Un verificador acepta al menos su authority.",
+      "errors": [
+        {
+          "keyword": "minItems",
+          "instance_path": "/endpoints/api/erc8128/authorities"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/authority-con-mayusculas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.3",
+      "why": "La authority es un host en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/endpoints/api/erc8128/authorities/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/authority-con-puerto-443.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.3",
+      "why": "Un puerto por omisión en la authority configurada no coincide con lo que firma el cliente.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/endpoints/api/erc8128/authorities/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/authorities-repetidas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.3",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/endpoints/api/erc8128/authorities"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/chain-ids-vacio.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "Una lista vacía no acepta nada; cualquiera es null.",
+      "errors": [
+        {
+          "keyword": "minItems",
+          "instance_path": "/endpoints/api/erc8128/chain_ids"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/chain-id-cero.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "Un chain id es positivo.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/endpoints/api/erc8128/chain_ids/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/chain-ids-repetidos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.4",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/endpoints/api/erc8128/chain_ids"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/preset-desconocido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.5",
+      "why": "Las posturas son datos fijados por vectores; no se inventan.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/endpoints/api/erc8128/preset"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/nonce-sin-source.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.9",
+      "why": "Quien firma tiene que saber de dónde sale el nonce.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128/nonce",
+          "property": "source"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/nonce-source-desconocido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.9",
+      "why": "Tres semánticas de nonce: issued, unseen, none.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/endpoints/api/erc8128/nonce/source"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/nonce-emitido-sin-endpoint.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.9",
+      "why": "Si el servidor emite el nonce, publica dónde se pide.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/endpoints/api/erc8128/nonce",
+          "property": "endpoint"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/nonce-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.5",
+      "why": "El orden de consumo lo fija el preset.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/endpoints/api/erc8128/nonce"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/evento-s2s-con-nonce-emitido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.6",
+      "why": "evento-s2s es nonce al azar por intento con almacén de no vistos.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/endpoints/api/erc8128/nonce/source"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/buzon-sin-evento-s2s.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R3.8",
+      "why": "Un buzón de eventos que acepta ERC-8128 lo hace con evento-s2s.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/endpoints/event_inbox/erc8128/preset"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/identidad-sin-service-signer.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.5",
+      "why": "No declararlo y declarar que no firma (null) son cosas distintas.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/identity",
+          "property": "service_signer"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/service-signer-con-checksum.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.3",
+      "why": "Las direcciones EVM van en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/service_signer"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/identidad-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.2",
+      "why": "La wallet de servicio va en service_signer.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/identity"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-red-sin-caip2.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "Las redes se nombran en CAIP-2.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/erc8004"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-agent-id-negativo.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "Un agentId EVM es un entero no negativo.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/identity/erc8004/eip155:8453"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-agent-id-texto-invalido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "Un agentId de texto es una clave base58 (Solana).",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/erc8004/eip155:8453"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/hosts-de-reputacion-repetidos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.2",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/identity/reputation_hosts"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/host-de-reputacion-con-esquema.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.2",
+      "why": "Un host, no una URL.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/reputation_hosts/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/pagos-sin-charges.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.7",
+      "why": "La app dice si cobra.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/payments",
+          "property": "charges"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/cobra-sin-x402.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.7",
+      "why": "Quien cobra apunta a su /.well-known/x402.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/payments",
+          "property": "x402"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/no-cobra-con-x402.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.7",
+      "why": "Quien no cobra no apunta a nada.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/payments"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/pagos-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.7",
+      "why": "Lo que se cobra está en /.well-known/x402.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/payments"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-sin-scope.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Un límite declara scope.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/rate_limits/0",
+          "property": "scope"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-sin-limit.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Un límite declara limit.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/rate_limits/0",
+          "property": "limit"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-sin-window-s.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Un límite declara window_s.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/rate_limits/0",
+          "property": "window_s"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-scope-desconocido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "ip, wallet, key o global.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/rate_limits/0/scope"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-de-puerta-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Sin applies_to, el límite es de todas las puertas.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/rate_limits/0/applies_to"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-cero.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Un límite de cero no deja pasar nada.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/rate_limits/0/limit"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/ventana-cero.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Una ventana dura al menos un segundo.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/rate_limits/0/window_s"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/limite-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.3",
+      "why": "Forma cerrada del límite.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/rate_limits/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/eventos-sin-emits.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "events declara emits, aunque sea vacío.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/events",
+          "property": "emits"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/eventos-sin-consumes.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "events declara consumes, aunque sea vacío.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/events",
+          "property": "consumes"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/eventos-sin-envelopes.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "events declara envelopes, aunque sea vacío.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/events",
+          "property": "envelopes"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/tipo-de-evento-de-dos-segmentos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.2",
+      "why": "El tipo es <app>.<sujeto>.<verbo>.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/events/emits/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/emits-repetidos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/events/emits"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/consumes-repetidos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/events/consumes"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/sobres-repetidos.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "Sin repetidos.",
+      "errors": [
+        {
+          "keyword": "uniqueItems",
+          "instance_path": "/events/envelopes"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/sobre-desconocido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.16",
+      "why": "Los sobres que existen: uvd.event/1 y el perfil em.event.v1.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/events/envelopes/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/eventos-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.12",
+      "why": "Forma cerrada.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/events"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/salud-sin-live.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.5",
+      "why": "La salud va partida en live y ready.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/health",
+          "property": "live"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/salud-sin-ready.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.5",
+      "why": "La salud va partida en live y ready.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/health",
+          "property": "ready"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/salud-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R7.5",
+      "why": "Forma cerrada.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/health"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-sin-name.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "Una instantánea declara name.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/snapshots/0",
+          "property": "name"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-sin-url.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "Una instantánea declara url.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/snapshots/0",
+          "property": "url"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-sin-schema.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "Una instantánea declara schema.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/snapshots/0",
+          "property": "schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-nombre-con-mayusculas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "Nombre en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/snapshots/0/name"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-schema-sin-version.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "El schema de una instantánea lleva su versión mayor.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/snapshots/0/schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/instantanea-con-clave-desconocida.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R5.14",
+      "why": "Forma cerrada.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/snapshots/0"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/enlace-con-nombre-invalido.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.2",
+      "why": "Los nombres de enlace van en snake_case.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/links"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/enlace-en-http.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "Solo https.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/links/llms_txt"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/valid/reintentable-antes-de-aceptar.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.5",
+      "why": "503 antes de aceptar: se repite la misma petición."
+    },
+    {
+      "file": "uvd-error/valid/minimo.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.3",
+      "why": "Solo lo obligatorio."
+    },
+    {
+      "file": "uvd-error/valid/pago-en-curso.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.1",
+      "why": "Aditivo: convive con error en la raíz; spent maybe y reenviar el mismo pago."
+    },
+    {
+      "file": "uvd-error/valid/difundida-sin-recibo.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.4",
+      "why": "spent maybe, revisar la transacción en details."
+    },
+    {
+      "file": "uvd-error/valid/ya-liquidada.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.7",
+      "why": "spent yes y stop."
+    },
+    {
+      "file": "uvd-error/valid/hace-falta-pagar.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.1",
+      "why": "Convive con el cuerpo 402 de x402."
+    },
+    {
+      "file": "uvd-error/valid/firma-invalida.json",
+      "schema": "uvd-error",
+      "valid": true,
+      "rule": "R6.7",
+      "why": "authenticate."
+    },
+    {
+      "file": "uvd-error/invalid/sin-uvd-error.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.1",
+      "why": "Sin la clave no hay sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "uvd_error"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/uvd-error-no-es-objeto.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "El sobre es un objeto.",
+      "errors": [
+        {
+          "keyword": "type",
+          "instance_path": "/uvd_error"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-code.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "code es obligatorio.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "code"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-message.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "message es obligatorio.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "message"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-spent.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "spent es obligatorio.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "spent"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-retryable.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.5",
+      "why": "Sin retryable el cliente adivina.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "retryable"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-next-action.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.7",
+      "why": "Sin next_action el cliente adivina.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "next_action"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/falta-next-action-con-espera.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.6",
+      "why": "Sin acción, un plazo de espera no tiene a qué aplicarse.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "next_action"
+        },
+        {
+          "keyword": "not",
+          "instance_path": "/uvd_error"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/code-en-camel-case.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "El código es snake_case estable.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/uvd_error/code"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/message-vacio.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "Siempre hay un texto para una persona.",
+      "errors": [
+        {
+          "keyword": "minLength",
+          "instance_path": "/uvd_error/message"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/spent-desconocido.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.4",
+      "why": "no, maybe o yes.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/uvd_error/spent"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/next-action-desconocida.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.7",
+      "why": "Vocabulario cerrado.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/uvd_error/next_action"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/clave-desconocida-retry-after.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "Un retry_after sin _s no pasa en silencio.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/uvd_error"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/retry-after-negativo.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.6",
+      "why": "No se espera un tiempo negativo.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/uvd_error/retry_after_s"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/docs-en-http.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "Solo https.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/uvd_error/docs"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/details-no-es-objeto.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "Lo propio de la app va en un objeto.",
+      "errors": [
+        {
+          "keyword": "type",
+          "instance_path": "/uvd_error/details"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/reintentable-que-no-reintenta.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.5",
+      "why": "retryable true va con next_action retry.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/uvd_error/next_action"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/retry-sin-espera.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.6",
+      "why": "Un reintento dice cuánto esperar.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/uvd_error",
+          "property": "retry_after_s"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/retry-no-reintentable.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.5",
+      "why": "next_action retry va con retryable true.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/uvd_error/retryable"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/retry-con-plata-quiza-movida.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.5",
+      "why": "Un emisor no puede ofrecer reintento sobre una petición que pudo mover plata.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/uvd_error/spent"
+        }
+      ]
+    },
+    {
+      "file": "uvd-error/invalid/espera-sin-accion-de-espera.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.6",
+      "why": "retry_after_s solo con retry o resend_same_payment.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/uvd_error"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/valid/tarea-asignada.json",
+      "schema": "uvd-event-1",
+      "valid": true,
+      "rule": "R5.16",
+      "why": "El perfil em.event.v1 llevado a uvd.event/1: subject.kind task."
+    },
+    {
+      "file": "uvd-event-1/valid/sujeto-que-no-es-tarea.json",
+      "schema": "uvd-event-1",
+      "valid": true,
+      "rule": "R5.1",
+      "why": "Un evento sin tarea y sin plata; actor app."
+    },
+    {
+      "file": "uvd-event-1/valid/actor-sistema-con-sello.json",
+      "schema": "uvd-event-1",
+      "valid": true,
+      "rule": "R5.15",
+      "why": "Actor de sistema, monto con sello Solana y sequence en el máximo entero seguro."
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-schema.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "schema es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-event-id.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "event_id es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "event_id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-source.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "source es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "source"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-type.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "type es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "type"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-subject.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "subject es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "subject"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-sequence.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "sequence es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "sequence"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-occurred-at.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "occurred_at es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "occurred_at"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-actor.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "actor es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "actor"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-payload.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "payload es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "payload"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/falta-trace-id.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "trace_id es parte del sobre.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "",
+          "property": "trace_id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/task-id-en-la-raiz.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El sujeto va en subject; task_id en la raíz es del perfil em.event.v1.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": ""
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/schema-del-perfil-legado.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "Este sobre es uvd.event/1; em.event.v1 es un perfil aparte.",
+      "errors": [
+        {
+          "keyword": "const",
+          "instance_path": "/schema"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/event-id-en-mayusculas.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.9",
+      "why": "UUID en minúsculas: la deduplicación compara texto.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/event_id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/source-con-mayusculas.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R1.10",
+      "why": "El id de la app es uno solo, en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/source"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/type-de-dos-segmentos.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.2",
+      "why": "El tipo es <app>.<sujeto>.<verbo>.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/type"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/subject-sin-kind.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El sujeto declara kind.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/subject",
+          "property": "kind"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/subject-sin-id.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El sujeto declara id.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/subject",
+          "property": "id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/subject-con-type.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El sujeto es {kind, id}.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/subject"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/subject-kind-con-mayusculas.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "kind en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/subject/kind"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/subject-id-vacio.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "Un id vacío no identifica.",
+      "errors": [
+        {
+          "keyword": "minLength",
+          "instance_path": "/subject/id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/sequence-negativa.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.3",
+      "why": "sequence empieza en 0.",
+      "errors": [
+        {
+          "keyword": "minimum",
+          "instance_path": "/sequence"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/sequence-fuera-de-entero-seguro.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.3",
+      "why": "Un consumidor en JavaScript la leería redondeada.",
+      "errors": [
+        {
+          "keyword": "maximum",
+          "instance_path": "/sequence"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/occurred-at-con-offset.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.5",
+      "why": "UTC con Z.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/occurred_at"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-sin-kind.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El actor declara kind.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/actor",
+          "property": "kind"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-sin-id.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El actor declara id.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/actor",
+          "property": "id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-kind-desconocido.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "wallet, app o system.",
+      "errors": [
+        {
+          "keyword": "enum",
+          "instance_path": "/actor/kind"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-id-vacio.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "Un id vacío no identifica.",
+      "errors": [
+        {
+          "keyword": "minLength",
+          "instance_path": "/actor/id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-con-clave-desconocida.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "Lo propio de la app va en payload.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/actor"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-rol-con-mayusculas.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "role en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/actor/role"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-wallet-con-checksum.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R2.3",
+      "why": "Las direcciones EVM van en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/actor/id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-app-con-nombre-invalido.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R1.10",
+      "why": "Una app se nombra con su id.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/actor/id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/economic-sin-amount.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "economic declara amount.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/economic",
+          "property": "amount"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/economic-sin-currency.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "economic declara currency.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/economic",
+          "property": "currency"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/economic-sin-network.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "economic declara network.",
+      "errors": [
+        {
+          "keyword": "required",
+          "instance_path": "/economic",
+          "property": "network"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/monto-como-numero.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "Un float pierde precisión; el monto va como string.",
+      "errors": [
+        {
+          "keyword": "type",
+          "instance_path": "/economic/amount"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/monto-en-notacion-cientifica.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "String decimal simple.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/amount"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/moneda-en-minusculas.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "El símbolo en mayúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/currency"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/red-sin-caip2.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "Las redes se nombran en CAIP-2.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/network"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/tx-hash-invalido.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.15",
+      "why": "El sello tiene la forma de su cadena.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/tx_hash"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/economic-con-clave-desconocida.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "Lo propio de la app va en payload.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/economic"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/payload-no-es-objeto.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.1",
+      "why": "El cuerpo del evento es un objeto.",
+      "errors": [
+        {
+          "keyword": "type",
+          "instance_path": "/payload"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/trace-id-con-guiones.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.6",
+      "why": "El trace-id W3C son 32 hex sin guiones.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/trace_id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/trace-id-en-ceros.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.6",
+      "why": "W3C declara inválido el trace-id en ceros.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/trace_id"
+        }
+      ]
+    }
+  ]
+}

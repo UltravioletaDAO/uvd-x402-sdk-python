@@ -1,0 +1,125 @@
+{
+  "schema": "uvd.stack/1",
+  "app": "mercado-ejemplo",
+  "name": "Mercado de ejemplo",
+  "version": "1.4.0",
+  "git_sha": "3f9c2ab",
+  "generated_at": "2026-09-24T02:00:00Z",
+  "endpoints": {
+    "api": {
+      "url": "https://api.mercado.example",
+      "auth": [
+        "none",
+        "erc8128"
+      ],
+      "erc8128": {
+        "authorities": [
+          "api.mercado.example"
+        ],
+        "chain_ids": [
+          8453
+        ],
+        "preset": "canonical-strict",
+        "nonce": {
+          "source": "issued",
+          "endpoint": "https://api.mercado.example/auth/erc8128/nonce"
+        }
+      }
+    },
+    "mcp": {
+      "url": "https://mcp.mercado.example/mcp",
+      "auth": [
+        "bearer"
+      ]
+    },
+    "event_inbox": {
+      "url": "https://api.mercado.example/events/inbox",
+      "auth": [
+        "erc8128"
+      ],
+      "erc8128": {
+        "authorities": [
+          "api.mercado.example"
+        ],
+        "chain_ids": [
+          8453
+        ],
+        "preset": "evento-s2s",
+        "nonce": {
+          "source": "unseen"
+        }
+      }
+    },
+    "event_cursor": {
+      "url": "https://api.mercado.example/events",
+      "auth": [
+        "erc8128"
+      ],
+      "erc8128": {
+        "authorities": [
+          "api.mercado.example"
+        ],
+        "chain_ids": [
+          8453
+        ],
+        "preset": "canonical-strict",
+        "nonce": {
+          "source": "unseen"
+        }
+      }
+    }
+  },
+  "snapshots": [
+    {
+      "name": "orders",
+      "url": "https://cdn.mercado.example/live/orders.json",
+      "schema": "mercado-ejemplo.orders/1"
+    }
+  ],
+  "identity": {
+    "service_signer": "0x5eed00000000000000000000000000000000cafe",
+    "erc8004": {
+      "eip155:8453": 1234
+    },
+    "reputation_hosts": [
+      "mercado.example"
+    ]
+  },
+  "payments": {
+    "charges": true,
+    "x402": "https://api.mercado.example/.well-known/x402"
+  },
+  "rate_limits": [
+    {
+      "scope": "ip",
+      "limit": 60,
+      "window_s": 60
+    },
+    {
+      "scope": "wallet",
+      "applies_to": "event_inbox",
+      "limit": 600,
+      "window_s": 60
+    }
+  ],
+  "events": {
+    "emits": [
+      "mercado-ejemplo.order.created",
+      "mercado-ejemplo.order.paid"
+    ],
+    "consumes": [
+      "describe-net.feedback.indexed"
+    ],
+    "envelopes": [
+      "uvd.event/1"
+    ]
+  },
+  "health": {
+    "live": "https://api.mercado.example/health/live",
+    "ready": "https://api.mercado.example/health/ready"
+  },
+  "links": {
+    "llms_txt": "https://mercado.example/llms.txt",
+    "api_catalog": "https://api.mercado.example/.well-known/api-catalog"
+  }
+}

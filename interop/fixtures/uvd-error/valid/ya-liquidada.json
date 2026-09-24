@@ -1,0 +1,9 @@
+{
+  "uvd_error": {
+    "code": "authorization_already_settled",
+    "message": "Esta autorización ya se liquidó.",
+    "retryable": false,
+    "spent": "yes",
+    "next_action": "stop"
+  }
+}

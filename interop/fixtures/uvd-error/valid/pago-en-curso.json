@@ -1,0 +1,11 @@
+{
+  "error": "payment in progress",
+  "uvd_error": {
+    "code": "settlement_in_progress",
+    "message": "El pago con este vínculo sigue en curso. Presentá el MISMO pago en 5 s; no firmes otro.",
+    "retryable": false,
+    "retry_after_s": 5,
+    "spent": "maybe",
+    "next_action": "resend_same_payment"
+  }
+}
