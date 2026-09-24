@@ -437,6 +437,112 @@ def test_charge_is_refused_before_signing(chain_id):
 
 
 # ---------------------------------------------------------------------------
+# v3: the state read before void() fails -> one retryable error, no tx
+# ---------------------------------------------------------------------------
+
+import http.server  # noqa: E402
+import socket  # noqa: E402
+import threading  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+
+class _FailingRpc(http.server.BaseHTTPRequestHandler):
+    """JSON-RPC over a real socket that fails the way public RPCs do."""
+
+    def do_POST(self):  # noqa: N802
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        self.server.methods.append(body.get("method"))
+        if self.server.mode == "http-429":
+            payload, status = b'{"message":"rate limited"}', 429
+        elif body.get("method") == "eth_chainId":  # "rpc-error": up, answers this
+            payload, status = json.dumps(
+                {"jsonrpc": "2.0", "id": body.get("id"), "result": hex(5042)}
+            ).encode(), 200
+        else:  # "rpc-error": HTTP 200 carrying a JSON-RPC error for eth_call
+            payload, status = json.dumps({
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": -32005, "message": "limit exceeded"},
+            }).encode(), 200
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, *args):
+        pass
+
+
+@contextmanager
+def _failing_rpc(mode: str):
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _FailingRpc)
+    server.mode, server.methods = mode, []
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", server.methods
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _refused_url() -> str:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    return f"http://127.0.0.1:{port}"  # closed again: connecting is refused
+
+
+def _refund_against(url: str):
+    client = ae.AdvancedEscrowClient(private_key=CLIENT_KEY, chain_id=5042, rpc_url=url)
+    sent: list = []
+    client._send_tx = lambda func_call: sent.append(func_call)  # must never run
+    with pytest.raises(ae.EscrowStateUnavailableError) as caught:
+        client.refund_in_escrow(_client_pi(), 5_000_000)
+    return caught.value, sent
+
+
+def _assert_retryable_and_nothing_sent(error, sent, url):
+    assert not isinstance(error, ValueError)
+    assert not isinstance(error, ae.EscrowNothingToVoidError)
+    assert error.__cause__ is not None
+    message = str(error)
+    assert "No transaction was sent" in message
+    assert type(error.__cause__).__name__ in message
+    assert "127.0.0.1" not in message and url not in message
+    assert sent == []
+
+
+@pytest.mark.parametrize("mode", ["http-429", "rpc-error"])
+def test_a_failed_state_read_is_retryable_and_sends_nothing(mode):
+    with _failing_rpc(mode) as (url, methods):
+        error, sent = _refund_against(url)
+
+    _assert_retryable_and_nothing_sent(error, sent, url)
+    # Only reads reached the RPC (web3 may ask eth_chainId first).
+    assert methods and set(methods) <= {"eth_chainId", "eth_call"}
+    if mode == "rpc-error":
+        assert "eth_call" in methods
+
+
+def test_a_refused_connection_is_retryable_and_sends_nothing():
+    url = _refused_url()
+    error, sent = _refund_against(url)
+
+    _assert_retryable_and_nothing_sent(error, sent, url)
+
+
+def test_the_state_error_is_exported_and_distinct():
+    import uvd_x402_sdk
+
+    assert uvd_x402_sdk.EscrowStateUnavailableError is ae.EscrowStateUnavailableError
+    assert "EscrowStateUnavailableError" in uvd_x402_sdk.__all__
+    assert not issubclass(ae.EscrowStateUnavailableError, ValueError)
+    assert not issubclass(ae.EscrowStateUnavailableError, ae.EscrowNothingToVoidError)
+
+
+# ---------------------------------------------------------------------------
 # Pre-auth (sign-on-assignment): build_escrow_pre_auth / compute_escrow_nonce
 # ---------------------------------------------------------------------------
 

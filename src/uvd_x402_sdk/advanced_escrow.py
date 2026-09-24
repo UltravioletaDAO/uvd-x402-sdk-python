@@ -653,6 +653,17 @@ class EscrowNothingToVoidError(Exception):
         self.payment_info_hash = payment_info_hash
 
 
+class EscrowStateUnavailableError(Exception):
+    """refund_in_escrow() on a v3 chain could not read the escrow state.
+
+    The getHash / paymentState read that comes before void() failed: a rate
+    limit, a JSON-RPC error, a connection that never opened. Retryable: nothing
+    was decided about the amount, so this is neither the partial-amount
+    ``ValueError`` nor :class:`EscrowNothingToVoidError`. No transaction was
+    sent. The original error is ``__cause__``.
+    """
+
+
 # ============================================================
 # Client
 # ============================================================
@@ -1139,6 +1150,8 @@ class AdvancedEscrowClient:
         * capturableAmount == 0 -> :class:`EscrowNothingToVoidError`
         * any other amount      -> ``ValueError`` (a partial void does not
           exist; release() part of it first, then void the rest)
+        * the state cannot be read -> :class:`EscrowStateUnavailableError`
+          (retryable)
 
         Args:
             payment_info: PaymentInfo from the authorize step
@@ -1147,8 +1160,19 @@ class AdvancedEscrowClient:
         pt = self._build_tuple(payment_info)
         amt = amount or payment_info.max_amount
         if self.generation == "v3":
-            payment_info_hash, capturable = self._capturable_amount(pt)
             chain_name = ESCROW_CHAIN_NAMES.get(self.chain_id, str(self.chain_id))
+            try:
+                payment_info_hash, capturable = self._capturable_amount(pt)
+            except Exception as exc:
+                # web3 raises a different class per version and failure (HTTP
+                # error, connection error, Web3RPCError, or a plain ValueError
+                # in web3 6): one retryable class, and never the partial one.
+                # Only the type name: the RPC URL and bodies stay out.
+                raise EscrowStateUnavailableError(
+                    f"Could not read the escrow state on {chain_name} before "
+                    f"void() ({type(exc).__name__}). No transaction was sent; "
+                    f"retry later."
+                ) from exc
             if capturable == 0:
                 raise EscrowNothingToVoidError(
                     f"Nothing to void on {chain_name}: capturableAmount is 0 for "

@@ -260,7 +260,9 @@ and the client maps its methods onto them:
 `void()` takes no amount: it returns everything still capturable. Before
 sending it, the client reads `capturableAmount` from the escrow (`getHash` +
 `paymentState`). Any other `amount` raises `ValueError`, and a capturable
-amount of 0 raises `EscrowNothingToVoidError`. Neither sends a transaction. To
+amount of 0 raises `EscrowNothingToVoidError`. If that read fails, it raises
+`EscrowStateUnavailableError`, which is retryable. None of them sends a
+transaction. To
 pay part and return the rest, call `release(pi, part)` and then
 `refund_in_escrow(pi, rest)`.
 
