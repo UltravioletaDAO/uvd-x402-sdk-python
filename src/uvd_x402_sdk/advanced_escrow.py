@@ -193,6 +193,32 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
         "refund_request": "0x69e9BF2b40Ed472b55E47e9D4205d93Ed673093F",
         "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
     },
+    # ----- Canonical x402r deployments -----
+    # Same addresses on every chain (CREATE2). Sources: BackTrackCo/x402r-sdk
+    # packages/core/src/config/index.ts @ bbfec12c and BackTrackCo/x402r-contracts
+    # deployments/canonical-v1.0.1.json + canonical-v1.0.2.json @ c5223eaa.
+    # Registry key <- upstream contract:
+    #   escrow           <- AuthCaptureEscrow (commerce-payments v1.0.0)
+    #   operator_factory <- PaymentOperatorFactory v1.0.2
+    #   token_collector  <- ERC3009PaymentCollector
+    #   refund_request   <- RefundRequestFactory v1.0.1
+    # Code at each one read on both chains: tests/fixtures/arc-escrow-d.json.
+    5042: {  # Arc
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "protocol_fee_config": "0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc",
+        "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
+        "usdc": "0x3600000000000000000000000000000000000000",
+    },
+    5042002: {  # Arc Testnet
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "protocol_fee_config": "0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc",
+        "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
+        "usdc": "0x3600000000000000000000000000000000000000",
+    },
 }
 
 # Human-readable chain names for diagnostics and error messages.
@@ -208,6 +234,8 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     143: "Monad",
     43114: "Avalanche",
     1187947933: "SKALE Base",
+    5042: "Arc",
+    5042002: "Arc Testnet",
 }
 
 # Base Mainnet contract addresses (Fase 5 PaymentOperator).
@@ -588,6 +616,10 @@ class AdvancedEscrowClient:
             if operator_address is None and chain_id == 1187947933:
                 # SKALE Base: EM PaymentOperator Fase 5 (1300bps fee, facilitator-as-arbiter)
                 operator_address = "0x43E46d4587fCCc382285C52012227555ed78D183"
+            if operator_address is None and chain_id in (5042, 5042002):
+                # Arc / Arc Testnet: EM PaymentOperator, same address on both
+                # (computeAddress on the v1.0.2 factory, tests/fixtures/arc-escrow-d.json)
+                operator_address = "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D"
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
