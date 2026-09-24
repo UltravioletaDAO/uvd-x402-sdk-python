@@ -309,9 +309,9 @@ async def generate(
     return {"result": "generated", "payer": payment.payer_address}
 ```
 
-To charge by path instead, add `X402Middleware`. Its `protected_paths` are full request paths,
-mount included, matched against the ASGI scope path (the one the app routes on), independent of the
-`Host` header:
+To charge by path instead, add `X402Middleware`. Its `protected_paths` are request paths, written
+with or without the app's mount (`root_path`), matched exactly (case and a trailing slash count)
+against the ASGI scope path (the one the app routes on), independent of the `Host` header:
 
 ```python
 from starlette.middleware.trustedhost import TrustedHostMiddleware

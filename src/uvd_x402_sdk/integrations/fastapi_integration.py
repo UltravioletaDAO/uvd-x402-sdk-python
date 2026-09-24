@@ -7,9 +7,14 @@ Provides:
 - fastapi_require_payment: Decorator for protected routes
 """
 
+import re
 from decimal import Decimal
 from functools import wraps
+from ipaddress import AddressValueError, IPv6Address
 from typing import Any, Callable, Optional, TypeVar, Union
+from urllib.parse import quote, unquote
+
+import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
@@ -38,13 +43,108 @@ from uvd_x402_sdk.receipts import payment_response_headers, validate_purchase_co
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+#: A bare ``host[:port]``: a registered name or an IP literal, and a port.
+#: Nothing that could carry a path, a query, a fragment or userinfo.
+_AUTHORITY = re.compile(
+    r"(?:[A-Za-z0-9._~%!$&'()*+,;=-]+|\[(?P<ipv6>[0-9A-Fa-f:.]+)\])(?::(?P<port>[0-9]{1,5}))?"
+)
+#: What stays literal when the path of the URL compared has to be re-encoded
+#: (no usable ``raw_path``); the rest is percent-encoded.
+_PATH_SAFE = "/!$&'()*+,;=:@-._~"
+#: A ``raw_path`` that can stand for the path as the buyer's client sent it:
+#: the characters HTTP clients leave literal in a path (``[ ] \ ^ |`` and a
+#: stray ``%`` included) and percent escapes; never ``?``, ``#``, a space or a
+#: control character, which would end the path or change the request.
+_RAW_PATH = re.compile(r"[A-Za-z0-9\-._~!$&'()*+,;=:@/\[\]\\^|%]*")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _authority(scope: Any) -> Optional[str]:
+    """The request's ``host[:port]``, or ``None`` when it is not a bare one.
+
+    The ``Host`` header when there is one; otherwise the server address, as
+    Starlette falls back to it.
+    """
+    host: Optional[str] = None
+    for key, value in scope.get("headers") or ():
+        if key.lower() == b"host":
+            host = value.decode("latin-1")
+            break
+    if host is None:
+        server = scope.get("server")
+        if not server:
+            return None
+        name, port = server
+        if ":" in name and not name.startswith("["):
+            name = f"[{name}]"
+        default = _DEFAULT_PORTS.get(scope.get("scheme", "http"))
+        host = name if port in (None, default) else f"{name}:{port}"
+    match = _AUTHORITY.fullmatch(host)
+    if match is None:
+        return None
+    if match["port"] is not None and int(match["port"]) > 65535:
+        return None
+    if match["ipv6"] is not None:
+        try:
+            IPv6Address(match["ipv6"])
+        except AddressValueError:
+            return None
+    return host
+
+
+def _request_url(scope: Any) -> Optional[str]:
+    """The URL of this request as the buyer's client wrote it, from the ASGI scope.
+
+    Scheme, a bare authority (:func:`_authority`), the full path with its
+    mount (:func:`_full_request_path`, the same path the binding store's
+    resource uses), and the query as received. ``None`` when the authority is
+    not a bare ``host[:port]``.
+
+    The path is written as the client sent it: ``scope["raw_path"]`` (or the
+    mount followed by it, when the server leaves the mount out), used only when
+    it decodes to exactly the full path, which keeps it tied to the path the
+    app routes on, and only when it holds nothing that could end the path
+    (``_RAW_PATH``: no ``?``, ``#``, space or control character). Otherwise the
+    full path is percent-encoded, ``_PATH_SAFE`` left literal.
+    """
+    authority = _authority(scope)
+    if authority is None:
+        return None
+    full = _full_request_path(scope)
+    path = quote(full, safe=_PATH_SAFE)
+    raw = scope.get("raw_path")
+    if isinstance(raw, bytes):
+        text = raw.decode("latin-1")
+        mount = quote(scope.get("root_path") or "", safe=_PATH_SAFE)
+        for candidate in (text, mount + text):
+            if _RAW_PATH.fullmatch(candidate) and unquote(candidate) == full:
+                path = candidate
+                break
+    url = f"{scope.get('scheme', 'http')}://{authority}{path}"
+    query = (scope.get("query_string") or b"").decode("latin-1")
+    return f"{url}?{query}" if query else url
+
+
 async def _receipt_context(request: Request) -> Optional[str]:
+    """The buyer's ``X-UVD-Purchase``, checked against THIS request.
+
+    Its URL is compared with the URL of the request built from the ASGI scope
+    (:func:`_request_url`), not with ``request.url``; an authority that is not
+    a bare ``host[:port]`` matches nothing. Any mismatch is ``400
+    receipt_context_mismatch``, before the facilitator is called.
+    """
     header = request.headers.get("X-UVD-Purchase")
     if header is None:
         return None
+    url = _request_url(request.scope)
     try:
-        return validate_purchase_context(header, request.method, str(request.url), await request.body())
-    except (ValueError, TypeError, KeyError):
+        if url is None:
+            raise ValueError("the request's authority is not a bare host[:port]")
+        return validate_purchase_context(header, request.method, url, await request.body())
+    except (ValueError, TypeError, KeyError, httpx.InvalidURL):
+        # `httpx.InvalidURL` is not a ValueError: an authority that passes
+        # `_AUTHORITY` but that httpx cannot parse (an IPv4 with an octet
+        # above 255) was a 500.
         raise HTTPException(status_code=400, detail="receipt_context_mismatch")
 
 
@@ -430,17 +530,24 @@ def _requested_paths(scope: Any) -> tuple[str, ...]:
     Read from the ASGI scope the application routes on (``scope["path"]``,
     already decoded, and ``scope["root_path"]``), never from ``request.url``,
     which Starlette rebuilds from the ``Host`` header and a re-parsed path.
+    The first reading is always the full path, mount included.
 
-    A protected path is the full path, mount included. The ASGI specification
-    puts ``root_path`` inside ``path`` (current servers do), compared by whole
-    segments; a server that passes it only in ``root_path`` gives two readings,
-    ``root_path + path`` and ``path`` as given (what ``request.url.path``
-    returned there on Starlette after 0.27), and either one matches.
+    Under a mount (``root_path``) a protected path may be written with or
+    without it, and either one matches:
+
+    * The ASGI specification puts ``root_path`` inside ``path`` (current
+      servers do), compared by whole segments: the readings are ``path`` and
+      the path inside the mount, ``path[len(root_path):]`` or ``/`` (the path
+      Starlette routes on, ``get_route_path``).
+    * A server that passes the mount only in ``root_path``: ``root_path +
+      path`` and ``path`` as given.
     """
     path: str = scope["path"]
     root_path: str = scope.get("root_path") or ""
-    if not root_path or path == root_path or path.startswith(root_path + "/"):
+    if not root_path:
         return (path,)
+    if path == root_path or path.startswith(root_path + "/"):
+        return (path, path[len(root_path):] or "/")
     return (root_path + path, path)
 
 
@@ -448,8 +555,10 @@ class X402Middleware(BaseHTTPMiddleware):
     """
     Middleware that automatically handles x402 payments for configured paths.
 
-    ``protected_paths`` are matched against the path of the ASGI scope, mount
-    (``root_path``) included, independent of the ``Host`` header.
+    ``protected_paths`` are matched against the path of the ASGI scope,
+    independent of the ``Host`` header, exactly (case and a trailing slash
+    count). Under a mount (``root_path``) a protected path may be written with
+    or without it.
 
     Example:
         >>> from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
@@ -518,6 +627,14 @@ class X402Middleware(BaseHTTPMiddleware):
                 response.headers.update(payment_response_headers(result))
             return response
 
+        except HTTPException as e:
+            # `_receipt_context`'s 400 receipt_context_mismatch. A middleware
+            # runs outside FastAPI's exception handlers, so it answers the 400
+            # itself; left to propagate it was a 500. (A route's own
+            # HTTPException never gets here: the app answers it downstream.)
+            return JSONResponse(
+                status_code=e.status_code, content={"detail": e.detail}, headers=e.headers
+            )
         except X402Error as e:
             status, content, headers = _payment_error(e)
             return JSONResponse(status_code=status, content=content, headers=headers)

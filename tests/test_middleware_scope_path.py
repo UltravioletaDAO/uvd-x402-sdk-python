@@ -168,3 +168,24 @@ def test_without_a_root_path_only_the_path_counts():
 
     assert _status(app, "/paid") == 200
     assert _status(app, "/api/paid") == 402
+
+
+@pytest.mark.parametrize("host", ["testserver", "testserver/api/free#"], ids=repr)
+def test_mounted_with_the_mount_inside_path_a_protected_path_may_leave_it_out(host):
+    """``FastAPI(root_path=...)``, ``uvicorn --root-path`` and ``app.mount``
+    give ``path`` with the mount inside it; the app routes on the path inside
+    the mount, and a protected path written that way matches too."""
+    app = _app(["/paid", "/"])
+
+    assert _status(app, "/api/paid", root_path="/api", host=host) == 402
+    assert _status(app, "/api", root_path="/api", host=host) == 402
+    assert _status(app, "/api/free", root_path="/api", host=host) == 200
+
+
+@pytest.mark.parametrize("path", ["/PAID", "/Paid", "/paid/"])
+def test_a_protected_path_is_matched_exactly(path):
+    """Case and a trailing slash count: only ``/paid`` is ``/paid``."""
+    app = _app(["/paid"])
+
+    assert _status(app, path) == 200
+    assert _status(app, "/paid") == 402
