@@ -102,11 +102,13 @@ async def _process_payment(
 
     With one, the payment's key is the one the store persisted for it
     (:func:`~uvd_x402_sdk.bindings.process_payment_bound`), for the resource
-    this request buys: method, path, query and body, read from the ASGI scope
-    the app routes on. Never from ``request.url``: Starlette rebuilds it from
-    the DECODED path (a ``%23`` in a segment becomes a ``#`` that cuts it) and,
-    in some releases, from the ``Host`` header. The store's I/O runs off the
-    event loop too.
+    this request buys: method, the full path with its mount
+    (:func:`_full_request_path`), query and body, read from the ASGI scope the
+    app routes on. The mount matters: two apps mounted at ``/a`` and ``/b``
+    that share one store sell ``/a/x`` and ``/b/x``, not ``/x`` twice. Never
+    from ``request.url``: Starlette rebuilds it from the DECODED path (a
+    ``%23`` in a segment becomes a ``#`` that cuts it) and, in some releases,
+    from the ``Host`` header. The store's I/O runs off the event loop too.
     """
     receipt_context = await _receipt_context(request)
     if binding_store is None:
@@ -118,7 +120,7 @@ async def _process_payment(
         )
     resource = purchase_resource(
         request.method,
-        request.scope["path"],
+        _full_request_path(request.scope),
         request.scope.get("query_string", b"").decode("latin-1"),
         await request.body(),
     )
@@ -387,6 +389,23 @@ def fastapi_require_payment(
         return wrapper  # type: ignore
 
     return decorator
+
+
+def _full_request_path(scope: Any) -> str:
+    """The full path this request asks for, mount (``root_path``) included.
+
+    The ASGI specification puts ``root_path`` inside ``path`` (current
+    servers, Starlette 0.33 and later), compared by whole segments; an older
+    server, or a ``Mount`` before Starlette 0.33, leaves it out of ``path``,
+    and then it is ``root_path + path``. The same full path ``protected_paths``
+    reads first (:func:`_requested_paths`), stated on its own so that no caller
+    depends on the order of that tuple.
+    """
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path") or ""
+    if not root_path or path == root_path or path.startswith(root_path + "/"):
+        return path
+    return root_path + path
 
 
 def _middleware_rereads_the_body() -> bool:

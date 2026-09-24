@@ -170,12 +170,13 @@ _QUERY_SAFE = "!$&'()*+,;=:@/?-._~%"
 def purchase_resource(method: str, path: str, query: str = "", body: bytes = b"") -> str:
     """What one request buys, as a binding compares it: ``"GET /path?query"``.
 
-    ``path`` is the path the application routes on (decoded, as ASGI's
-    ``scope["path"]``), and it is percent-encoded here so that the string is
+    ``path`` is the full request path, mount (``root_path``) included, decoded
+    as ASGI gives it, and it is percent-encoded here so that the string is
     unambiguous: a decoded ``#`` or ``?`` inside a path segment cannot make one
-    path read as another, nor move text into the query. A non-empty body enters
-    as its sha256 (``" sha256:<hex>"``): two POSTs to the same path with
-    different bodies are two purchases, and with the body left out the same
+    path read as another, nor move text into the query. Two apps mounted at
+    ``/a`` and ``/b`` that share one store sell ``/a/x`` and ``/b/x``, not the
+    same ``/x``. A non-empty body enters as its sha256 (``" sha256:<hex>"``):
+    two POSTs to the same path with different bodies are two purchases, and with the body left out the same
     ``X-PAYMENT`` presented with another body would get the facilitator's replay
     of the first one and be delivered for free. A buyer's resend repeats the
     request byte for byte, so it maps to the same resource.

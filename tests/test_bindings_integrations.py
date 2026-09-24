@@ -744,6 +744,136 @@ def test_a_header_that_is_not_a_payment_never_reaches_the_store(rails, mount):
     assert status == 402 and seen == [] and rail.calls == []
 
 
+# -- the mount is part of what is bought ----------------------------------------
+
+
+def _scope_get(app: Any, path: str, root_path: str, payment: str) -> Answer:
+    """One GET with the ASGI scope exactly as given (``path``, ``root_path``),
+    whatever the installed Starlette would build for it."""
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("utf-8"),
+        "root_path": root_path,
+        "query_string": b"",
+        "headers": [(b"host", b"testserver"), (b"x-payment", payment.encode())],
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 50000),
+    }
+    sent: list[dict[str, Any]] = []
+
+    async def main() -> None:
+        asked: list[bool] = []
+        answered = asyncio.Event()
+
+        async def receive() -> dict[str, Any]:
+            if not asked:
+                asked.append(True)
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await answered.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                answered.set()
+
+        await asyncio.wait_for(app(scope, receive, send), timeout=10)
+
+    asyncio.run(main())
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    return status, json.loads(body or b"null"), {}
+
+
+def _mounted_dependency(rail: Facilitator, store: Any, served: list[str]) -> Any:
+    from fastapi import Depends, FastAPI
+
+    from uvd_x402_sdk.integrations.fastapi_integration import FastAPIX402
+
+    app = FastAPI()
+    requirement = FastAPIX402(app, config=_config(rail), binding_store=store).require_payment(PRICE)
+
+    @app.get("/{rest:path}")
+    async def paid(rest: str, payment: PaymentResult = Depends(requirement)):
+        served.append(rest)
+        return {"delivered": True}
+
+    return app
+
+
+def _mounted_middleware(rail: Facilitator, store: Any, served: list[str]) -> Any:
+    from fastapi import FastAPI
+
+    from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
+
+    app = FastAPI()
+
+    @app.get("/{rest:path}")
+    async def paid(rest: str):
+        served.append(rest)
+        return {"delivered": True}
+
+    app.add_middleware(
+        X402Middleware,
+        config=_config(rail),
+        protected_paths={"/a/x": PRICE, "/b/x": PRICE},
+        binding_store=store,
+    )
+    return app
+
+
+@pytest.mark.parametrize("build", [_mounted_dependency, _mounted_middleware],
+                         ids=["require_payment", "X402Middleware"])
+@pytest.mark.parametrize("mode", ["receipts", "legacy"])
+@pytest.mark.parametrize(
+    "path_a, path_b",
+    [("/x", "/x"), ("/a/x", "/b/x")],
+    ids=["mount-outside-path", "mount-inside-path"],
+)
+def test_two_mounts_sharing_a_store_sell_two_resources(rails, build, mode, path_a, path_b):
+    """Two apps mounted at ``/a`` and ``/b`` share one store and charge ``/x``
+    at the same price. The resource is the full path, so ``/a/x`` owns the
+    payment and ``/b/x`` gets ``409 payment_already_used``: in the form a
+    ``Mount`` before Starlette 0.33 (or an older server) gives, the mount out
+    of ``path``, and in the current ASGI form, the mount inside it."""
+    pytest.importorskip("fastapi")
+    rail = rails(mode)
+    store, served = InMemoryBindingStore(), []
+    at_a, at_b = build(rail, store, served), build(rail, store, served)
+
+    assert _scope_get(at_a, path_a, "/a", x_payment())[0] == 200
+
+    status, body, _ = _scope_get(at_b, path_b, "/b", x_payment())
+    assert status == 409 and _reason(body) == PAYMENT_ALREADY_USED, body
+    assert len(served) == 1 and rail.moved == 1
+
+
+@pytest.mark.parametrize(
+    "path, root_path, full",
+    [
+        ("/x", "", "/x"),
+        ("/x", "/a", "/a/x"),
+        ("/a/x", "/a", "/a/x"),
+        ("/a", "/a", "/a"),
+        ("/apix", "/api", "/api/apix"),
+    ],
+)
+def test_the_full_path_is_what_protected_paths_read_first(path, root_path, full):
+    pytest.importorskip("fastapi")
+    from uvd_x402_sdk.integrations.fastapi_integration import (
+        _full_request_path,
+        _requested_paths,
+    )
+
+    scope = {"path": path, "root_path": root_path}
+    assert _full_request_path(scope) == full == _requested_paths(scope)[0]
+
+
 # -- compatibility: no store, no change -----------------------------------------
 
 
