@@ -17,7 +17,7 @@
     "amount": "1.5",
     "currency": "USDC",
     "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-    "tx_hash": "5Ejemp1o11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    "tx_hash": "sello.con.puntos.0000"
   },
   "payload": {
     "closed_by": "expiry"

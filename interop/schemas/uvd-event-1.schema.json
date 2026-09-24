@@ -25,7 +25,8 @@
     "event_id": {
       "description": "R5.1 y R5.9. UUID en minúsculas; con source, la clave de deduplicación del receptor.",
       "type": "string",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "$ref": "#/$defs/una_linea"
     },
     "source": {
       "description": "R1.10. Id de la app que emite.",
@@ -34,7 +35,8 @@
     "type": {
       "description": "R5.2. <app>.<sujeto>.<verbo>; el primer segmento es source.",
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{1,62}[.][a-z][a-z0-9_]{0,31}[.][a-z][a-z0-9_]{0,62}$"
+      "pattern": "^[a-z][a-z0-9-]{1,62}[.][a-z][a-z0-9_]{0,31}[.][a-z][a-z0-9_]{0,62}$",
+      "$ref": "#/$defs/una_linea"
     },
     "subject": {
       "description": "R5.1. Sobre qué es el evento; sequence ordena por este par.",
@@ -42,8 +44,12 @@
       "additionalProperties": false,
       "required": ["kind", "id"],
       "properties": {
-        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
-        "id": { "type": "string", "minLength": 1 }
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "$ref": "#/$defs/una_linea"
+        },
+        "id": { "type": "string", "minLength": 1, "$ref": "#/$defs/una_linea" }
       }
     },
     "sequence": {
@@ -53,9 +59,10 @@
       "maximum": 9007199254740991
     },
     "occurred_at": {
-      "description": "R5.5. RFC 3339 en UTC, con Z.",
+      "description": "R5.5. RFC 3339 en UTC, con Z. El esquema acota mes, día, hora, minuto y segundo; que la fecha exista lo verifica el runner.",
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,9})?Z$"
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)([.][0-9]{1,9})?Z$",
+      "$ref": "#/$defs/una_linea"
     },
     "actor": {
       "description": "R5.1. Quién causó el evento: una wallet, una app o un proceso del sistema.",
@@ -64,19 +71,27 @@
       "required": ["kind", "id"],
       "properties": {
         "kind": { "enum": ["wallet", "app", "system"] },
-        "id": { "type": "string", "minLength": 1 },
-        "role": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" }
+        "id": { "type": "string", "minLength": 1, "$ref": "#/$defs/una_linea" },
+        "role": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "$ref": "#/$defs/una_linea"
+        }
       },
       "allOf": [
         {
-          "$comment": "R2.3: una wallet EVM va en minúsculas; una de Solana, en base58.",
+          "$comment": "R2.3: una wallet de cualquier familia es una línea de [A-Za-z0-9._:@/+=-]; si empieza con 0x, es hex en minúsculas (EVM de 20 bytes o de 32 bytes).",
           "if": {
             "required": ["kind"],
             "properties": { "kind": { "const": "wallet" } }
           },
           "then": {
             "properties": {
-              "id": { "pattern": "^(0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$" }
+              "id": {
+                "pattern": "^[A-Za-z0-9._:@/+=-]{2,128}$",
+                "if": { "pattern": "^0x" },
+                "then": { "pattern": "^0x([0-9a-f]{40}|[0-9a-f]{64})$" }
+              }
             }
           }
         },
@@ -93,27 +108,56 @@
       ]
     },
     "economic": {
-      "description": "R5.4. Opcional: la plata que involucra el evento. Los montos van como string decimal.",
+      "description": "R5.4. Opcional: la plata que involucra el evento. Los montos van como string decimal; la forma del sello depende de la familia de la red.",
       "type": "object",
       "additionalProperties": false,
       "required": ["amount", "currency", "network"],
       "properties": {
         "amount": {
           "type": "string",
-          "pattern": "^(0|[1-9][0-9]{0,30})([.][0-9]{1,18})?$"
+          "pattern": "^(0|[1-9][0-9]{0,30})([.][0-9]{1,18})?$",
+          "$ref": "#/$defs/una_linea"
         },
-        "currency": { "type": "string", "pattern": "^[A-Z][A-Z0-9]{1,15}$" },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]{1,15}$",
+          "$ref": "#/$defs/una_linea"
+        },
         "network": {
           "description": "CAIP-2.",
           "type": "string",
-          "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$"
+          "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$",
+          "$ref": "#/$defs/una_linea"
         },
         "tx_hash": {
-          "description": "R5.15. El sello, si ya lo hay: 0x + 64 hex en minúsculas (EVM) o base58 (Solana).",
+          "description": "R5.15. El sello, si ya lo hay: una línea de [A-Za-z0-9._:@/+=-]; en eip155, 0x + 64 hex en minúsculas; en solana, la firma en base58.",
           "type": "string",
-          "pattern": "^(0x[0-9a-f]{64}|[1-9A-HJ-NP-Za-km-z]{64,128})$"
+          "pattern": "^[A-Za-z0-9._:@/+=-]{8,128}$",
+          "$ref": "#/$defs/una_linea"
         }
-      }
+      },
+      "allOf": [
+        {
+          "$comment": "R5.4: en eip155 el sello es 0x + 64 hex en minúsculas.",
+          "if": {
+            "required": ["network"],
+            "properties": { "network": { "pattern": "^eip155:" } }
+          },
+          "then": {
+            "properties": { "tx_hash": { "pattern": "^0x[0-9a-f]{64}$" } }
+          }
+        },
+        {
+          "$comment": "R5.4: en solana el sello es la firma en base58.",
+          "if": {
+            "required": ["network"],
+            "properties": { "network": { "pattern": "^solana:" } }
+          },
+          "then": {
+            "properties": { "tx_hash": { "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,128}$" } }
+          }
+        }
+      ]
     },
     "payload": {
       "description": "R5.1. El cuerpo propio del tipo de evento.",
@@ -123,13 +167,19 @@
       "description": "R5.6. El trace-id W3C de la traza que produjo el evento.",
       "type": "string",
       "pattern": "^[0-9a-f]{32}$",
-      "not": { "const": "00000000000000000000000000000000" }
+      "not": { "const": "00000000000000000000000000000000" },
+      "$ref": "#/$defs/una_linea"
     }
   },
   "$defs": {
+    "una_linea": {
+      "description": "Sin saltos de línea. El $ de re de Python también acepta un salto final; esto lo cierra en todos los motores.",
+      "not": { "type": "string", "pattern": "[\\n\\r]" }
+    },
     "app_id": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{1,62}$"
+      "pattern": "^[a-z][a-z0-9-]{1,62}$",
+      "$ref": "#/$defs/una_linea"
     }
   }
 }

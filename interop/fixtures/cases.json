@@ -263,6 +263,19 @@
       ]
     },
     {
+      "file": "uvd-stack/invalid/generated-at-hora-25.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.2",
+      "why": "El esquema acota hora, minuto y segundo.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/generated_at"
+        }
+      ]
+    },
+    {
       "file": "uvd-stack/invalid/clave-desconocida-en-la-raiz.json",
       "schema": "manifest",
       "valid": false,
@@ -362,6 +375,19 @@
       "valid": false,
       "rule": "R1.5",
       "why": "Nunca una ruta interna en un documento público.",
+      "errors": [
+        {
+          "keyword": "not",
+          "instance_path": "/endpoints/mcp/url"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/url-de-ruta-interna-en-mayusculas.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R1.5",
+      "why": "El segmento internal se rechaza en mayúsculas o minúsculas.",
       "errors": [
         {
           "keyword": "not",
@@ -653,7 +679,7 @@
       "file": "uvd-stack/invalid/nonce-con-clave-desconocida.json",
       "schema": "manifest",
       "valid": false,
-      "rule": "R3.5",
+      "rule": "R3.9",
       "why": "El orden de consumo lo fija el preset.",
       "errors": [
         {
@@ -716,6 +742,23 @@
       ]
     },
     {
+      "file": "uvd-stack/invalid/service-signer-con-salto-final.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.3",
+      "why": "Un salto de línea final no pasa: el $ de Python lo aceptaría y el de ECMA-262 no.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/service_signer"
+        },
+        {
+          "keyword": "not",
+          "instance_path": "/identity/service_signer"
+        }
+      ]
+    },
+    {
       "file": "uvd-stack/invalid/identidad-con-clave-desconocida.json",
       "schema": "manifest",
       "valid": false,
@@ -733,11 +776,54 @@
       "schema": "manifest",
       "valid": false,
       "rule": "R2.4",
-      "why": "Las redes se nombran en CAIP-2.",
+      "why": "Las redes se nombran en CAIP-2 (y base no es ninguna familia con ERC-8004).",
       "errors": [
         {
           "keyword": "pattern",
           "instance_path": "/identity/erc8004"
+        },
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/identity/erc8004"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-red-sin-erc8004.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "v1 solo conoce ERC-8004 en eip155 y solana.",
+      "errors": [
+        {
+          "keyword": "additionalProperties",
+          "instance_path": "/identity/erc8004"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-entero-en-red-solana.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "En solana el agentId es una clave base58.",
+      "errors": [
+        {
+          "keyword": "type",
+          "instance_path": "/identity/erc8004/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+        }
+      ]
+    },
+    {
+      "file": "uvd-stack/invalid/erc8004-solana-no-base58.json",
+      "schema": "manifest",
+      "valid": false,
+      "rule": "R2.4",
+      "why": "En solana el agentId es una clave base58.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/identity/erc8004/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
         }
       ]
     },
@@ -755,14 +841,14 @@
       ]
     },
     {
-      "file": "uvd-stack/invalid/erc8004-agent-id-texto-invalido.json",
+      "file": "uvd-stack/invalid/erc8004-texto-en-red-evm.json",
       "schema": "manifest",
       "valid": false,
       "rule": "R2.4",
-      "why": "Un agentId de texto es una clave base58 (Solana).",
+      "why": "En eip155 el agentId es un entero.",
       "errors": [
         {
-          "keyword": "pattern",
+          "keyword": "type",
           "instance_path": "/identity/erc8004/eip155:8453"
         }
       ]
@@ -1400,6 +1486,23 @@
       ]
     },
     {
+      "file": "uvd-error/invalid/code-con-salto-final.json",
+      "schema": "uvd-error",
+      "valid": false,
+      "rule": "R6.3",
+      "why": "Un salto de línea final no pasa: el $ de Python lo aceptaría y el de ECMA-262 no.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/uvd_error/code"
+        },
+        {
+          "keyword": "not",
+          "instance_path": "/uvd_error/code"
+        }
+      ]
+    },
+    {
       "file": "uvd-error/invalid/message-vacio.json",
       "schema": "uvd-error",
       "valid": false,
@@ -1576,6 +1679,13 @@
       "valid": true,
       "rule": "R5.15",
       "why": "Actor de sistema, monto con sello Solana y sequence en el máximo entero seguro."
+    },
+    {
+      "file": "uvd-event-1/valid/sello-hedera.json",
+      "schema": "uvd-event-1",
+      "valid": true,
+      "rule": "R5.4",
+      "why": "Una familia que no es EVM ni Solana: wallet y sello en su propia forma."
     },
     {
       "file": "uvd-event-1/invalid/falta-schema.json",
@@ -1757,6 +1867,23 @@
       ]
     },
     {
+      "file": "uvd-event-1/invalid/event-id-con-salto-final.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.9",
+      "why": "Un salto de línea final no pasa: el $ de Python lo aceptaría y el de ECMA-262 no.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/event_id"
+        },
+        {
+          "keyword": "not",
+          "instance_path": "/event_id"
+        }
+      ]
+    },
+    {
       "file": "uvd-event-1/invalid/source-con-mayusculas.json",
       "schema": "uvd-event-1",
       "valid": false,
@@ -1889,6 +2016,19 @@
       ]
     },
     {
+      "file": "uvd-event-1/invalid/occurred-at-hora-25.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.5",
+      "why": "El esquema acota hora, minuto y segundo.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/occurred_at"
+        }
+      ]
+    },
+    {
       "file": "uvd-event-1/invalid/actor-sin-kind.json",
       "schema": "uvd-event-1",
       "valid": false,
@@ -1974,6 +2114,19 @@
       "valid": false,
       "rule": "R2.3",
       "why": "Las direcciones EVM van en minúsculas.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/actor/id"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/actor-wallet-con-espacios.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R2.3",
+      "why": "Una wallet de cualquier familia es una sola palabra.",
       "errors": [
         {
           "keyword": "pattern",
@@ -2093,7 +2246,33 @@
       "schema": "uvd-event-1",
       "valid": false,
       "rule": "R5.15",
-      "why": "El sello tiene la forma de su cadena.",
+      "why": "El sello es una línea de al menos 8 caracteres.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/tx_hash"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/sello-solana-en-red-evm.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "En eip155 el sello es 0x + 64 hex.",
+      "errors": [
+        {
+          "keyword": "pattern",
+          "instance_path": "/economic/tx_hash"
+        }
+      ]
+    },
+    {
+      "file": "uvd-event-1/invalid/sello-no-base58-en-red-solana.json",
+      "schema": "uvd-event-1",
+      "valid": false,
+      "rule": "R5.4",
+      "why": "En solana el sello es base58.",
       "errors": [
         {
           "keyword": "pattern",

@@ -9,6 +9,10 @@
     "uvd_error": { "$ref": "#/$defs/uvd_error" }
   },
   "$defs": {
+    "una_linea": {
+      "description": "Sin saltos de línea. El $ de re de Python también acepta un salto final; esto lo cierra en todos los motores.",
+      "not": { "type": "string", "pattern": "[\\n\\r]" }
+    },
     "uvd_error": {
       "type": "object",
       "additionalProperties": false,
@@ -17,7 +21,8 @@
         "code": {
           "description": "R6.3. Código estable, snake_case, que un programa compara.",
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "$ref": "#/$defs/una_linea"
         },
         "message": {
           "description": "R6.3. Texto para una persona. Ningún programa decide por él.",
@@ -25,7 +30,7 @@
           "minLength": 1
         },
         "retryable": {
-          "description": "R6.5. true solo si repetir la MISMA petición más tarde es seguro y puede funcionar.",
+          "description": "R6.5. true solo si repetir a ciegas la MISMA petición más tarde es seguro y puede funcionar.",
           "type": "boolean"
         },
         "retry_after_s": {
@@ -53,7 +58,8 @@
         "docs": {
           "description": "R6.3. Página que explica este código.",
           "type": "string",
-          "pattern": "^https://[^/?#@ ]+([/?#][^ ]*)?$"
+          "pattern": "^https://[^/?#@ ]+([/?#][^ ]*)?$",
+          "$ref": "#/$defs/una_linea"
         },
         "details": {
           "description": "R6.3. Datos propios de la app (por ejemplo la transacción o el recibo). Nada de lo que decide el reintento va acá.",
