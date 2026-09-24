@@ -117,6 +117,11 @@ aws = [
 algorand = [
     "py-algorand-sdk>=2.0.0",
 ]
+# The offline interop conformance runner (python -m uvd_x402_sdk.interop, or
+# uvd-interop): it validates against the JSON Schemas in interop/schemas.
+interop = [
+    "jsonschema>=4.18.0",
+]
 all = [
     "uvd-x402-sdk[signer,wallet,web3,escrow,solana,hedera,flask,fastapi,django,aws,algorand]",
 ]
@@ -128,10 +133,13 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "httpx>=0.24.0",
-    # tests/test_interop_schemas.py validates interop/fixtures against the
-    # draft 2020-12 schemas in interop/schemas.
+    # tests/interop validates interop/fixtures against the draft 2020-12
+    # schemas in interop/schemas, and runs the interop conformance runner.
     "jsonschema>=4.18.0",
 ]
+
+[project.scripts]
+uvd-interop = "uvd_x402_sdk.interop.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/UltravioletaDAO/uvd-x402-sdk-python"
