@@ -6,12 +6,20 @@ Provides:
 - lambda_handler: Decorator for protecting Lambda functions
 """
 
+import base64
 import json
 import logging
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from urllib.parse import urlencode
 
+from uvd_x402_sdk.bindings import (
+    BindingStore,
+    check_binding_config,
+    process_payment_bound,
+    purchase_resource,
+)
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
@@ -53,6 +61,46 @@ def _get_header(event: LambdaEvent, header_name: str) -> Optional[str]:
             return value
 
     return None
+
+
+def _event_resource(event: LambdaEvent) -> str:
+    """What this invocation buys (:func:`~uvd_x402_sdk.bindings.purchase_resource`).
+
+    API Gateway HTTP API (payload 2.0) carries ``rawPath`` / ``rawQueryString``
+    and the method in ``requestContext.http``; the REST API (1.0) carries
+    ``httpMethod`` / ``path`` and only the PARSED query, which is re-encoded
+    with its keys in a fixed order and each key's values in the order they came:
+    ``?id=1&id=2`` and ``?id=2&id=1`` are two purchases (the handler sees a
+    different last value). The body counts, base64-decoded when API Gateway
+    encoded it; a body that is not a string (a direct invocation) enters as its
+    JSON, and one that does not decode enters as it came.
+    """
+    http = (event.get("requestContext") or {}).get("http") or {}
+    method = event.get("httpMethod") or http.get("method") or ""
+    path = event.get("rawPath") or event.get("path") or ""
+    if "rawQueryString" in event:
+        query = event.get("rawQueryString") or ""
+    else:
+        multi = event.get("multiValueQueryStringParameters") or {}
+        pairs: List[Tuple[str, str]] = (
+            [(k, v) for k, values in multi.items() for v in (values or [])]
+            if multi
+            else list((event.get("queryStringParameters") or {}).items())
+        )
+        query = urlencode(sorted(pairs, key=lambda pair: pair[0]))
+    body = event.get("body")
+    if body is None:
+        raw = b""
+    elif not isinstance(body, str):
+        raw = json.dumps(body, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    elif event.get("isBase64Encoded"):
+        try:
+            raw = base64.b64decode(body)
+        except ValueError:  # binascii.Error
+            raw = body.encode("utf-8")
+    else:
+        raw = body.encode("utf-8")
+    return purchase_resource(method, path, query, raw)
 
 
 def _create_lambda_response(
@@ -118,6 +166,7 @@ class LambdaX402:
         recipient_near: str = "",
         recipient_stellar: str = "",
         recipient_xrpl: str = "",
+        binding_store: Optional[BindingStore] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -130,6 +179,17 @@ class LambdaX402:
             recipient_near: NEAR recipient account
             recipient_stellar: Stellar recipient address
             recipient_xrpl: XRP Ledger recipient address
+            binding_store: Where each payment's key is persisted before the
+                facilitator is called (:mod:`uvd_x402_sdk.bindings`), shared
+                by every instance (:class:`~uvd_x402_sdk.bindings.PostgresBindingStore`,
+                :class:`~uvd_x402_sdk.bindings.DynamoDBBindingStore`). A Lambda
+                that dies after the settle leaves the key behind, and the
+                buyer's resend of the same X-PAYMENT, in any instance,
+                recovers the payment. Within the window a byte-identical
+                resend runs the handler again with
+                ``payment_result.idempotent_replayed`` true: check it where
+                the handler has side effects or answers per caller. Without a
+                store, nothing changes.
             **kwargs: Additional config parameters
         """
         if config:
@@ -144,6 +204,9 @@ class LambdaX402:
                 **kwargs,
             )
         self._client = X402Client(config=self._config)
+        if binding_store is not None:
+            check_binding_config(self._config)
+        self._binding_store = binding_store
 
     @property
     def client(self) -> X402Client:
@@ -210,9 +273,18 @@ class LambdaX402:
         if not payment_header:
             raise X402Error("Missing X-PAYMENT header", code="PAYMENT_REQUIRED")
 
-        return self._client.process_payment(
-            x_payment_header=payment_header,
-            expected_amount_usd=Decimal(str(expected_amount_usd)),
+        return self._process(event, payment_header, Decimal(str(expected_amount_usd)))
+
+    def _process(self, event: LambdaEvent, payment_header: str, amount: Decimal) -> PaymentResult:
+        """``process_payment``, under the payment's persisted binding when a
+        store is configured (:func:`~uvd_x402_sdk.bindings.process_payment_bound`)."""
+        if self._binding_store is None:
+            return self._client.process_payment(
+                x_payment_header=payment_header,
+                expected_amount_usd=amount,
+            )
+        return process_payment_bound(
+            self._client, self._binding_store, payment_header, amount, _event_resource(event)
         )
 
     def process_or_require(
@@ -244,10 +316,7 @@ class LambdaX402:
             return self.create_402_response(amount_usd, message)
 
         try:
-            result = self._client.process_payment(
-                x_payment_header=payment_header,
-                expected_amount_usd=Decimal(str(amount_usd)),
-            )
+            result = self._process(event, payment_header, Decimal(str(amount_usd)))
             logger.info(f"Payment processed: {result.payer_address} paid ${amount_usd}")
             return result
 
@@ -278,6 +347,7 @@ def lambda_handler(
     config: Optional[X402Config] = None,
     recipient_address: Optional[str] = None,
     message: Optional[str] = None,
+    binding_store: Optional[BindingStore] = None,
 ) -> Callable[[F], F]:
     """
     Decorator for Lambda handlers requiring x402 payment.
@@ -291,6 +361,9 @@ def lambda_handler(
         config: X402Config object
         recipient_address: EVM recipient (convenience arg)
         message: Custom 402 message
+        binding_store: Persist each payment's key before the facilitator is
+            called, shared by every instance (:mod:`uvd_x402_sdk.bindings`).
+            Without one, nothing changes.
 
     Example (fixed amount):
         >>> @lambda_handler(amount_usd="1.00", recipient_address="0x...")
@@ -311,7 +384,7 @@ def lambda_handler(
         ...     return {"statusCode": 200, "body": "..."}
     """
     _config = config or X402Config(recipient_evm=recipient_address or "")
-    x402 = LambdaX402(config=_config)
+    x402 = LambdaX402(config=_config, binding_store=binding_store)
 
     def decorator(func: F) -> F:
         @wraps(func)
