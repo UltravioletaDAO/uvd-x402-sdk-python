@@ -1438,6 +1438,62 @@ The receipt travels in `PAYMENT-RESPONSE` when the facilitator sent one. Only th
 integration forwards the buyer's `X-UVD-Purchase`; with it, a resumed purchase gets its original
 answer and is delivered.
 
+### Persisting the binding across instances (`BindingStore`)
+
+A fresh key per request dies with the process that minted it. If a Lambda dies after the
+facilitator settled and before it delivers, the buyer's resend of the same `X-PAYMENT` reaches
+another instance with another key, and the receipt rail answers it `409
+authorization_already_settled`: paid, not delivered. A `BindingStore` writes one row per payment
+**before** the facilitator is called: the resource the payment belongs to and a random key. The
+resend, in any instance, carries that key and gets the original settle back: delivered once,
+charged once.
+
+```python
+import boto3
+from botocore.config import Config
+from uvd_x402_sdk import DynamoDBBindingStore, PostgresBindingStore
+from uvd_x402_sdk.integrations import FastAPIX402, LambdaX402
+
+dynamodb = boto3.client("dynamodb", config=Config(connect_timeout=1, read_timeout=1,
+                                                  retries={"max_attempts": 2}))
+x402 = LambdaX402(config=config, binding_store=DynamoDBBindingStore(dynamodb))
+
+# or, with the app's psycopg 3 pool:
+x402 = FastAPIX402(app, config=config, binding_store=PostgresBindingStore(pool))
+```
+
+`X402Depends`, `fastapi_require_payment`, `X402Middleware` and `lambda_handler` take the same
+`binding_store=`. Without it, nothing changes.
+
+- **Stores.** `InMemoryBindingStore` (one process only), `PostgresBindingStore(pool)` (a pool not
+  in autocommit; the table is `uvd_x402_sdk.bindings.POSTGRES_BINDINGS_SCHEMA`: apply it in your
+  migrations before deploying the code, or every paid request answers 503),
+  `DynamoDBBindingStore(client)` (hash key `payment_key`, a string:
+  `DYNAMODB_BINDINGS_KEY_SCHEMA`; no TTL on `expires_at`).
+- **What is bought.** The request's method, path, query and a sha256 of its body, read from what
+  the app routes on (FastAPI: the ASGI scope, never `request.url`). The same `X-PAYMENT` for
+  another resource or another body is `409 payment_already_used`, and the facilitator is not
+  called. Headers are not part of it: see the window below.
+- **Fail closed.** A store that cannot answer is `503 payment_store_unavailable` + `Retry-After`,
+  and the facilitator is not called: never a charge whose key was not stored.
+- **Never a 402 over a payment seen before.** A payment this seller had already seen that the
+  facilitator then refuses is `409 payment_presented_before`: the earlier attempt may have moved
+  it. That is what the resend gets on a network without receipts whose `/verify` simulates the
+  transfer (EVM), where it cannot be recovered.
+- **The window.** For `binding_window_seconds(config)` (300 s with the defaults, at most 1800 s) the
+  same `X-PAYMENT` for the same resource is the same purchase: delivered again from the
+  facilitator's replay, not charged again. **Your route runs again**, with
+  `payment.idempotent_replayed` true: check it if the route has side effects, or if its answer
+  depends on the caller (`Authorization`, cookies), because whoever resends the same request with
+  the same `X-PAYMENT` gets it. After the window the key is renewed and the facilitator answers
+  `409` with the receipt.
+- **`X402Middleware` needs Starlette 0.28 or later with a store** (it reads the body for the
+  resource, and on 0.27 the route cannot read it again). It raises `ValueError` otherwise; the
+  dependency and the decorator work on 0.27.
+- **Your own handler.** `process_payment_bound(client, store, x_payment_header, amount, resource)`
+  runs the same rule and raises `PaymentBindingError`, whose `reason` is one of the three codes
+  above (`503` for the first, `409` for the other two).
+
 ### Spent nonce: never answer 402 over a payment that may have moved
 
 `is_spent_nonce_error(exc)` says whether a failure means the authorization was **already

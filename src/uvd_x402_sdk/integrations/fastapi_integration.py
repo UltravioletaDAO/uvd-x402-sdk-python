@@ -25,6 +25,12 @@ except ImportError:
         "Install with: pip install uvd-x402-sdk[fastapi]"
     )
 
+from uvd_x402_sdk.bindings import (
+    BindingStore,
+    check_binding_config,
+    process_payment_bound,
+    purchase_resource,
+)
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
@@ -148,7 +154,11 @@ def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
 
 
 async def _process_payment(
-    client: X402Client, request: Request, payment_header: str, amount: Decimal
+    client: X402Client,
+    request: Request,
+    payment_header: str,
+    amount: Decimal,
+    binding_store: Optional[BindingStore] = None,
 ) -> PaymentResult:
     """``process_payment`` off the event loop.
 
@@ -157,16 +167,44 @@ async def _process_payment(
     freeze the whole event loop for every request on the server, /health
     included, while one payment settles.
 
-    Each request is one handling with a fresh key, so its only purchase
-    binding from outside is the buyer's ``X-UVD-Purchase``. A replayed settle
-    that reaches it without one is another request's purchase, and
-    process_payment raises instead of returning it.
+    Without ``binding_store`` each request is one handling with a fresh key,
+    so its only purchase binding from outside is the buyer's
+    ``X-UVD-Purchase``. A replayed settle that reaches it without one is
+    another request's purchase, and process_payment raises instead of
+    returning it.
+
+    With one, the payment's key is the one the store persisted for it
+    (:func:`~uvd_x402_sdk.bindings.process_payment_bound`), for the resource
+    this request buys: method, the full path with its mount
+    (:func:`_full_request_path`), query and body, read from the ASGI scope the
+    app routes on. The mount matters: two apps mounted at ``/a`` and ``/b``
+    that share one store sell ``/a/x`` and ``/b/x``, not ``/x`` twice. Never
+    from ``request.url``: Starlette rebuilds it from the DECODED path (a
+    ``%23`` in a segment becomes a ``#`` that cuts it) and, in some releases,
+    from the ``Host`` header. The store's I/O runs off the event loop too.
     """
+    receipt_context = await _receipt_context(request)
+    if binding_store is None:
+        return await run_in_threadpool(
+            client.process_payment,
+            x_payment_header=payment_header,
+            expected_amount_usd=amount,
+            receipt_context=receipt_context,
+        )
+    resource = purchase_resource(
+        request.method,
+        _full_request_path(request.scope),
+        request.scope.get("query_string", b"").decode("latin-1"),
+        await request.body(),
+    )
     return await run_in_threadpool(
-        client.process_payment,
-        x_payment_header=payment_header,
-        expected_amount_usd=amount,
-        receipt_context=await _receipt_context(request),
+        process_payment_bound,
+        client,
+        binding_store,
+        payment_header,
+        amount,
+        resource,
+        receipt_context=receipt_context,
     )
 
 
@@ -191,6 +229,7 @@ class FastAPIX402:
         app: Optional[FastAPI] = None,
         config: Optional[X402Config] = None,
         recipient_address: Optional[str] = None,
+        binding_store: Optional[BindingStore] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -200,6 +239,13 @@ class FastAPIX402:
             app: FastAPI application (optional)
             config: X402Config object
             recipient_address: Default recipient for EVM chains
+            binding_store: Where each payment's key is persisted before the
+                facilitator is called (:mod:`uvd_x402_sdk.bindings`), so the
+                resend of a payment whose process died after the settle
+                recovers it. Within the window a byte-identical resend runs
+                the route again with ``payment.idempotent_replayed`` true:
+                check it where the route has side effects or answers per
+                caller. Without a store, nothing changes.
             **kwargs: Additional config parameters
         """
         self._config = config or X402Config(
@@ -207,6 +253,9 @@ class FastAPIX402:
             **kwargs,
         )
         self._client = X402Client(config=self._config)
+        if binding_store is not None:
+            check_binding_config(self._config)
+        self._binding_store = binding_store
 
         if app is not None:
             self.init_app(app)
@@ -272,7 +321,7 @@ class FastAPIX402:
 
             try:
                 result = await _process_payment(
-                    self._client, request, payment_header, required_amount
+                    self._client, request, payment_header, required_amount, self._binding_store
                 )
                 if response is not None and getattr(result, "receipt", None):
                     response.headers.update(payment_response_headers(result))
@@ -306,11 +355,15 @@ class X402Depends:
         config: X402Config,
         amount_usd: Union[Decimal, float, str],
         message: Optional[str] = None,
+        binding_store: Optional[BindingStore] = None,
     ) -> None:
         self._config = config
         self._client = X402Client(config=config)
         self._amount = Decimal(str(amount_usd))
         self._message = message
+        if binding_store is not None:
+            check_binding_config(config)
+        self._binding_store = binding_store
 
     async def __call__(self, request: Request, response: Response = None) -> PaymentResult:
         """Process payment when used as dependency."""
@@ -329,7 +382,9 @@ class X402Depends:
             )
 
         try:
-            result = await _process_payment(self._client, request, payment_header, self._amount)
+            result = await _process_payment(
+                self._client, request, payment_header, self._amount, self._binding_store
+            )
             if response is not None and getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
             return result
@@ -342,6 +397,7 @@ def fastapi_require_payment(
     amount_usd: Union[Decimal, float, str],
     config: X402Config,
     message: Optional[str] = None,
+    binding_store: Optional[BindingStore] = None,
 ) -> Callable[[F], F]:
     """
     Decorator for FastAPI routes requiring payment.
@@ -352,6 +408,8 @@ def fastapi_require_payment(
         amount_usd: Required payment amount
         config: X402Config with recipient addresses
         message: Custom 402 message
+        binding_store: Persist each payment's key before the facilitator is
+            called (:mod:`uvd_x402_sdk.bindings`). Without one, nothing changes.
 
     Example:
         >>> @app.get("/resource")
@@ -362,6 +420,8 @@ def fastapi_require_payment(
     """
     required_amount = Decimal(str(amount_usd))
     client = X402Client(config=config)
+    if binding_store is not None:
+        check_binding_config(config)
 
     def decorator(func: F) -> F:
         @wraps(func)
@@ -381,7 +441,9 @@ def fastapi_require_payment(
                 )
 
             try:
-                result = await _process_payment(client, request, payment_header, required_amount)
+                result = await _process_payment(
+                    client, request, payment_header, required_amount, binding_store
+                )
                 # Store result in request state
                 request.state.payment_result = result
                 response = await func(request, *args, **kwargs)
@@ -400,6 +462,39 @@ def fastapi_require_payment(
         return wrapper  # type: ignore
 
     return decorator
+
+
+def _full_request_path(scope: Any) -> str:
+    """The full path this request asks for, mount (``root_path``) included.
+
+    The ASGI specification puts ``root_path`` inside ``path`` (current
+    servers, Starlette 0.33 and later), compared by whole segments; an older
+    server, or a ``Mount`` before Starlette 0.33, leaves it out of ``path``,
+    and then it is ``root_path + path``. The same full path ``protected_paths``
+    reads first (:func:`_requested_paths`), stated on its own so that no caller
+    depends on the order of that tuple.
+    """
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path") or ""
+    if not root_path or path == root_path or path.startswith(root_path + "/"):
+        return path
+    return root_path + path
+
+
+def _middleware_rereads_the_body() -> bool:
+    """Can a route read the body a ``BaseHTTPMiddleware`` already read?
+
+    Measured: Starlette 0.27.0 cannot (the route waits for ever), 0.28.0 can.
+    FastAPI 0.100.x pins Starlette below 0.28. A version string this cannot
+    read is taken as a later release.
+    """
+    import starlette
+
+    try:
+        major, minor = (int(part) for part in starlette.__version__.split(".")[:2])
+    except ValueError:
+        return True
+    return (major, minor) >= (0, 28)
 
 
 def _requested_paths(scope: Any) -> tuple[str, ...]:
@@ -456,11 +551,22 @@ class X402Middleware(BaseHTTPMiddleware):
         app: Any,
         config: X402Config,
         protected_paths: dict[str, Decimal],
+        binding_store: Optional[BindingStore] = None,
     ) -> None:
         super().__init__(app)
         self._config = config
         self._client = X402Client(config=config)
         self._protected_paths = protected_paths
+        if binding_store is not None:
+            check_binding_config(config)
+            if not _middleware_rereads_the_body():
+                raise ValueError(
+                    "X402Middleware with a binding_store needs Starlette 0.28 or later: before "
+                    "it, BaseHTTPMiddleware cannot hand the body it read to the route, which "
+                    "then waits for it after the payment settled. Use FastAPIX402."
+                    "require_payment or X402Depends, or upgrade Starlette."
+                )
+        self._binding_store = binding_store
 
     async def dispatch(self, request: Request, call_next: Any) -> Any:
         # Check if path is protected
@@ -485,7 +591,9 @@ class X402Middleware(BaseHTTPMiddleware):
             )
 
         try:
-            result = await _process_payment(self._client, request, payment_header, required_amount)
+            result = await _process_payment(
+                self._client, request, payment_header, required_amount, self._binding_store
+            )
             request.state.payment_result = result
             response = await call_next(request)
             if getattr(result, "receipt", None):

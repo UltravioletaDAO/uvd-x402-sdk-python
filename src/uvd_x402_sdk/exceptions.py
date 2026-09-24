@@ -322,6 +322,23 @@ ADMITTED_AUTHORIZATION_CODES = frozenset(
 #: present the same request, with the same binding, again.
 SETTLEMENT_IN_PROGRESS = "settlement_in_progress"
 
+#: What a seller's own purchase binding (:mod:`uvd_x402_sdk.bindings`) decides
+#: when the facilitator's answer cannot, carried as
+#: :attr:`PaymentBindingError.reason`. None is a 402, which asks the buyer to
+#: sign a new payment:
+#:
+#: * ``payment_store_unavailable``: the binding could not be read or minted, so
+#:   the facilitator was not called. 503 + ``Retry-After``: present the SAME
+#:   ``X-PAYMENT`` later (an earlier presentation may have charged it).
+#: * ``payment_already_used``: this ``X-PAYMENT`` was first presented for
+#:   another resource, and one payment buys one resource. 409, and the
+#:   facilitator is not called.
+#: * ``payment_presented_before``: the facilitator refused a payment this seller
+#:   had already seen, so an earlier attempt may have moved it. 409.
+PAYMENT_STORE_UNAVAILABLE = "payment_store_unavailable"
+PAYMENT_ALREADY_USED = "payment_already_used"
+PAYMENT_PRESENTED_BEFORE = "payment_presented_before"
+
 #: Hard ceiling, in seconds, on any ``Retry-After`` the SDK will honour by
 #: sleeping or by echoing to a caller. A misconfigured facilitator answering
 #: ``Retry-After: 3600`` must not be able to hang a request for an hour; the
@@ -844,6 +861,40 @@ class PaymentExceedsMaxError(X402Error):
         self.required = required
         self.max_amount = max_amount
         self.resource = resource
+
+
+class PaymentBindingError(X402Error):
+    """
+    Raised by :func:`~uvd_x402_sdk.bindings.process_payment_bound` when the
+    seller's purchase binding decides the request instead of the facilitator.
+
+    :attr:`reason` is one of :data:`PAYMENT_STORE_UNAVAILABLE`,
+    :data:`PAYMENT_ALREADY_USED` or :data:`PAYMENT_PRESENTED_BEFORE`. For the
+    last one, :attr:`cause` is the facilitator's refusal (also in
+    ``details["cause"]``) and :attr:`receipt` its receipt, if it sent one.
+    ``details["retryable"]`` is true only for the store that could not answer,
+    so :func:`~uvd_x402_sdk.client.is_transient_error` calls that one transient.
+    The integrations answer all three through the same mapping as every other
+    undelivered payment: 503 for the first, 409 for the other two, never 402.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        message: str,
+        *,
+        cause: Optional[X402Error] = None,
+    ) -> None:
+        details: Dict[str, Any] = {
+            "reason": reason,
+            "retryable": reason == PAYMENT_STORE_UNAVAILABLE,
+        }
+        if cause is not None:
+            details["cause"] = cause.to_dict()
+        super().__init__(message=message, code=reason.upper(), details=details)
+        self.reason = reason
+        self.cause = cause
+        self.receipt = getattr(cause, "receipt", None)
 
 
 class NoAcceptablePaymentError(X402Error):
