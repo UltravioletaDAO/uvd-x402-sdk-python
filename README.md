@@ -21,7 +21,7 @@ Accept **gasless stablecoin payments** across **29 blockchain networks** with a 
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
 - **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (23 networks: 21 EVM + Solana + Solana-devnet)
-- **Escrow & Refunds**: Hold payments in escrow with dispute resolution (11 EVM chains + SKALE via CREATE3)
+- **Escrow & Refunds**: Hold payments in escrow with dispute resolution (10 EVM chains, SKALE via CREATE3, Arc and Arc Testnet on the canonical x402r operator)
 - **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
