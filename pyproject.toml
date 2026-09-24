@@ -136,6 +136,9 @@ dev = [
     # tests/interop validates interop/fixtures against the draft 2020-12
     # schemas in interop/schemas, and runs the interop conformance runner.
     "jsonschema>=4.18.0",
+    # tests/test_bindings*.py run DynamoDBBindingStore against moto's DynamoDB
+    # (in process, fake keys, no network). boto3 comes with it.
+    "moto[dynamodb]>=5.0.0",
 ]
 
 [project.scripts]

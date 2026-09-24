@@ -31,6 +31,11 @@ idempotency_key_conflict``; only a success is cached; otherwise the settle
 executes, and the "chain" answers a second execution of one authorization with
 ``400 contract_call_failed (ref)``.
 
+``verify_sees_used`` (legacy only) is x402-rs's ``/verify`` on EVM, which
+simulates the transfer: an authorization the chain already executed is refused
+there with the same opaque ``400 contract_call_failed (ref)``, before any settle
+cache is consulted. Off by default, as the rail has always answered.
+
 In every mode the "chain" moves an authorization once. ``hold_before_confirm``
 keeps the first settle in flight for that long (the pending window);
 ``hold_after_confirm`` confirms it and then sits on the answer (a response lost
@@ -125,10 +130,12 @@ class Facilitator:
         hold_before_confirm: float = 0.0,
         hold_after_confirm: float = 0.0,
         store_down: bool = False,
+        verify_sees_used: bool = False,
     ) -> None:
         assert mode in MODES, mode
         self.mode = mode
         self.store_down = store_down
+        self.verify_sees_used = verify_sees_used
         self.hold_before_confirm = hold_before_confirm
         self.hold_after_confirm = hold_after_confirm
         #: (path, Idempotency-Key or None, X-UVD-Purchase or None), in arrival order.
@@ -198,6 +205,8 @@ class Facilitator:
                     body = {"error": "idempotency_store_unavailable", "correlation_id": "local"}
                     return 503, body, {}
             if self.mode == "legacy":
+                if path == "/verify" and self.verify_sees_used and authorization in self._settled:
+                    return 400, {"error": "contract_call_failed (ref: local)"}, {}
                 answered = self._legacy_lookup(path, key, raw)
                 if answered is not None:
                     return answered
