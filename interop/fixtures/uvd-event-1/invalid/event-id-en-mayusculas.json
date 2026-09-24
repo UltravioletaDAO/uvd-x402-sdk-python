@@ -1,0 +1,27 @@
+{
+  "schema": "uvd.event/1",
+  "event_id": "0F8B6C1E-3D2A-4B7C-9E10-5A6B7C8D9E0F",
+  "source": "execution-market",
+  "type": "execution-market.task.assigned",
+  "subject": {
+    "kind": "task",
+    "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+  },
+  "sequence": 7,
+  "occurred_at": "2026-09-24T01:10:00.123Z",
+  "actor": {
+    "kind": "wallet",
+    "id": "0x5eed00000000000000000000000000000000cafe",
+    "role": "publisher"
+  },
+  "economic": {
+    "amount": "0.100000",
+    "currency": "USDC",
+    "network": "eip155:8453"
+  },
+  "payload": {
+    "task_id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+    "executor_role": "worker"
+  },
+  "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+}

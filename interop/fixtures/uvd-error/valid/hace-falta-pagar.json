@@ -1,0 +1,12 @@
+{
+  "x402Version": 1,
+  "accepts": [],
+  "error": "X-PAYMENT header is required",
+  "uvd_error": {
+    "code": "payment_required",
+    "message": "Este recurso cobra; el desafío está en accepts.",
+    "retryable": false,
+    "spent": "no",
+    "next_action": "pay"
+  }
+}

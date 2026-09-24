@@ -128,6 +128,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "httpx>=0.24.0",
+    # tests/test_interop_schemas.py validates interop/fixtures against the
+    # draft 2020-12 schemas in interop/schemas.
+    "jsonschema>=4.18.0",
 ]
 
 [project.urls]

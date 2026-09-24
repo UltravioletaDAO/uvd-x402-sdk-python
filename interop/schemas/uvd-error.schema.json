@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ultravioletadao.xyz/interop/v1/uvd-error.schema.json",
+  "title": "Cuerpo de error con uvd_error (interop v1)",
+  "description": "Valida un cuerpo JSON de error que lleva el sobre común uvd_error en la raíz. El sobre es ADITIVO: las claves que la app ya devolvía (error, detail, code, reason, retryAfter...) se quedan al lado y este esquema no las mira. Reglas: interop/06-errores.md.",
+  "type": "object",
+  "required": ["uvd_error"],
+  "properties": {
+    "uvd_error": { "$ref": "#/$defs/uvd_error" }
+  },
+  "$defs": {
+    "una_linea": {
+      "description": "Sin saltos de línea. El $ de re de Python también acepta un salto final; esto lo cierra en todos los motores.",
+      "not": { "type": "string", "pattern": "[\\n\\r]" }
+    },
+    "uvd_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable", "spent", "next_action"],
+      "properties": {
+        "code": {
+          "description": "R6.3. Código estable, snake_case, que un programa compara.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "$ref": "#/$defs/una_linea"
+        },
+        "message": {
+          "description": "R6.3. Texto para una persona. Ningún programa decide por él.",
+          "type": "string",
+          "minLength": 1
+        },
+        "retryable": {
+          "description": "R6.5. true solo si repetir a ciegas la MISMA petición más tarde es seguro y puede funcionar.",
+          "type": "boolean"
+        },
+        "retry_after_s": {
+          "description": "R6.6. Segundos a esperar; el mismo valor que la cabecera Retry-After.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "spent": {
+          "description": "R6.4. no = esta petición no movió plata; maybe = pudo moverla; yes = la movió.",
+          "enum": ["no", "maybe", "yes"]
+        },
+        "next_action": {
+          "description": "R6.7. Lo que hace quien llama después, en vocabulario cerrado.",
+          "enum": [
+            "retry",
+            "resend_same_payment",
+            "check_transaction",
+            "pay",
+            "authenticate",
+            "fix_request",
+            "stop",
+            "contact_operator"
+          ]
+        },
+        "docs": {
+          "description": "R6.3. Página que explica este código.",
+          "type": "string",
+          "pattern": "^https://[^/?#@ ]+([/?#][^ ]*)?$",
+          "$ref": "#/$defs/una_linea"
+        },
+        "details": {
+          "description": "R6.3. Datos propios de la app (por ejemplo la transacción o el recibo). Nada de lo que decide el reintento va acá.",
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "R6.5: retryable true solo acompaña a next_action retry.",
+          "if": {
+            "required": ["retryable"],
+            "properties": { "retryable": { "const": true } }
+          },
+          "then": {
+            "properties": { "next_action": { "const": "retry" } }
+          }
+        },
+        {
+          "$comment": "R6.5 y R6.6: retry exige retryable true, spent no y cuánto esperar.",
+          "if": {
+            "required": ["next_action"],
+            "properties": { "next_action": { "const": "retry" } }
+          },
+          "then": {
+            "required": ["retry_after_s"],
+            "properties": {
+              "retryable": { "const": true },
+              "spent": { "const": "no" }
+            }
+          }
+        },
+        {
+          "$comment": "R6.6: retry_after_s solo tiene sentido si la acción es esperar y repetir.",
+          "if": {
+            "required": ["next_action"],
+            "properties": { "next_action": { "enum": ["retry", "resend_same_payment"] } }
+          },
+          "else": {
+            "not": { "required": ["retry_after_s"] }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "uvd_error": {
+    "code": "signature_invalid",
+    "message": "La firma ERC-8128 no verifica.",
+    "retryable": false,
+    "spent": "no",
+    "next_action": "authenticate"
+  }
+}

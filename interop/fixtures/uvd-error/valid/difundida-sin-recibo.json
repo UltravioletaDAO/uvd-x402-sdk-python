@@ -1,0 +1,14 @@
+{
+  "detail": "settlement unconfirmed",
+  "uvd_error": {
+    "code": "settlement_unconfirmed",
+    "message": "La transacción se difundió sin recibo: puede estar minada. Revisala antes de pagar otra vez.",
+    "retryable": false,
+    "spent": "maybe",
+    "next_action": "check_transaction",
+    "details": {
+      "transaction": "ejemplo-no-es-una-transaccion",
+      "network": "eip155:8453"
+    }
+  }
+}

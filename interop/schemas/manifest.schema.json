@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ultravioletadao.xyz/interop/v1/manifest.schema.json",
+  "title": "Manifiesto del stack, /.well-known/uvd-stack.json (interop v1)",
+  "description": "Lo que una app del stack publica de sí misma en el host de su API: quién es, dónde atiende, cómo se la autentica, qué cobra, cuánto aguanta, qué eventos emite y consume y cómo se mide su salud. Reglas: interop/01-descubrimiento.md y las capas que cita cada campo.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "app",
+    "version",
+    "git_sha",
+    "endpoints",
+    "identity",
+    "payments",
+    "rate_limits",
+    "events",
+    "health"
+  ],
+  "properties": {
+    "schema": {
+      "description": "R1.4. Nombre y versión mayor del formato.",
+      "const": "uvd.stack/1"
+    },
+    "app": {
+      "description": "R1.10. Id de la app: el mismo en source de eventos, User-Agent y nombre del secreto.",
+      "$ref": "#/$defs/app_id"
+    },
+    "name": {
+      "description": "R1.4. Nombre para personas.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "R1.4. Versión desplegada de la app; viaja en el User-Agent (R7.1), así que es una línea.",
+      "type": "string",
+      "minLength": 1,
+      "$ref": "#/$defs/una_linea"
+    },
+    "git_sha": {
+      "description": "R1.4. Commit desplegado, hex en minúsculas.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "generated_at": {
+      "description": "R1.2. Cuándo se generó este documento.",
+      "$ref": "#/$defs/timestamp"
+    },
+    "endpoints": {
+      "description": "R1.5 y R1.6. Las puertas públicas de la app, cada una con sus modos de autenticación.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api"],
+      "properties": {
+        "api": { "$ref": "#/$defs/endpoint" },
+        "mcp": { "$ref": "#/$defs/endpoint" },
+        "event_inbox": {
+          "description": "R5.7. Donde la app recibe eventos empujados (POST). R3.8: si acepta ERC-8128, lo hace con evento-s2s.",
+          "allOf": [
+            { "$ref": "#/$defs/endpoint" },
+            {
+              "properties": {
+                "erc8128": {
+                  "properties": { "preset": { "const": "evento-s2s" } }
+                }
+              }
+            }
+          ]
+        },
+        "event_cursor": {
+          "description": "R5.11. GET con ?after= para leer los eventos que la app emite.",
+          "$ref": "#/$defs/endpoint"
+        }
+      }
+    },
+    "snapshots": {
+      "description": "R5.14. Instantáneas publicadas que la app escribe (JSON en almacenamiento y CDN).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/snapshot" }
+    },
+    "identity": {
+      "description": "R2.2. La identidad de servicio de la app, declarada en un solo lugar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_signer"],
+      "properties": {
+        "service_signer": {
+          "description": "R2.1, R2.3 y R2.5. Dirección pública de la wallet de servicio (firma ERC-8128, EVM); null si la app no firma como sí misma.",
+          "type": ["string", "null"],
+          "pattern": "^0x[0-9a-f]{40}$",
+          "$ref": "#/$defs/una_linea"
+        },
+        "erc8004": {
+          "description": "R2.4. agentId por red CAIP-2, a lo sumo uno por red: entero en eip155, clave base58 en solana. v1 no conoce ERC-8004 en otras familias.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/caip2" },
+          "patternProperties": {
+            "^eip155:": { "$ref": "#/$defs/agent_id_evm" },
+            "^solana:": { "$ref": "#/$defs/agent_id_solana" }
+          },
+          "additionalProperties": false
+        },
+        "reputation_hosts": {
+          "description": "R2.2. Hosts desde los que la app emite documentos de reputación.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/host" }
+        }
+      }
+    },
+    "payments": {
+      "description": "R1.7. Si la app cobra, apunta a su /.well-known/x402; si no, lo dice y no apunta.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["charges"],
+      "properties": {
+        "charges": { "type": "boolean" },
+        "x402": { "$ref": "#/$defs/public_url" }
+      },
+      "if": {
+        "required": ["charges"],
+        "properties": { "charges": { "const": true } }
+      },
+      "then": { "required": ["x402"] },
+      "else": { "not": { "required": ["x402"] } }
+    },
+    "rate_limits": {
+      "description": "R7.3. Los límites que la app aplica, publicados antes de que un cliente los descubra por un bloqueo.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/rate_limit" }
+    },
+    "events": {
+      "description": "R5.12. Tipos de evento que la app emite y consume, y los sobres que habla.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["emits", "consumes", "envelopes"],
+      "properties": {
+        "emits": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/event_type" }
+        },
+        "consumes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/event_type" }
+        },
+        "envelopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["uvd.event/1", "em.event.v1"] }
+        }
+      }
+    },
+    "health": {
+      "description": "R7.5. Salud partida: vivo sin I/O externo, listo con dependencias.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["live", "ready"],
+      "properties": {
+        "live": { "$ref": "#/$defs/public_url" },
+        "ready": { "$ref": "#/$defs/public_url" }
+      }
+    },
+    "links": {
+      "description": "R1.2. Otras superficies agénticas de la app (llms_txt, api_catalog, agent_card, openapi...).",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,62}$",
+        "$ref": "#/$defs/una_linea"
+      },
+      "additionalProperties": { "$ref": "#/$defs/public_url" }
+    }
+  },
+  "$defs": {
+    "una_linea": {
+      "description": "Sin saltos de línea. El $ de re de Python también acepta un salto final; esto lo cierra en todos los motores.",
+      "not": { "type": "string", "pattern": "[\\n\\r]" }
+    },
+    "app_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "timestamp": {
+      "description": "RFC 3339 en UTC, con Z. El esquema acota mes, día, hora, minuto y segundo; que la fecha exista (un 30 de febrero) lo verifica el runner.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:([0-5][0-9]|60)([.][0-9]{1,9})?Z$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "public_url": {
+      "description": "R1.5. https, sin credenciales en la URL y nunca una ruta interna (el segmento internal, en mayúsculas o minúsculas).",
+      "type": "string",
+      "pattern": "^https://[^/?#@ ]+([/?#][^ ]*)?$",
+      "not": { "pattern": "/[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]([/?#]|$)" },
+      "$ref": "#/$defs/una_linea"
+    },
+    "host": {
+      "description": "Host en minúsculas, con puerto solo si no es el de omisión (R3.3).",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?([.][a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$",
+      "not": { "pattern": ":(80|443)$" },
+      "$ref": "#/$defs/una_linea"
+    },
+    "caip2": {
+      "type": "string",
+      "pattern": "^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "agent_id_evm": {
+      "description": "R2.4. En eip155 el agentId es un entero.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent_id_solana": {
+      "description": "R2.4. En solana el agentId es una clave base58.",
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "event_type": {
+      "description": "R5.2. <app>.<sujeto>.<verbo>; el sujeto, como subject.kind, hasta 32 caracteres.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}[.][a-z][a-z0-9_]{0,31}[.][a-z][a-z0-9_]{0,62}$",
+      "$ref": "#/$defs/una_linea"
+    },
+    "auth_mode": {
+      "description": "R1.6. none, erc8128, oauth2.1, x402 (el pago es la credencial), api_key y hmac (perfiles legados).",
+      "enum": ["none", "erc8128", "oauth2.1", "x402", "api_key", "hmac"]
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "auth"],
+      "properties": {
+        "url": { "$ref": "#/$defs/public_url" },
+        "auth": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/auth_mode" }
+        },
+        "erc8128": { "$ref": "#/$defs/erc8128_policy" }
+      },
+      "$comment": "R3.4: una puerta que acepta ERC-8128 publica su política; una que no, no la publica.",
+      "if": {
+        "required": ["auth"],
+        "properties": { "auth": { "contains": { "const": "erc8128" } } }
+      },
+      "then": { "required": ["erc8128"] },
+      "else": { "not": { "required": ["erc8128"] } }
+    },
+    "erc8128_policy": {
+      "description": "R3.4. La política del verificador de esta puerta.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorities", "chain_ids", "preset", "nonce"],
+      "properties": {
+        "authorities": {
+          "description": "R3.3. Las authorities propias que acepta; nunca una ajena.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/host" }
+        },
+        "chain_ids": {
+          "description": "Cadenas aceptadas en el keyid; null = cualquiera.",
+          "type": ["array", "null"],
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "preset": {
+          "description": "R3.5. La postura, como dato.",
+          "enum": ["meshrelay-strict", "em-lenient", "canonical-strict", "evento-s2s"]
+        },
+        "nonce": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source"],
+          "properties": {
+            "source": {
+              "description": "R3.9. issued = solo nonces que emitió el servidor; unseen = cualquier nonce no visto dentro de la ventana; none = sin nonce (solo lecturas).",
+              "enum": ["issued", "unseen", "none"]
+            },
+            "endpoint": {
+              "description": "Dónde se pide un nonce (GET).",
+              "$ref": "#/$defs/public_url"
+            }
+          },
+          "$comment": "R3.9: un nonce emitido por el servidor exige publicar dónde se pide.",
+          "if": {
+            "required": ["source"],
+            "properties": { "source": { "const": "issued" } }
+          },
+          "then": { "required": ["endpoint"] }
+        }
+      },
+      "$comment": "R3.6: evento-s2s es nonce al azar por intento con almacén de no vistos.",
+      "if": {
+        "required": ["preset"],
+        "properties": { "preset": { "const": "evento-s2s" } }
+      },
+      "then": {
+        "properties": {
+          "nonce": { "properties": { "source": { "const": "unseen" } } }
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "url", "schema"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,62}$",
+          "$ref": "#/$defs/una_linea"
+        },
+        "url": { "$ref": "#/$defs/public_url" },
+        "schema": {
+          "description": "R5.14. <app>.<nombre>/<mayor>, el mismo valor que la clave schema del documento publicado.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,62}[.][a-z][a-z0-9_.-]{0,62}/[1-9][0-9]{0,5}$",
+          "$ref": "#/$defs/una_linea"
+        }
+      }
+    },
+    "rate_limit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "limit", "window_s"],
+      "properties": {
+        "scope": {
+          "description": "Qué cuenta el límite: por IP, por wallet, por llave o global.",
+          "enum": ["ip", "wallet", "key", "global"]
+        },
+        "applies_to": {
+          "description": "La puerta a la que aplica; sin este campo, a todas.",
+          "enum": ["api", "mcp", "event_inbox", "event_cursor"]
+        },
+        "limit": { "type": "integer", "minimum": 1 },
+        "window_s": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
