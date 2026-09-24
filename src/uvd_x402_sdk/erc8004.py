@@ -1,5 +1,6 @@
 import re
-from decimal import Decimal
+
+from uvd_x402_sdk.networks.base import to_base_units
 """
 ERC-8004 Trustless Agents client for x402 SDK.
 
@@ -2295,8 +2296,9 @@ def build_erc8004_payment_requirements(
     return {
         "scheme": "exact",
         "network": _wire(network),
-        # 6 decimals, in Decimal: as a float, "2.01" came out 2009999.
-        "maxAmountRequired": str(int(Decimal(str(amount)) * 10**6)),
+        # 6 decimals, exact: as a float, "2.01" came out 2009999, and digits
+        # below one base unit raise instead of being truncated.
+        "maxAmountRequired": str(to_base_units(amount, 6, unit="USDC")),
         "resource": resource,
         "description": description,
         "mimeType": mime_type,

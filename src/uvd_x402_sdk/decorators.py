@@ -120,7 +120,7 @@ def require_payment(
     Example (Dynamic pricing):
         >>> def calculate_price(request):
         ...     items = request.json.get("items", 1)
-        ...     return Decimal(str(items * 0.10))
+        ...     return Decimal(items) * Decimal("0.10")
         >>>
         >>> @require_payment(amount_callback=calculate_price)
         >>> def dynamic_endpoint(payment_result=None):

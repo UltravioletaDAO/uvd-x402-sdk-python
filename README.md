@@ -361,7 +361,7 @@ def handler(event, context):
     # Calculate price based on request
     body = json.loads(event.get("body", "{}"))
     quantity = body.get("quantity", 1)
-    price = Decimal(str(quantity * 0.01))
+    price = Decimal(quantity) * Decimal("0.01")
 
     # Process payment or return 402
     result = x402.process_or_require(event, price)

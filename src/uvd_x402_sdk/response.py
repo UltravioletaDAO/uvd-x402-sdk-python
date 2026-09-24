@@ -15,6 +15,7 @@ v2 Response:
 """
 
 from decimal import Decimal
+from fractions import Fraction
 from typing import Dict, List, Optional, Any, Union, Literal
 
 from uvd_x402_sdk.config import X402Config
@@ -26,6 +27,15 @@ from uvd_x402_sdk.networks import (
     get_supported_network_names,
     to_caip2_network,
 )
+from uvd_x402_sdk.networks.base import to_base_units
+
+
+def _plain_decimal(units: int, decimals: int) -> str:
+    """``units`` base units of a ``decimals``-decimal token as a plain decimal
+    without trailing zeros: ``(350000, 6)`` is ``"0.35"``."""
+    whole, fraction = divmod(units, 10**decimals)
+    digits = str(fraction).rjust(decimals, "0").rstrip("0")
+    return f"{whole}.{digits}" if digits else str(whole)
 
 
 def create_402_response(
@@ -74,6 +84,14 @@ def create_402_response(
             the DEFAULT one. Empty is a ValueError: a challenge that names no
             currency gives the buyer nothing to decide what to sign with.
 
+    `amount` is written as a plain decimal, never in exponent form:
+    `Decimal("10.00").normalize()` is `1E+1` and goes out as `"10"`. A price
+    with a real digit below one base unit of any chain the body lists raises
+    `ValueError` (`"0.0000015"` with a 6-decimal USDC listed): a buyer signs
+    whole base units, so no buyer could pay it as written. Float noise is
+    rounded away first, as `to_base_units` does for the settle:
+    `Decimal(str(35 * 0.01))` goes out as `"0.35"`.
+
     Returns:
         Dictionary suitable for JSON response body
 
@@ -87,6 +105,10 @@ def create_402_response(
         >>> return JSONResponse(status_code=402, content=response_body)
     """
     amount = Decimal(str(amount_usd))
+    if not amount.is_finite():
+        raise ValueError(f"amount_usd must be a finite number, got {amount_usd!r}")
+    if not token:
+        raise ValueError("token must be a non-empty symbol, e.g. 'USDC' or 'EURC'")
 
     # Build recipients map
     recipients: Dict[str, str] = {}
@@ -105,6 +127,8 @@ def create_402_response(
     supported_chains: List[Union[int, str]] = []
 
     any_svm_offered = False
+    # What each listed chain charges, in whole tokens -> (base units, decimals)
+    charged: dict[Fraction, tuple[int, int]] = {}
     for network_name in config.supported_networks:
         network = get_network(network_name)
         if network and network.enabled and config.is_network_enabled(network_name):
@@ -114,6 +138,12 @@ def create_402_response(
                 # Opt-in parity with v2: a chain nobody can pay the treasury
                 # on is not "supported", it is an advertisement of a dead end.
                 continue
+            # The one `amount` of this body is signed on every chain it lists,
+            # in that chain's base units: refuse a price one of them cannot
+            # carry exactly instead of advertising it.
+            decimals = network.usdc_decimals
+            units = to_base_units(amount, decimals, unit=f"{token} on {network_name}")
+            charged.setdefault(Fraction(units, 10**decimals), (units, decimals))
             if network.network_type == NetworkType.SVM:
                 any_svm_offered = True
             if network.network_type == NetworkType.EVM and network.chain_id > 0:
@@ -122,12 +152,24 @@ def create_402_response(
                 # Non-EVM networks: include name
                 supported_chains.append(network_name)
 
-    if not token:
-        raise ValueError("token must be a non-empty symbol, e.g. 'USDC' or 'EURC'")
+    if len(charged) > 1:
+        raise ValueError(
+            f"{format(amount, 'f')} rounds to different amounts on the chains this body "
+            f"lists ({', '.join(_plain_decimal(*c) for c in charged.values())}), and a v1 "
+            f"body carries one amount for all of them. Write the price with fewer decimals."
+        )
+
+    # Plain decimal, never exponent form: str() writes Decimal("1E+1") as
+    # "1E+1" and Decimal("0.0000005") as "5E-7", which a strict buyer refuses.
+    plain_amount = format(amount, "f")
+    for exact, (units, decimals) in charged.items():
+        if exact != Fraction(amount):
+            # Float noise that to_base_units rounded away: say what is charged.
+            plain_amount = _plain_decimal(units, decimals)
 
     # Default message
     if not message:
-        message = f"Payment of ${amount} {token} required"
+        message = f"Payment of ${plain_amount} {token} required"
         if resource_description:
             message += f" for {resource_description}"
 
@@ -140,7 +182,7 @@ def create_402_response(
             if omit_unused_solana_facilitator and not any_svm_offered
             else config.facilitator_solana
         ),
-        amount=str(amount),
+        amount=plain_amount,
         token=token,
         supportedChains=supported_chains,
         message=message,
