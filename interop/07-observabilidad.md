@@ -63,5 +63,5 @@ Un runner de conformidad que lee superficies vivas: una petición a la vez, **al
 peticiones, y se detiene en el **primer 429** o en el **tercer 401**. Nunca firma lecturas públicas
 (R3.1) ni llama tools que escriben o cobran.
 
-- **Por qué:** hay APIs del stack que bloquean la IP por acumulación de 429 **y también de 401**, y
-  el bloqueo alcanza a todas las apps de la casa que salen por la misma IP.
+- **Por qué:** hay APIs del stack que bloquean la IP por acumulación de 429, y en algunas rutas
+  **también de 401**; el bloqueo alcanza a todas las apps de la casa que salen por la misma IP.

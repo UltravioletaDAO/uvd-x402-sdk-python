@@ -16,8 +16,8 @@ allowlist, un cursor autenticado). **No** se firma un GET a una ruta pública: n
 sondeo, ni una lectura de catálogo.
 
 - **Por qué:** firmar cada lectura cuesta una firma de wallet por cada sondeo, y contra una API que
-  pide nonce al servidor multiplica los pedidos de nonce y las respuestas 401, que también cuentan
-  para los bloqueos de IP. Lo que no necesita identidad no la manda.
+  pide nonce al servidor multiplica los pedidos de nonce y las respuestas 401, que en algunas APIs
+  también cuentan para los bloqueos de IP. Lo que no necesita identidad no la manda.
 - **Sale de:** KarmaKadabra, regla del dueño desde 2026-07-23 («SIGN ONLY WRITES, NEVER A READ»), y
   el partner gate de describe-net (la lectura que se firma es la que decide si se cobra).
 
