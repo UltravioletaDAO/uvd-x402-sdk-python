@@ -9,7 +9,7 @@ Provides:
 
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Callable, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
@@ -329,7 +329,7 @@ def fastapi_require_payment(
     return decorator
 
 
-def _requested_paths(scope: Any) -> Tuple[str, ...]:
+def _requested_paths(scope: Any) -> tuple[str, ...]:
     """The path this request asks for, as ``protected_paths`` names routes.
 
     Read from the ASGI scope the application routes on (``scope["path"]``,
