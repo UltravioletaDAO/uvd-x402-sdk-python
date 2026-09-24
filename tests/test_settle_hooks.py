@@ -358,8 +358,9 @@ class TestTrySettlePayment:
     """Result-dict mode for callers that treat settle failures as data."""
 
     def test_success_shape(self, client, monkeypatch):
-        # v0.76.0 added ``payment_id`` and ``error_code``. They are present and
-        # None on the happy path ON PURPOSE: a caller reading
+        # v0.76.0 added ``payment_id`` and ``error_code``, and the next release
+        # ``proof_of_payment`` and ``safe_to_retry``. They are present and None
+        # on the happy path ON PURPOSE: a caller reading
         # ``result["payment_id"]`` must not hit a KeyError depending on whether
         # the settle worked.
         _wire(client, monkeypatch, [_FakeResponse(200, _ok_settle_body("0xf00d"))])
@@ -370,6 +371,8 @@ class TestTrySettlePayment:
             "payment_id": None,
             "error_code": None,
             "error": None,
+            "proof_of_payment": None,
+            "safe_to_retry": None,
         }
 
     def test_failure_does_not_raise(self, client, monkeypatch):

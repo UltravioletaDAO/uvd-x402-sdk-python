@@ -11,10 +11,14 @@ Supports both x402 v1 and v2 protocols:
 - v2: network as CAIP-2 ("eip155:8453", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
 """
 
+import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, ValidationError, field_validator
+from uvd_x402_sdk.erc8004 import ProofOfPayment
 from uvd_x402_sdk.receipts import FacilitatorReceipt
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -322,8 +326,12 @@ class PaymentRequirements(BaseModel):
     payTo: str = Field(..., description="Recipient address for the payment")
     maxTimeoutSeconds: int = Field(default=60, description="Max settlement timeout")
     asset: str = Field(..., description="Token contract address/identifier")
-    extra: Optional[Dict[str, str]] = Field(
-        default=None, description="EIP-712 domain params for EVM chains"
+    extra: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "EIP-712 domain params for EVM chains, and any extension the "
+            "facilitator reads (e.g. 8004-reputation). Values of any JSON type."
+        ),
     )
 
 
@@ -469,6 +477,16 @@ class SettleResponse(BaseModel):
     payer: Optional[str] = Field(None, description="Verified payer address")
     message: Optional[str] = Field(None, description="Error message if failed")
     errors: List[str] = Field(default_factory=list, description="List of errors")
+    proof_of_payment: Optional[ProofOfPayment] = Field(
+        None,
+        validation_alias=AliasChoices("proofOfPayment", "proof_of_payment"),
+        description=(
+            "The facilitator's proofOfPayment, sent when the settle's "
+            "requirements carried the 8004-reputation extension and the network "
+            "supports ERC-8004. None without one, and None when the one sent "
+            "does not parse: the proof is optional, the payment is not."
+        ),
+    )
     idempotent_replayed: bool = Field(
         False,
         description=(
@@ -487,6 +505,20 @@ class SettleResponse(BaseModel):
             "reaches the buyer in PAYMENT-RESPONSE."
         ),
     )
+
+    @field_validator("proof_of_payment", mode="wrap")
+    @classmethod
+    def _proof_or_none(cls, value: Any, handler: Any) -> Any:
+        """A proof that does not parse is ``None``, never a failed settle."""
+        try:
+            return handler(value)
+        except ValidationError as exc:
+            logger.warning(
+                "The facilitator's proofOfPayment does not parse (%d errors); "
+                "settle_payment() returns proof_of_payment=None",
+                exc.error_count(),
+            )
+            return None
 
     def get_transaction_hash(self) -> Optional[str]:
         """Get transaction hash from either field."""

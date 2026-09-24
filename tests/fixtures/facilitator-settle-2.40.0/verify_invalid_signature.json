@@ -1,0 +1,7 @@
+{
+  "body": "{\"isValid\":false,\"invalidReason\":\"invalid_signature\",\"payer\":\"0x0000000000000000000000000000000000000001\"}",
+  "case": "verify_invalid_signature",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 200
+}

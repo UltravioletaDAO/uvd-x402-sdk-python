@@ -6,8 +6,26 @@ failure scenarios in the payment flow.
 """
 
 import json
+import re
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
+
+
+#: How much of the facilitator's response body a :class:`PaymentSettlementError`
+#: or :class:`PaymentVerificationError` keeps, in bytes of UTF-8. Enough for every
+#: body x402-rs sends on these paths (a settle or verify answer, its receipt), and
+#: a ceiling on what an exception carries into a log line.
+MAX_ERROR_BODY_BYTES = 4096
+
+
+def _bounded_body(body: Optional[str]) -> Optional[str]:
+    """``body`` cut to :data:`MAX_ERROR_BODY_BYTES`, never mid-character."""
+    if body is None:
+        return None
+    encoded = body.encode("utf-8", errors="replace")
+    if len(encoded) <= MAX_ERROR_BODY_BYTES:
+        return body
+    return encoded[:MAX_ERROR_BODY_BYTES].decode("utf-8", errors="ignore")
 
 
 class X402Error(Exception):
@@ -74,6 +92,12 @@ class PaymentVerificationError(X402Error):
     - Amount mismatch
     - Wrong recipient
     - Expired payment authorization
+
+    When the client raised it from a facilitator answer it also carries that
+    answer: ``status_code`` (the HTTP status), ``error_reason`` (the
+    facilitator's own ``invalidReason``, verbatim, ``None`` when it sent none)
+    and ``response_body`` (the body, cut to :data:`MAX_ERROR_BODY_BYTES`). All
+    three are ``None`` otherwise, and none of them enters ``to_dict()``.
     """
 
     def __init__(
@@ -82,6 +106,10 @@ class PaymentVerificationError(X402Error):
         reason: Optional[str] = None,
         errors: Optional[List[str]] = None,
         receipt: Optional[Any] = None,
+        *,
+        status_code: Optional[int] = None,
+        error_reason: Optional[str] = None,
+        response_body: Optional[str] = None,
     ) -> None:
         self.receipt = receipt
         details = {}
@@ -97,6 +125,9 @@ class PaymentVerificationError(X402Error):
         )
         self.reason = reason
         self.errors = errors or []
+        self.status_code = status_code
+        self.error_reason = error_reason
+        self.response_body = _bounded_body(response_body)
 
 
 class PaymentSettlementError(X402Error):
@@ -108,6 +139,15 @@ class PaymentSettlementError(X402Error):
     - Nonce already used
     - Authorization expired
     - Network congestion/timeout
+
+    When the client raised it from a facilitator answer it also carries that
+    answer: ``status_code`` (the HTTP status: ``200`` for a ``success: false``
+    or a failed re-validation), ``error_reason`` (the facilitator's own
+    ``errorReason``, or ``invalidReason`` for a re-validation, verbatim, ``None``
+    when it sent none; ``reason`` stays what it was, that value or the
+    ``message``) and ``response_body`` (the body, cut to
+    :data:`MAX_ERROR_BODY_BYTES`). All three are ``None`` otherwise, and none of
+    them enters ``to_dict()``.
     """
 
     def __init__(
@@ -117,6 +157,10 @@ class PaymentSettlementError(X402Error):
         tx_hash: Optional[str] = None,
         reason: Optional[str] = None,
         receipt: Optional[Any] = None,
+        *,
+        status_code: Optional[int] = None,
+        error_reason: Optional[str] = None,
+        response_body: Optional[str] = None,
     ) -> None:
         self.receipt = receipt
         details = {}
@@ -135,6 +179,9 @@ class PaymentSettlementError(X402Error):
         self.network = network
         self.tx_hash = tx_hash
         self.reason = reason
+        self.status_code = status_code
+        self.error_reason = error_reason
+        self.response_body = _bounded_body(response_body)
 
 
 class UnsupportedNetworkError(X402Error):
@@ -225,15 +272,23 @@ WRITE_NOT_ATTEMPTED_REASONS = frozenset(
     }
 )
 
-#: Values of ``reason`` for which the write is AMBIGUOUS: the forward to the
-#: lease holder failed AFTER the attempt, so the holder may have processed the
-#: write and only the response was lost. Treat exactly like a timeout.
+#: Values of ``reason`` for which the write is AMBIGUOUS: the holder may have
+#: processed the write and only the response was lost. Treat exactly like a
+#: timeout.
+#:
+#: * ``forward_unconfirmed`` (x402-rs 2.39.6+): the holder received the
+#:   forwarded write and its answer was lost. ``502``, ``retryable: false``.
+#: * ``forward_failed``: from 2.39.6 on, a hop that never reached the holder
+#:   (``docs/settle-errors.md``, "Nothing was sent"). Up to 2.39.5 the same
+#:   ``503`` + ``Retry-After: 5``, with the same body, also answered a hop the
+#:   holder received and whose answer was lost. Nothing in the answer tells the
+#:   two versions apart, so it stays here.
 #:
 #: On ``POST /register`` this must never be resolved by re-POSTing the mint.
 #: Resolve it with ``GET /identity/{network}/owner/{recipient}`` first, honouring
 #: that endpoint's 404-vs-503 distinction; re-POSTing an ambiguous mint is what
 #: produced five duplicate agents.
-WRITE_AMBIGUOUS_REASONS = frozenset({"forward_failed"})
+WRITE_AMBIGUOUS_REASONS = frozenset({"forward_failed", "forward_unconfirmed"})
 
 #: What the facilitator's receipt rail answers (x402-rs 2.39.0,
 #: ``docs/facilitator-receipts.md``, "Replays of an admitted authorization") when
@@ -298,11 +353,33 @@ def write_retry_is_safe(reason: Optional[str]) -> bool:
     """Is a write carrying this facilitator ``reason`` safe to re-send verbatim?
 
     ``True`` only for the reasons the facilitator emits BEFORE reaching the
-    lease holder. ``False`` for ``forward_failed`` and for anything unknown —
-    a ``reason`` this SDK has never heard of is ambiguous by construction, and
-    guessing optimistically about an unknown is how a duplicate mint happens.
+    lease holder. ``False`` for :data:`WRITE_AMBIGUOUS_REASONS` and for anything
+    unknown — a ``reason`` this SDK has never heard of is ambiguous by
+    construction, and guessing optimistically about an unknown is how a
+    duplicate mint happens.
     """
     return reason in WRITE_NOT_ATTEMPTED_REASONS
+
+
+#: ``error`` tokens, without their `` (ref: …)`` suffix, with which x402-rs says
+#: a settle may have left it (``docs/settle-errors.md``, "May be on chain").
+#: From 2.39.6 on the first four also carry ``retryable: false``; up to 2.39.5
+#: ``broadcast_uncertain`` and ``receipt_pending`` did not, which is why they are
+#: named here. ``idempotency_cache_corrupt`` (``503``) is answered only when a
+#: settle of this same request under this key already SUCCEEDED and its cached
+#: answer cannot be read back.
+SETTLE_MAY_HAVE_SENT_ERRORS = frozenset(
+    {
+        "settlement_unconfirmed",
+        "broadcast_uncertain",
+        "receipt_pending",
+        "receipt_response_unreadable",
+        "idempotency_cache_corrupt",
+    }
+)
+
+#: The `` (ref: <uuid>)`` x402-rs appends to an opaque ``error`` token.
+_REF_SUFFIX = re.compile(r"\s*\(ref: [^)]*\)\s*$")
 
 
 #: The spellings the facilitator uses for a transaction hash, across endpoints
@@ -348,14 +425,17 @@ def parse_facilitator_error_body(response_body: Optional[str]) -> Dict[str, Any]
     yields all-``None``, because a parser that refuses an unknown shape turns a
     new facilitator diagnosis into an outage.
 
-    Returns ``transaction``, ``payment_id``, ``error_code`` and ``retryable``
-    (``None`` when the facilitator did not state one).
+    Returns ``transaction``, ``payment_id``, ``error_code``, ``reason``,
+    ``retryable`` and ``safe_to_retry`` (the body's ``safeToRetry``); each is
+    ``None`` when the facilitator did not state it.
     """
     empty: Dict[str, Any] = {
         "transaction": None,
         "payment_id": None,
         "error_code": None,
+        "reason": None,
         "retryable": None,
+        "safe_to_retry": None,
     }
     if not response_body:
         return empty
@@ -368,12 +448,16 @@ def parse_facilitator_error_body(response_body: Optional[str]) -> Dict[str, Any]
 
     payment_id = parsed.get("paymentId") or parsed.get("payment_id")
     error_code = parsed.get("error")
+    reason = parsed.get("reason")
     retryable = parsed.get("retryable")
+    safe_to_retry = parsed.get("safeToRetry")
     return {
         "transaction": body_tx_hash(parsed),
         "payment_id": str(payment_id) if isinstance(payment_id, str) and payment_id else None,
         "error_code": str(error_code) if isinstance(error_code, str) and error_code else None,
+        "reason": reason if isinstance(reason, str) and reason else None,
         "retryable": retryable if isinstance(retryable, bool) else None,
+        "safe_to_retry": safe_to_retry if isinstance(safe_to_retry, bool) else None,
     }
 
 
@@ -389,8 +473,9 @@ class FacilitatorError(X402Error):
       from the EVM writer lease this is one of ``holder_unknown``,
       ``forwarding_disabled``, ``forwarded_but_not_writer``, ``body_unreadable``
       (the write never ran, retry is safe) or ``forward_failed`` (ambiguous,
-      like a timeout). Use :func:`write_retry_is_safe` rather than comparing
-      strings, and treat an unknown value as ambiguous.
+      like a timeout); on a 502, ``forward_unconfirmed`` (the holder received
+      the write and its answer was lost). Use :func:`write_retry_is_safe` rather
+      than comparing strings, and treat an unknown value as ambiguous.
     * ``retry_after`` — the server's ``Retry-After``, in seconds, already
       clamped to :data:`MAX_RETRY_AFTER_SECONDS`.
 
@@ -416,7 +501,66 @@ class FacilitatorError(X402Error):
     ``operation`` names the facilitator call that failed, ``"verify"`` or
     ``"settle"``, when the client raised it from one of them, and is ``None``
     otherwise. Not in ``to_dict()``.
+
+    ``safe_to_retry`` says whether the facilitator stated that NOTHING WAS SENT,
+    the question x402-rs answers per failure in ``docs/settle-errors.md``
+    ("Nothing was sent" / "May be on chain"). Not in ``to_dict()``. Three values:
+
+    * ``True``: the facilitator said so outright, on a ``5xx``: ``safeToRetry:
+      true`` in the body (the receipt rail, x402-rs 2.39.3+), or a ``reason`` in
+      :data:`WRITE_NOT_ATTEMPTED_REASONS` (the writer lease, before the hop).
+      Resend the SAME request, with the same ``Idempotency-Key``. It is never a
+      reason to sign a new authorization.
+    * ``False``: the payment may be on chain. ``retryable: false``, a
+      ``transaction`` in the body, a receipt ``pending`` or ``unknown``, an
+      ``error`` in :data:`SETTLE_MAY_HAVE_SENT_ERRORS`, a ``reason`` in
+      :data:`WRITE_AMBIGUOUS_REASONS`, or the receipt rail's admitted
+      authorization (``202 settlement_in_progress``, the three codes of
+      :data:`ADMITTED_AUTHORIZATION_CODES`). Look the transaction up; do not
+      sign again. This wins over any ``True`` signal in the same body.
+      ``forward_failed`` is here although x402-rs 2.39.6+ lists it under
+      "Nothing was sent": up to 2.39.5 the same ``503`` + ``Retry-After: 5``,
+      with the same body, also answered a hop the lease holder received.
+    * ``None``: neither was stated. A refusal (fix the request), a transport
+      failure with no answer, and the other rows of the "Nothing was sent"
+      table: ``upstream_rpc_unavailable``, ``upstream_nonce_or_mempool``,
+      ``upstream_rate_limited`` and ``facilitator_signer_unfunded``. Up to
+      x402-rs 2.39.5 those same answers, with the same status and
+      ``Retry-After``, also covered a transaction whose send answer was lost,
+      and nothing in the answer says which version sent it. ``retryable``
+      still reads them as transient, and resending the SAME authorization
+      cannot move the money twice: the token's own nonce stops it.
     """
+
+    @staticmethod
+    def _safe_to_retry_verdict(
+        status_code: Optional[int],
+        fields: Dict[str, Any],
+        reason: Optional[str],
+        receipt: Any,
+    ) -> Optional[bool]:
+        """``True`` / ``False`` / ``None``, as the class docstring states them.
+
+        "May be on chain" is read first and wins: a body that says both is
+        treated as the one that can cost a second payment.
+        """
+        token = _REF_SUFFIX.sub("", fields.get("error_code") or "")
+        reason = reason if reason is not None else fields.get("reason")
+        if (
+            fields.get("retryable") is False
+            or fields.get("transaction") is not None
+            or getattr(receipt, "status", None) in ("pending", "unknown")
+            or token in SETTLE_MAY_HAVE_SENT_ERRORS
+            or token in ADMITTED_AUTHORIZATION_CODES
+            or token == SETTLEMENT_IN_PROGRESS
+            or reason in WRITE_AMBIGUOUS_REASONS
+        ):
+            return False
+        if status_code is None or status_code < 500:
+            return None
+        if fields.get("safe_to_retry") is True or reason in WRITE_NOT_ATTEMPTED_REASONS:
+            return True
+        return None
 
     @staticmethod
     def _retryable_verdict(
@@ -516,6 +660,9 @@ class FacilitatorError(X402Error):
         self.transaction = fields["transaction"]
         self.payment_id = fields["payment_id"]
         self.error_code = fields["error_code"]
+        self.safe_to_retry = self._safe_to_retry_verdict(
+            status_code, fields, reason, self.receipt
+        )
 
 
 class LookupInconclusiveError(X402Error):

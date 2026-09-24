@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"facilitator_signer_unfunded (ref: 95243142-5289-493c-bf45-996650557750)\"}",
+  "case": "facilitator_signer_unfunded",
+  "retryAfter": "271",
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 503
+}

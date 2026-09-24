@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"broadcast_uncertain (ref: f8072cd0-9802-462e-93df-da2b03c2c60a)\",\"retryable\":false}",
+  "case": "broadcast_uncertain",
+  "retryAfter": null,
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 502
+}

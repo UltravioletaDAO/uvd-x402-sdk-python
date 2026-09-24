@@ -79,6 +79,10 @@ class X402Config:
         facilitator_solana: Solana/SVM facilitator address (fee payer)
         verify_timeout: Timeout for verify requests (seconds)
         settle_timeout: Timeout for settle requests (seconds)
+        max_timeout_seconds: The ``maxTimeoutSeconds`` of the payment
+            requirements ``verify_payment`` / ``settle_payment`` /
+            ``process_payment`` send (default 60). Native Hedera keeps its own
+            180, bounded by the validity window of a Hedera transaction.
         supported_networks: List of enabled network names
         network_configs: Per-network recipient overrides
         resource_url: Resource URL sent to facilitator
@@ -110,6 +114,9 @@ class X402Config:
     # Timeouts
     verify_timeout: float = 30.0
     settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
+
+    # maxTimeoutSeconds of the requirements the client sends to the facilitator.
+    max_timeout_seconds: int = 60
 
     # Network configuration - All 29 networks
     supported_networks: List[str] = field(default_factory=lambda: [
@@ -164,6 +171,15 @@ class X402Config:
         """Validate configuration after initialization."""
         if not self.facilitator_url:
             raise ValueError("facilitator_url is required")
+
+        if (
+            isinstance(self.max_timeout_seconds, bool)
+            or not isinstance(self.max_timeout_seconds, int)
+            or self.max_timeout_seconds <= 0
+        ):
+            raise ValueError(
+                f"max_timeout_seconds must be a positive integer, got {self.max_timeout_seconds!r}"
+            )
 
         # At least one recipient is required
         if not any([

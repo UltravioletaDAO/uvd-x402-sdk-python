@@ -1,0 +1,7 @@
+{
+  "body": "{\"error\":\"this instance does not hold the EVM writer lease; retry\",\"reason\":\"forward_failed\"}",
+  "case": "forward_failed",
+  "retryAfter": "5",
+  "source": "x402-rs 8ee44114 (2.40.0), src/handlers.rs",
+  "status": 503
+}

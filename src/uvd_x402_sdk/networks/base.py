@@ -9,8 +9,9 @@ This module provides the foundation for network configuration, including:
 """
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Any
+from typing import Dict, List, Literal, Optional, Any, Union
 
 
 # =============================================================================
@@ -139,12 +140,20 @@ class NetworkConfig:
         if not self.usdc_address and self.network_type != NetworkType.XRPL:
             raise ValueError(f"USDC address is required for network {self.name}")
 
-    def get_token_amount(self, usd_amount: float) -> int:
+    def get_token_amount(self, usd_amount: Union[Decimal, float, int, str]) -> int:
         """
         Convert USD amount to token base units.
 
+        The product is taken in ``Decimal``: a float is read through its
+        shortest decimal form (``str``), never scaled as a binary float. Scaled
+        as a float, 151 of the 9,999 prices from $0.01 to $99.99 came out one
+        base unit short (``int(2.01 * 10**6)`` is ``2009999``) while the payer
+        signed the exact amount. A fraction below one base unit is still
+        dropped (``int``), as before.
+
         Args:
-            usd_amount: Amount in USD (e.g., 10.50)
+            usd_amount: Amount in USD (e.g., ``Decimal("10.50")``, ``10.50``
+                or ``"10.50"``)
 
         Returns:
             Amount in token base units (e.g., 10500000 for 6 decimals)
@@ -157,7 +166,8 @@ class NetworkConfig:
         """
         if not self.usd_pegged:
             raise ValueError(self.usd_conversion_error())
-        return int(usd_amount * (10**self.usdc_decimals))
+        amount = usd_amount if isinstance(usd_amount, Decimal) else Decimal(str(usd_amount))
+        return int(amount * (Decimal(10) ** self.usdc_decimals))
 
     def usd_conversion_error(self) -> str:
         """The message for refusing to price this network in dollars.

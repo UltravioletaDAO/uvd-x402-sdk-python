@@ -16,6 +16,7 @@ import os
 import re
 import secrets
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Optional, Tuple, List, Dict, Any, Union
@@ -44,6 +45,7 @@ from uvd_x402_sdk.exceptions import (
     NoAcceptablePaymentError,
     PolicyRefusedError,
     MAX_RETRY_AFTER_SECONDS,
+    _REF_SUFFIX,
     body_tx_hash,
     parse_facilitator_error_body,
     parse_retry_after,
@@ -342,6 +344,15 @@ def _response_retry_after(response: Any) -> Optional[float]:
         return None
 
 
+def _response_text(response: Any) -> Optional[str]:
+    """The body of an httpx response as text, or ``None``. Never raises."""
+    try:
+        text = response.text
+    except Exception:  # noqa: BLE001 - a body read must not break error handling
+        return None
+    return text if isinstance(text, str) else None
+
+
 #: The header with which the facilitator marks an answer served from a payment
 #: it had already admitted (or cached) instead of executed.
 IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"
@@ -419,6 +430,8 @@ class _Binding:
             network=network,
             reason=AUTHORIZATION_IN_FLIGHT if in_flight else AUTHORIZATION_ALREADY_SETTLED,
             receipt=receipt,
+            status_code=getattr(response, "status_code", None),
+            response_body=_response_text(response),
         )
 
 
@@ -706,7 +719,7 @@ def spent_nonce_evidence(exc: Exception) -> Optional[str]:
         return None
     if _spent_nonce_code_of(exc) is not None:
         return "structured"
-    body_text = getattr(exc, "response_body", None)
+    body_text = _classified_body(exc)
     reason = getattr(exc, "reason", None)
     text = " ".join(
         part for part in (exc.message, reason, body_text) if isinstance(part, str) and part
@@ -714,9 +727,23 @@ def spent_nonce_evidence(exc: Exception) -> Optional[str]:
     return "wording" if _mentions_spent_nonce(text) else None
 
 
+def _classified_body(exc: X402Error) -> Any:
+    """The facilitator body the spent-nonce classification reads.
+
+    Not the one a :class:`PaymentSettlementError` or
+    :class:`PaymentVerificationError` carries since it has one: that is a whole
+    settle or verify answer (payer, network, receipt) whose verdict already
+    reached ``reason``, and scanning its free text would move a rejection that
+    answered ``402`` into ``409``.
+    """
+    if isinstance(exc, (PaymentSettlementError, PaymentVerificationError)):
+        return None
+    return getattr(exc, "response_body", None)
+
+
 def _spent_nonce_code_of(exc: X402Error) -> Optional[str]:
     """The spent-nonce code in ``exc``'s details or facilitator JSON body, verbatim."""
-    body_text = getattr(exc, "response_body", None)
+    body_text = _classified_body(exc)
     try:
         body = json.loads(body_text) if body_text else None
     except (ValueError, TypeError):
@@ -953,7 +980,6 @@ _SETTLE_REQUEST_REFUSAL_PREFIXES = (
     "Invalid UTF-8",
     "Address blocked",
 )
-_REF_SUFFIX = re.compile(r"\s*\(ref: [^)]*\)\s*$")
 
 
 def _settle_refused_after_verify(exc: FacilitatorError) -> bool:
@@ -1090,6 +1116,46 @@ def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
     return {"name": domain["name"], "version": domain["version"]}
 
 
+def _merge_caller_extra(
+    requirements: PaymentRequirements, extra: Optional[Mapping[str, Any]]
+) -> PaymentRequirements:
+    """``requirements`` with the caller's ``extra`` merged into its ``extra``.
+
+    The entries the SDK set stay (the EIP-712 ``name`` / ``version`` on EVM,
+    ``feePayer`` on Hedera): a caller key that gives one of them ANOTHER value
+    raises before anything is sent, and the same value is accepted. Everything
+    else is added as given, nested values included, e.g.
+    ``{"8004-reputation": {"includeProof": True}}``, with which the facilitator
+    returns the settlement's ``proofOfPayment``.
+
+    Raises:
+        TypeError: ``extra`` is not a mapping with string keys.
+        ValueError: it is not JSON-serialisable, or it overrides an entry the
+            SDK set (the EIP-712 domain goes through ``eip712_domain``).
+    """
+    if extra is None:
+        return requirements
+    if not isinstance(extra, Mapping) or not all(isinstance(k, str) for k in extra):
+        raise TypeError("extra must be a mapping with string keys")
+    caller = dict(extra)
+    try:
+        # allow_nan=False: NaN / Infinity are not JSON, and some httpx
+        # versions within the supported range would send them as bare tokens.
+        json.dumps(caller, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"extra must be JSON-serialisable: {exc}") from None
+    merged: Dict[str, Any] = dict(requirements.extra or {})
+    clashes = sorted(k for k in caller if k in merged and merged[k] != caller[k])
+    if clashes:
+        raise ValueError(
+            f"extra gives {', '.join(clashes)} another value than the SDK set for this "
+            "payment; the EIP-712 domain goes through eip712_domain"
+        )
+    merged.update(caller)
+    requirements.extra = merged
+    return requirements
+
+
 class X402Client:
     """
     Client for processing x402 payments via the Ultravioleta facilitator.
@@ -1118,6 +1184,7 @@ class X402Client:
         *,
         verify_facilitator_support: bool = False,
         policy: Optional[PurchasePolicy] = None,
+        http_client: Optional[httpx.Client] = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -1140,6 +1207,21 @@ class X402Client:
                 WRITE gets the safe default (an asset with no declared ceiling
                 is refused), while a caller that supplied none keeps exactly the
                 behaviour they had before 0.82.0.
+            http_client: The `httpx.Client` every facilitator call of this
+                client goes through (`/verify`, `/settle` and its timeout
+                fallback, `/supported`, ...). Default: one the SDK creates and
+                closes. A client passed here is the caller's: `close()` leaves
+                it open. It is the public way to see the facilitator's raw
+                answers, through httpx's own response hooks:
+                `httpx.Client(event_hooks={"response": [hook]})`, where the
+                hook calls `response.read()` before reading the body. The
+                requests of `fetch()`, the paid one included, go through it
+                too unless `fetch()` gets its own `http_client`. The SDK sets
+                its own timeout on `/verify`, `/settle` and its timeout
+                fallback, `/accepts` and the `/supported` of route
+                validation; `get_version()`, `get_supported()`,
+                `get_blacklist()`, `health_check()`, the other GETs and
+                `fetch()` use the timeout of the client passed here.
             **kwargs: Additional config parameters passed to X402Config —
                 including `facilitator_by_network`, the `network -> facilitator
                 URL` routing table (see X402Config).
@@ -1177,6 +1259,8 @@ class X402Client:
 
         # HTTP client for facilitator requests
         self._http_client: Optional[httpx.Client] = None
+        # The caller's, when one was passed: used as given, never closed here.
+        self._caller_http_client = http_client
 
         # Client-side signer (set via connect_with_private_key)
         self._hedera_signer: Any = None
@@ -1283,6 +1367,8 @@ class X402Client:
 
     def _get_http_client(self) -> httpx.Client:
         """Get or create HTTP client."""
+        if self._caller_http_client is not None:
+            return self._caller_http_client
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.Client(
                 timeout=httpx.Timeout(
@@ -1589,7 +1675,7 @@ class X402Client:
                 raise ValueError(f"token_decimals must be non-negative, got {token_decimals}")
             expected_amount_wei = int(expected_amount_usd * (Decimal(10) ** token_decimals))
         else:
-            expected_amount_wei = network_config.get_token_amount(float(expected_amount_usd))
+            expected_amount_wei = network_config.get_token_amount(expected_amount_usd)
 
         # Get recipient for this network (allow per-call override)
         recipient = pay_to or self.config.get_recipient(normalized_network)
@@ -1604,7 +1690,7 @@ class X402Client:
             description=self.config.description,
             mimeType="application/json",
             payTo=recipient,
-            maxTimeoutSeconds=60,
+            maxTimeoutSeconds=self.config.max_timeout_seconds,
             asset=asset if asset is not None else network_config.usdc_address,
         )
 
@@ -1778,6 +1864,9 @@ class X402Client:
                     reason=verify_response.invalidReason,
                     errors=verify_response.errors,
                     receipt=verify_response.receipt,
+                    status_code=response.status_code,
+                    error_reason=verify_response.invalidReason,
+                    response_body=_response_text(response),
                 )
 
             logger.info(f"Payment verified! Payer: {verify_response.payer}")
@@ -1801,6 +1890,7 @@ class X402Client:
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> SettleResponse:
         """
         Settle payment on-chain via the facilitator.
@@ -1834,9 +1924,20 @@ class X402Client:
                 key is derived (:func:`derive_idempotency_key`) instead.
             receipt_context: The buyer's validated ``X-UVD-Purchase``,
                 forwarded unchanged.
+            extra: Entries added to ``paymentRequirements.extra``, values of
+                any JSON type. ``{"8004-reputation": {"includeProof": True}}``
+                asks the facilitator for the settlement's proof, returned in
+                ``proof_of_payment`` (``ERC8004_EXTENSION_ID`` names the key).
+                An entry the SDK already set (the EIP-712 ``name`` /
+                ``version``, Hedera's ``feePayer``) may be repeated but not
+                changed: ``ValueError`` before anything is sent.
 
         Returns:
-            SettleResponse from facilitator. ``idempotent_replayed`` is True
+            SettleResponse from facilitator. ``proof_of_payment`` carries the
+            facilitator's ``proofOfPayment`` when it sent one (it does for
+            ``extra`` with ``8004-reputation`` on a network with ERC-8004),
+            else ``None``; a proof that does not parse is ``None`` too, never
+            an error over a payment that settled. ``idempotent_replayed`` is True
             when the facilitator answered from a payment it had already
             admitted (``Idempotent-Replayed: true``) under this call's own
             binding: the key or context the caller brought, or this call's
@@ -1855,7 +1956,7 @@ class X402Client:
         binding = self._binding(payload, idempotency_key, idempotency_scope, receipt_context)
         return self._settle(
             payload, expected_amount_usd, pay_to, asset=asset, eip712_domain=eip712_domain,
-            token_decimals=token_decimals, retry=retry, binding=binding,
+            token_decimals=token_decimals, retry=retry, binding=binding, extra=extra,
         )
 
     def _settle(
@@ -1869,13 +1970,14 @@ class X402Client:
         token_decimals: Optional[int],
         retry: bool,
         binding: "_Binding",
+        extra: Optional[Dict[str, Any]] = None,
     ) -> SettleResponse:
         """The settle of one handling: its attempts all carry ``binding``."""
         if not retry:
             return self._settle_once(
                 payload, expected_amount_usd, pay_to=pay_to,
                 asset=asset, eip712_domain=eip712_domain,
-                token_decimals=token_decimals, binding=binding,
+                token_decimals=token_decimals, binding=binding, extra=extra,
             )
 
         for attempt in range(1, SETTLE_RETRY_ATTEMPTS + 1):
@@ -1883,7 +1985,7 @@ class X402Client:
                 return self._settle_once(
                     payload, expected_amount_usd, pay_to=pay_to,
                     asset=asset, eip712_domain=eip712_domain,
-                    token_decimals=token_decimals, binding=binding,
+                    token_decimals=token_decimals, binding=binding, extra=extra,
                 )
             except Exception as exc:
                 if attempt == SETTLE_RETRY_ATTEMPTS or not _is_retryable_settle_error(exc):
@@ -1923,6 +2025,7 @@ class X402Client:
         idempotency_scope: Optional[str] = None,
         receipt_context: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Settle payment without raising on payment-flow errors.
@@ -1947,11 +2050,19 @@ class X402Client:
               - ``error_code`` (Optional[str]): its machine-readable ``error``,
                 e.g. ``settlement_unconfirmed``.
               - ``error`` (Optional[str]): error message when failed
+              - ``proof_of_payment`` (Optional[dict]): on success, the
+                facilitator's ``proofOfPayment`` as its own camelCase object
+                (``SettleResponse.proof_of_payment`` dumped by alias), or
+                ``None`` without one.
+              - ``safe_to_retry`` (Optional[bool]): on failure,
+                ``FacilitatorError.safe_to_retry``; ``None`` for any other
+                error and on success.
 
             ``tx_hash``, ``payment_id`` and ``error_code`` are what turns a
             refusal to retry into something the caller can act on: without
             them the answer is "do not re-send" with nowhere to look, and
-            whoever paid cannot find out whether their money moved.
+            whoever paid cannot find out whether their money moved. Every key
+            is always present, so reading one never depends on the outcome.
         """
         try:
             response = self.settle_payment(
@@ -1959,16 +2070,18 @@ class X402Client:
                 asset=asset, eip712_domain=eip712_domain,
                 token_decimals=token_decimals, retry=retry,
                 idempotency_scope=idempotency_scope, receipt_context=receipt_context,
-                idempotency_key=idempotency_key,
+                idempotency_key=idempotency_key, extra=extra,
             )
         except X402Error as exc:
             tx_hash: Optional[str] = None
             payment_id: Optional[str] = None
             error_code: Optional[str] = None
+            safe_to_retry: Optional[bool] = None
             if isinstance(exc, FacilitatorError):
                 tx_hash = exc.transaction
                 payment_id = exc.payment_id
                 error_code = exc.error_code
+                safe_to_retry = exc.safe_to_retry
             elif isinstance(exc, PaymentSettlementError):
                 tx_hash = exc.tx_hash
             return {
@@ -1977,13 +2090,18 @@ class X402Client:
                 "payment_id": payment_id,
                 "error_code": error_code,
                 "error": exc.message,
+                "proof_of_payment": None,
+                "safe_to_retry": safe_to_retry,
             }
+        proof = response.proof_of_payment
         return {
             "success": True,
             "tx_hash": response.get_transaction_hash(),
             "payment_id": None,
             "error_code": None,
             "error": None,
+            "proof_of_payment": proof.model_dump(by_alias=True) if proof is not None else None,
+            "safe_to_retry": None,
         }
 
     def _settle_once(
@@ -1996,6 +2114,7 @@ class X402Client:
         token_decimals: Optional[int] = None,
         *,
         binding: "_Binding",
+        extra: Optional[Dict[str, Any]] = None,
     ) -> SettleResponse:
         """Single settle attempt — the pre-retry settle_payment body, under ``binding``."""
         normalized_network = self.validate_network(payload.network)
@@ -2007,6 +2126,7 @@ class X402Client:
             eip712_domain=eip712_domain,
             token_decimals=token_decimals,
         )
+        requirements = _merge_caller_extra(requirements, extra)
 
         if binding.receipt_context is not None:
             context_data = json.loads(base64.b64decode(binding.receipt_context, validate=True))
@@ -2065,6 +2185,9 @@ class X402Client:
                     network=payload.network,
                     reason=rejected.invalidReason or rejected.message,
                     receipt=rejected.receipt,
+                    status_code=response.status_code,
+                    error_reason=rejected.invalidReason,
+                    response_body=_response_text(response),
                 )
             settle_response = SettleResponse(**data)
             settle_response.idempotent_replayed = _response_replayed(response)
@@ -2079,6 +2202,9 @@ class X402Client:
                     tx_hash=_extract_tx_hash_from_body(data),
                     reason=settle_response.errorReason or settle_response.message,
                     receipt=settle_response.receipt,
+                    status_code=response.status_code,
+                    error_reason=settle_response.errorReason,
+                    response_body=_response_text(response),
                 )
 
             binding.refuse_foreign_replay(response, settle_response.receipt, payload.network)
