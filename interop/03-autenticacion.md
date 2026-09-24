@@ -10,10 +10,14 @@ públicas en el receptor. Con eso nadie custodia secretos ajenos. Esta capa fija
 
 ## R3.1 · Se firma toda escritura y toda lectura cuyo receptor necesita la identidad; una lectura pública no se firma
 
-Se firma: todo POST/PUT/PATCH/DELETE entre apps (un webhook de evento incluido, ver R3.13), y toda
-lectura cuyo receptor decide algo por la identidad de quien llama (una exención de pago por
-allowlist, un cursor autenticado). **No** se firma un GET a una ruta pública: ni un heartbeat, ni un
-sondeo, ni una lectura de catálogo.
+Se firma: toda escritura entre apps, que es todo POST/PUT/PATCH/DELETE salvo las lecturas MCP de
+abajo (un webhook de evento incluido, ver R3.13), y toda lectura cuyo receptor decide algo por la
+identidad de quien llama (una exención de pago por allowlist, un cursor autenticado). **No** se firma
+un GET a una ruta pública: ni un heartbeat, ni un sondeo, ni una lectura de catálogo.
+
+Una llamada MCP que lista tools (`tools/list`) o llama una tool de clase `lectura` sobre datos
+públicos ([R9.1](09-mcp.md), [R9.7](09-mcp.md)) es una lectura pública aunque viaje por POST: no se
+firma. Lo que decide es la operación, no el método.
 
 - **Por qué:** firmar cada lectura cuesta una firma de wallet por cada sondeo, y contra una API que
   pide nonce al servidor multiplica los pedidos de nonce y las respuestas 401, que en algunas APIs

@@ -1,7 +1,7 @@
 {
   "spec": "uvd-interop/1",
   "kind": "request-signing",
-  "about": "R3.1 en el cable: se firma toda escritura y toda lectura cuyo receptor necesita la identidad; una lectura pública no se firma. Entrada: una petición saliente de una app hacia otra (request.method, request.url y request.headers, tal como salen) y needs_identity, que dice si el receptor decide algo por la identidad de quien llama (un cursor autenticado, una exención de pago por allowlist). Salida: expect.must_sign, la decisión (verdadera si el método es POST, PUT, PATCH o DELETE, o si needs_identity es verdadero; cualquier otro método es una lectura), y expect.conforms, si la petición la cumple. Una petición lleva firma si trae la cabecera Signature o la cabecera Signature-Input; la firma está completa si trae las dos. Los nombres de cabecera se comparan sin distinguir mayúsculas, como en HTTP. Cumple si debe firmarse y la firma está completa, o si no debe firmarse y no lleva firma. Los valores de las cabeceras tienen la forma de ERC-8128 pero no verifican: el veredicto no los lee.",
+  "about": "R3.1 en el cable: se firma toda escritura y toda lectura cuyo receptor necesita la identidad; una lectura pública no se firma. Entrada: una petición saliente de una app hacia otra (request.method, request.url y request.headers, tal como salen; request.body, cuando está, es el cuerpo crudo y el veredicto no lo lee), needs_identity, que dice si el receptor decide algo por la identidad de quien llama (un cursor autenticado, una exención de pago por allowlist), y operation, opcional: \"read\" o \"write\", lo que la petición hace. Una llamada MCP que lista tools o llama una tool de clase lectura sobre datos públicos es \"read\" aunque viaje por POST (R9.1, R9.7). Sin operation, se deduce del método: POST, PUT, PATCH y DELETE escriben; cualquier otro método lee. Salida: expect.must_sign, la decisión (verdadera si la operación es \"write\" o si needs_identity es verdadero), y expect.conforms, si la petición la cumple. Una petición lleva firma si trae la cabecera Signature o la cabecera Signature-Input; la firma está completa si trae las dos. Los nombres de cabecera se comparan sin distinguir mayúsculas, como en HTTP. Cumple si debe firmarse y la firma está completa, o si no debe firmarse y no lleva firma. Los valores de las cabeceras tienen la forma de ERC-8128 pero no verifican: el veredicto no los lee.",
   "cases": [
     {
       "id": "sondeo-de-salud-sin-firma",
@@ -169,6 +169,82 @@
           "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
         }
       },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "escritura-con-signature-input-sola",
+      "rule": "R3.1",
+      "why": "Signature-Input sin Signature tampoco es una firma completa: dice qué cubriría una firma que no viene.",
+      "request": {
+        "method": "POST",
+        "url": "https://api.mercado.example/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Content-Digest": "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1790000000;expires=1790000300;nonce=\"Qz8vYk1mT0xwRnh3dUpoNQ\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\""
+        }
+      },
+      "needs_identity": false,
+      "expect": {"must_sign": true, "conforms": false}
+    },
+    {
+      "id": "mcp-tools-list-sin-firma",
+      "rule": "R3.1",
+      "why": "Listar las tools de un MCP es una lectura pública aunque viaje por POST (R9.7): sale sin firma.",
+      "request": {
+        "method": "POST",
+        "url": "https://mcp.mercado.example/mcp",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "MCP-Protocol-Version": "2025-06-18"
+        },
+        "body": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/list\"}"
+      },
+      "operation": "read",
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": true}
+    },
+    {
+      "id": "mcp-tool-de-lectura-firmada",
+      "rule": "R3.1",
+      "why": "Una tool de clase lectura sobre datos públicos es la misma lectura que su ruta REST (R9.1): firmarla cuesta una firma por llamada y no cumple.",
+      "request": {
+        "method": "POST",
+        "url": "https://mcp.mercado.example/mcp",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "MCP-Protocol-Version": "2025-06-18",
+          "Content-Digest": "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:",
+          "Signature-Input": "eth=(\"@method\" \"@authority\" \"@path\" \"content-digest\");created=1790000000;expires=1790000300;nonce=\"bUNwdlJ6a0xxVnFhSGRUeQ\";keyid=\"erc8128:8453:0x1ec7000000000000000000000000000000000b0b\";alg=\"eip191\"",
+          "Signature": "eth=:ZmlybWEgZGUgZWplbXBsbzogbm8gdmVyaWZpY2E=:"
+        },
+        "body": "{\"jsonrpc\": \"2.0\", \"id\": 2, \"method\": \"tools/call\", \"params\": {\"name\": \"list_orders\", \"arguments\": {}}}"
+      },
+      "operation": "read",
+      "needs_identity": false,
+      "expect": {"must_sign": false, "conforms": false}
+    },
+    {
+      "id": "mcp-tool-de-escritura-sin-firma",
+      "rule": "R3.1",
+      "why": "Una tool que escribe es una escritura: por MCP también sale firmada.",
+      "request": {
+        "method": "POST",
+        "url": "https://mcp.mercado.example/mcp",
+        "headers": {
+          "User-Agent": "lector-ejemplo/0.1.0 (+https://lector.example)",
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          "MCP-Protocol-Version": "2025-06-18"
+        },
+        "body": "{\"jsonrpc\": \"2.0\", \"id\": 3, \"method\": \"tools/call\", \"params\": {\"name\": \"create_order\", \"arguments\": {\"item\": \"sku-1\"}}}"
+      },
+      "operation": "write",
       "needs_identity": false,
       "expect": {"must_sign": true, "conforms": false}
     },

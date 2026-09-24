@@ -1,7 +1,7 @@
 {
   "spec": "uvd-interop/1",
   "kind": "event-redelivery",
-  "about": "Reintento de una entrega de evento tras una respuesta perdida: 200 already_processed, no 409 (R5.9), con el nonce nuevo por intento que lo hace posible (R3.6, R3.7). Cada escenario arranca con un buzón vacío que habla el preset evento-s2s y le entrega los intentos en orden. El buzón revisa cada intento en este orden, y decide la primera regla que aplica: (1) si la firma no verifica, 401 signature_invalid, y el nonce no se consume; (2) si ya vio el nonce con la clave (chain_id, wallet, nonce), 409 nonce_replayed; si no, lo consume; (3) si ya procesó (source, event_id), 200 already_processed; (4) si no, lo acepta. La deduplicación va antes que el orden por sequence de R5.10: el reintento de un evento ya procesado es already_processed, no stale_sequence. Un intento es un POST al buzón: el cuerpo es events[event]; keyid y nonce son los parámetros de ese nombre de Signature-Input (keyid es erc8128:<chain_id>:<wallet>); signature dice si la firma verifica (valid) o no (invalid). Los vectores con firmas reales del preset no están en este archivo. by dice quién lo manda: sender, la app que entrega el evento, o third_party, alguien que conoce un nonce en vuelo y manda una firma basura. response_lost marca la respuesta que el emisor nunca vio: el receptor no lo sabe y contesta igual. expect nombra el resultado, y outcomes dice qué respuestas lo son. Una respuesta es de un resultado si su status es el de alguna de sus formas y el body de esa forma está contenido en el cuerpo de la respuesta: cada clave de la forma está en la respuesta, con un valor igual o, si es un objeto, contenido de la misma manera, recursivamente; las claves de más, a cualquier profundidad, no cuentan. Tiene que coincidir exactamente un resultado. sender_conforms dice si los intentos de by = sender cumplen R3.7: para un mismo (source, event_id), ningún nonce se repite, y ninguno es el event_id, con o sin guiones (comparados en minúsculas). Los eventos cumplen schemas/uvd-event-1.schema.json.",
+  "about": "Reintento de una entrega de evento tras una respuesta perdida: 200 already_processed, no 409 (R5.9), con el nonce nuevo por intento que lo hace posible (R3.6, R3.7). Cada escenario arranca con un buzón vacío que habla el preset evento-s2s y le entrega los intentos en orden. El buzón revisa cada intento en este orden, y decide la primera regla que aplica: (1) si la firma no verifica, 401 signature_invalid, y el nonce no se consume; (2) si ya vio el nonce con la clave (chain_id, wallet, nonce), 409 nonce_replayed; si no, lo consume; (3) si ya procesó (source, event_id), 200 already_processed; (4) si no, lo acepta. La deduplicación va antes que el orden por sequence de R5.10: el reintento de un evento ya procesado es already_processed, no stale_sequence. Un intento es un POST al buzón: el cuerpo es events[event]; keyid y nonce son los parámetros de ese nombre de Signature-Input (keyid es erc8128:<chain_id>:<wallet>); signature dice si la firma verifica (valid) o no (invalid). Los vectores con firmas reales del preset no están en este archivo. by dice quién lo manda: sender, la app que entrega el evento, o third_party, alguien que conoce un nonce en vuelo y manda una firma basura. response_lost marca la respuesta que el emisor nunca vio: el receptor no lo sabe y contesta igual. expect nombra el resultado, y outcomes dice qué respuestas lo son. Una respuesta es de un resultado si su status es el de alguna de sus formas y el body de esa forma está contenido en el cuerpo de la respuesta: cada clave de la forma está en la respuesta, con un valor igual o, si es un objeto, contenido de la misma manera, recursivamente; las claves de más, a cualquier profundidad, no cuentan. Tiene que coincidir exactamente un resultado. sender_conforms dice si los intentos de by = sender cumplen R3.6 y R3.7: un mismo firmante (la wallet del keyid, en cualquier cadena) nunca repite un nonce, y ningún nonce es el event_id del evento que lleva, con o sin guiones (comparados en minúsculas). Los eventos cumplen schemas/uvd-event-1.schema.json.",
   "outcomes": {
     "accepted": {
       "any_of": [
@@ -50,6 +50,18 @@
       "actor": {"kind": "app", "id": "lector-ejemplo"},
       "payload": {},
       "trace_id": "0af7651916cd43dd8448eb211c80319c"
+    },
+    "pedido-enviado": {
+      "schema": "uvd.event/1",
+      "event_id": "5b0f3c2a-9e1d-4f7a-b6c8-0d2e4f6a8b1c",
+      "source": "mercado-ejemplo",
+      "type": "mercado-ejemplo.order.shipped",
+      "subject": {"kind": "order", "id": "ord-0001"},
+      "sequence": 4,
+      "occurred_at": "2026-09-24T02:05:00Z",
+      "actor": {"kind": "app", "id": "mercado-ejemplo"},
+      "payload": {"order_id": "ord-0001"},
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
     },
     "resena-creada": {
       "schema": "uvd.event/1",
@@ -114,6 +126,15 @@
       "sender_conforms": false
     },
     {
+      "id": "nonce-igual-al-event-id-en-mayusculas",
+      "rule": "R3.7",
+      "why": "Las mayúsculas no desatan el nonce del evento: se compara en minúsculas.",
+      "attempts": [
+        {"by": "sender", "event": "pedido-pagado", "keyid": "erc8128:8453:0x5eed00000000000000000000000000000000cafe", "nonce": "1D8BF732-5E54-4529-933D-03CE0A6113F0", "signature": "valid", "expect": "accepted"}
+      ],
+      "sender_conforms": false
+    },
+    {
       "id": "firma-basura-no-quema-el-nonce",
       "rule": "R3.6",
       "why": "Alguien que conoce el nonce del reintento lo manda antes con una firma que no verifica: recibe 401 y el nonce no se consume, porque se consume después de verificar. El reintento legítimo, con ese nonce, recibe 200 already_processed y no 409.",
@@ -143,6 +164,16 @@
         {"by": "sender", "event": "resena-creada", "keyid": "erc8128:8453:0x1ec7000000000000000000000000000000000b0b", "nonce": "q7WmZ2vY0tKc4nRb8xLs3A", "signature": "valid", "expect": "accepted"}
       ],
       "sender_conforms": true
+    },
+    {
+      "id": "mismo-wallet-y-nonce-en-otra-cadena",
+      "rule": "R3.6",
+      "why": "La cadena es parte de la clave de los nonces vistos: en un receptor que acepta las dos cadenas, el mismo wallet con el mismo nonce en otra cadena es otro nonce, y los dos intentos pasan. El emisor igual no cumple: un nonce nuevo por intento (R3.6) vale para todas sus entregas, en cualquier cadena.",
+      "attempts": [
+        {"by": "sender", "event": "pedido-pagado", "keyid": "erc8128:8453:0x5eed00000000000000000000000000000000cafe", "nonce": "Nk3xR8pWq2LvT5sYc7dZfA", "signature": "valid", "expect": "accepted"},
+        {"by": "sender", "event": "pedido-enviado", "keyid": "erc8128:1:0x5eed00000000000000000000000000000000cafe", "nonce": "Nk3xR8pWq2LvT5sYc7dZfA", "signature": "valid", "expect": "accepted"}
+      ],
+      "sender_conforms": false
     }
   ]
 }

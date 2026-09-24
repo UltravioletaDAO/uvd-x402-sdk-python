@@ -276,6 +276,22 @@ class TestRed:
         bad.write_text("<html></html>", encoding="utf-8")
         assert _items(run(INTEROP, [bad])) == [str(bad)]
 
+    def test_an_envelope_in_an_ip_ban_body_that_does_not_validate(self, tmp_path: Path) -> None:
+        # The case keeps its verdict (not a ban); what breaks is its example
+        # envelope, and a vector must not carry an invalid uvd_error.
+        interop = _copy_interop(tmp_path)
+
+        def break_envelope(vector: Any) -> None:
+            case = next(c for c in vector["cases"] if c["id"] == "bloqueo-con-uvd-error-al-lado")
+            body = json.loads(case["response"]["body"])
+            body["uvd_error"]["spent"] = "sometimes"
+            case["response"]["body"] = json.dumps(body)
+
+        _edit_json(interop / "vectors" / INDEX["ip-ban"]["file"], break_envelope)
+        report = run(interop)
+        assert _items(report) == ["ip-ban/bloqueo-con-uvd-error-al-lado"]
+        assert "uvd_error" in report.failures[0].detail
+
     def test_a_valid_manifest_fixture_that_breaks_a_runner_rule(self, tmp_path: Path) -> None:
         # What the schema suite let through: en-migracion.json without its mcp
         # endpoint accepted an authority that no endpoint of it serves.
@@ -444,6 +460,21 @@ def _ban_parses_blindly(profile: Any, status: int, headers: Headers, body: str) 
     return profile == "L9" and status == 403 and set(json.loads(body)) == {"error"}
 
 
+def _ban_any_json_with_only_error(profile: Any, status: int, headers: Headers, body: str) -> bool:
+    # No check that the body is an object: set(["error"]) is {"error"} too.
+    try:
+        return profile == "L9" and status == 403 and set(json.loads(body)) == {"error"}
+    except (ValueError, TypeError):
+        return False
+
+
+def _ban_on_403_or_429(profile: Any, status: int, headers: Headers, body: str) -> bool:
+    parsed = _json_object(body)
+    return (
+        profile == "L9" and status in (403, 429) and parsed is not None and set(parsed) == {"error"}
+    )
+
+
 def _ban_ignores_the_profile(profile: Any, status: int, headers: Headers, body: str) -> bool:
     return conformance.is_ip_ban("L9", status, headers, body)
 
@@ -463,15 +494,34 @@ def _ban_needs_a_json_content_type(profile: Any, status: int, headers: Headers, 
 
 
 def _conforms_with(
-    *, names: Callable[[Mapping[str, str]], set], complete: Callable[[set], bool]
-) -> Callable[[str, Mapping[str, str], bool], bool]:
-    def conforms(method: str, headers: Mapping[str, str], needs_identity: bool) -> bool:
+    *,
+    names: Callable[[Mapping[str, str]], set],
+    complete: Callable[[set], bool],
+    decide: Callable[..., bool] = conformance.must_sign,
+) -> Callable[..., bool]:
+    def conforms(
+        method: str, headers: Mapping[str, str], needs_identity: bool, operation: Any = None
+    ) -> bool:
         present = SIGNATURE_HEADERS & names(headers)
-        if conformance.must_sign(method, needs_identity):
+        if decide(method, needs_identity, operation):
             return complete(present)
         return not present
 
     return conforms
+
+
+def _by_method(method: str, needs_identity: bool, operation: Any = None) -> bool:
+    # Ignores the stated operation: every POST is a write, an MCP read too.
+    return method in conformance.WRITE_METHODS or needs_identity
+
+
+def _by(writes: Callable[[str], bool]) -> Callable[..., bool]:
+    """A decision that follows a stated operation and gets the method wrong."""
+
+    def decide(method: str, needs_identity: bool, operation: Any = None) -> bool:
+        return (operation == "write" if operation else writes(method)) or needs_identity
+
+    return decide
 
 
 def _lower(headers: Mapping[str, str]) -> set:
@@ -488,6 +538,7 @@ class _Inbox:
         duplicate: tuple[int, str] = (200, "already_processed"),
         dedupe_by_source: bool = True,
         nonce_key_has_wallet: bool = True,
+        nonce_key_has_chain: bool = True,
         dedupe_before_nonce: bool = False,
         sequence_before_dedupe: bool = False,
     ) -> None:
@@ -495,6 +546,7 @@ class _Inbox:
         self.duplicate = duplicate
         self.dedupe_by_source = dedupe_by_source
         self.nonce_key_has_wallet = nonce_key_has_wallet
+        self.nonce_key_has_chain = nonce_key_has_chain
         self.dedupe_before_nonce = dedupe_before_nonce
         self.sequence_before_dedupe = sequence_before_dedupe
         self.nonces: set = set()
@@ -508,7 +560,12 @@ class _Inbox:
     def deliver(
         self, event: Mapping[str, Any], keyid: str, nonce: str, signature_valid: bool
     ) -> tuple[int, dict[str, Any]]:
-        seen = (keyid, nonce) if self.nonce_key_has_wallet else nonce
+        _, chain_id, wallet = keyid.split(":")
+        seen = (
+            (chain_id if self.nonce_key_has_chain else None),
+            (wallet.lower() if self.nonce_key_has_wallet else None),
+            nonce,
+        )
         dedupe = (
             (event["source"], event["event_id"]) if self.dedupe_by_source else event["event_id"]
         )
@@ -540,6 +597,8 @@ def _sender_with(
     equality: bool = True,
     hyphenless: bool = True,
     only_sender: bool = True,
+    per_signer: bool = True,
+    lower_case: bool = True,
 ) -> Any:
     def conforms(attempts: Any, events: Any) -> bool:
         used: dict[Any, set] = {}
@@ -547,8 +606,13 @@ def _sender_with(
             if only_sender and attempt["by"] != "sender":
                 continue
             event = events[attempt["event"]]
-            nonce = attempt["nonce"].lower()
-            seen = used.setdefault((event["source"], event["event_id"]), set())
+            nonce = attempt["nonce"].lower() if lower_case else attempt["nonce"]
+            key = (
+                attempt["keyid"].split(":")[2].lower()
+                if per_signer
+                else (event["source"], event["event_id"])
+            )
+            seen = used.setdefault(key, set())
             if repeats and attempt["nonce"] in seen:
                 return False
             if equality and nonce == event["event_id"]:
@@ -638,14 +702,34 @@ WRONG: list[tuple[str, str, Implementation]] = [
     _wrong("ip-ban", "every-api-speaks-l9", is_ip_ban=_ban_ignores_the_profile),
     _wrong("ip-ban", "error-must-be-text", is_ip_ban=_ban_error_must_be_text),
     _wrong("ip-ban", "needs-a-json-content-type", is_ip_ban=_ban_needs_a_json_content_type),
-    _wrong("request-signing", "never-sign", must_sign=lambda m, n: False),
-    _wrong("request-signing", "always-sign", must_sign=lambda m, n: True),
-    _wrong("request-signing", "writes-are-only-post", must_sign=lambda m, n: m == "POST" or n),
-    _wrong("request-signing", "a-read-is-only-get", must_sign=lambda m, n: m != "GET" or n),
+    _wrong("ip-ban", "ban-en-403-o-429", is_ip_ban=_ban_on_403_or_429),
+    _wrong("ip-ban", "any-json-with-only-error", is_ip_ban=_ban_any_json_with_only_error),
+    _wrong("request-signing", "never-sign", must_sign=lambda m, n, op=None: False),
+    _wrong("request-signing", "always-sign", must_sign=lambda m, n, op=None: True),
+    _wrong("request-signing", "writes-are-only-post", must_sign=_by(lambda m: m == "POST")),
+    _wrong("request-signing", "a-read-is-only-get", must_sign=_by(lambda m: m != "GET")),
     _wrong(
         "request-signing",
         "reads-are-never-signed",
-        must_sign=lambda m, n: m in conformance.WRITE_METHODS,
+        must_sign=lambda m, n, op=None: conformance.operation_of(m, op) == "write",
+    ),
+    _wrong(
+        "request-signing",
+        "operation-ignored-decides-by-method",
+        must_sign=_by_method,
+        signing_conforms=_conforms_with(
+            names=_lower, complete=lambda p: p == SIGNATURE_HEADERS, decide=_by_method
+        ),
+    ),
+    _wrong(
+        "request-signing",
+        "a-stated-operation-is-a-read",
+        must_sign=lambda m, n, op=None: (op is None and m in conformance.WRITE_METHODS) or n,
+    ),
+    _wrong(
+        "request-signing",
+        "signature-input-basta",
+        signing_conforms=_conforms_with(names=_lower, complete=lambda p: "signature-input" in p),
     ),
     _wrong(
         "request-signing",
@@ -681,6 +765,11 @@ WRONG: list[tuple[str, str, Implementation]] = [
     ),
     _wrong(
         "event-redelivery",
+        "nonce-keyed-without-the-chain",
+        event_inbox=lambda: _Inbox(nonce_key_has_chain=False),
+    ),
+    _wrong(
+        "event-redelivery",
         "dedupe-before-the-nonce",
         event_inbox=lambda: _Inbox(dedupe_before_nonce=True),
     ),
@@ -708,6 +797,16 @@ WRONG: list[tuple[str, str, Implementation]] = [
         "event-redelivery",
         "third-party-counted-as-sender",
         sender_nonces_conform=_sender_with(only_sender=False),
+    ),
+    _wrong(
+        "event-redelivery",
+        "sender-checked-per-event",
+        sender_nonces_conform=_sender_with(per_signer=False),
+    ),
+    _wrong(
+        "event-redelivery",
+        "sender-compares-with-case",
+        sender_nonces_conform=_sender_with(lower_case=False),
     ),
     _wrong_manifest("authority-only-of-its-own-endpoint", own_endpoint_only=True),
     _wrong_manifest("port-443-kept", authority_of=lambda u: u.split("/")[2].lower()),

@@ -77,20 +77,35 @@ def is_ip_ban(profile: str | None, status: int, headers: Mapping[str, str], body
     return isinstance(parsed, dict) and set(parsed) == {"error"}
 
 
-def must_sign(method: str, needs_identity: bool) -> bool:
-    """R3.1: every write is signed, and every read whose receiver needs to know
-    who is calling. A public read is not.
+def operation_of(method: str, operation: str | None = None) -> str:
+    """``"read"`` or ``"write"``: the operation when the caller states it,
+    otherwise the method's (POST, PUT, PATCH and DELETE write). A public MCP
+    read travels by POST, so only the caller can say it reads.
     """
-    return method in WRITE_METHODS or needs_identity
+    if operation is not None:
+        return operation
+    return "write" if method in WRITE_METHODS else "read"
 
 
-def signing_conforms(method: str, headers: Mapping[str, str], needs_identity: bool) -> bool:
+def must_sign(method: str, needs_identity: bool, operation: str | None = None) -> bool:
+    """R3.1: every write is signed, and every read whose receiver needs to know
+    who is calling. A public read is not, an MCP one by POST included.
+    """
+    return operation_of(method, operation) == "write" or needs_identity
+
+
+def signing_conforms(
+    method: str,
+    headers: Mapping[str, str],
+    needs_identity: bool,
+    operation: str | None = None,
+) -> bool:
     """R3.1 on the wire: a request that must be signed carries both signature
     headers; any other request carries neither. Header names are compared
     without case, as HTTP does.
     """
     present = SIGNATURE_HEADERS & {name.lower() for name in headers}
-    if must_sign(method, needs_identity):
+    if must_sign(method, needs_identity, operation):
         return present == SIGNATURE_HEADERS
     return not present
 
@@ -156,18 +171,17 @@ def _uvd_error(code: str, message: str) -> dict[str, Any]:
 def sender_nonces_conform(
     attempts: Sequence[Mapping[str, Any]], events: Mapping[str, Mapping[str, Any]]
 ) -> bool:
-    """R3.7 on the sender's side: for one ``(source, event_id)``, every attempt
-    carries a new nonce, and a nonce is never the ``event_id``, with or without
-    its hyphens.
+    """R3.6 and R3.7 on the sender's side: a signer (the wallet of the keyid,
+    on any chain) never repeats a nonce, and a nonce is never the ``event_id``
+    of the event it carries, with or without its hyphens.
     """
-    used: dict[tuple[str, str], set[str]] = {}
+    used: dict[str, set[str]] = {}
     for attempt in attempts:
         if attempt["by"] != "sender":
             continue
-        event = events[attempt["event"]]
+        event_id = events[attempt["event"]]["event_id"].lower()
         nonce = attempt["nonce"]
-        event_id = event["event_id"].lower()
-        seen = used.setdefault((event["source"], event["event_id"]), set())
+        seen = used.setdefault(parse_keyid(attempt["keyid"])[1], set())
         if nonce in seen or nonce.lower() in (event_id, event_id.replace("-", "")):
             return False
         seen.add(nonce)
@@ -236,8 +250,8 @@ class Implementation:
     """
 
     is_ip_ban: Callable[[str | None, int, Mapping[str, str], str], bool]
-    must_sign: Callable[[str, bool], bool]
-    signing_conforms: Callable[[str, Mapping[str, str], bool], bool]
+    must_sign: Callable[[str, bool, str | None], bool]
+    signing_conforms: Callable[[str, Mapping[str, str], bool, str | None], bool]
     event_inbox: Callable[[], EventInboxLike]
     sender_nonces_conform: Callable[
         [Sequence[Mapping[str, Any]], Mapping[str, Mapping[str, Any]]], bool
@@ -460,12 +474,17 @@ def _request_signing_case(
     method, headers = request["method"], request["headers"]
     if not (isinstance(method, str) and isinstance(headers, dict)):
         raise ValueError("request needs method (text) and headers (object)")
+    if not isinstance(request.get("body", ""), str):
+        raise ValueError("request.body, when present, is the raw body as text")
     needs_identity = _flag(case["needs_identity"], "needs_identity")
+    operation = case.get("operation")
+    if operation is not None:
+        operation = _one_of(operation, ("read", "write"), "operation")
     expect = case["expect"]
     problems = []
     for name, got in (
-        ("must_sign", impl.must_sign(method, needs_identity)),
-        ("conforms", impl.signing_conforms(method, headers, needs_identity)),
+        ("must_sign", impl.must_sign(method, needs_identity, operation)),
+        ("conforms", impl.signing_conforms(method, headers, needs_identity, operation)),
     ):
         want = _flag(expect[name], f"expect.{name}")
         if got is not want:
