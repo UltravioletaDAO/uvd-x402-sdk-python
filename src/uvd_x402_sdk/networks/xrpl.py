@@ -27,10 +27,14 @@ an XRPL call in dollars, name the facilitator's dollar-pegged USDC on XRPL
 `token_decimals` overrides.
 """
 
+from decimal import Decimal
+from typing import Union
+
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
     register_network,
+    to_base_units,
 )
 
 # XRPL fee payer addresses are defined in uvd_x402_sdk.facilitator
@@ -118,17 +122,26 @@ def drops_to_xrp(drops: int) -> float:
     return drops / 1_000_000
 
 
-def xrp_to_drops(xrp: float) -> int:
+def xrp_to_drops(xrp: Union[Decimal, float, int, str]) -> int:
     """
     Convert an XRP amount to drops (6 decimals).
+
+    Converted with :func:`~uvd_x402_sdk.networks.base.to_base_units`, as the
+    settle converts: float noise rounds to the nearest drop (``2.01`` is
+    2010000, where scaling the float gave 2009999), and a real digit below
+    one drop raises.
 
     Args:
         xrp: XRP amount
 
     Returns:
         Amount in drops (1 XRP = 1,000,000 drops)
+
+    Raises:
+        ValueError: If the amount has a real digit below one drop
+            (``1.0000005``), is negative or is not finite.
     """
-    return int(xrp * 1_000_000)
+    return to_base_units(xrp, 6, unit="XRP")
 
 
 def is_valid_xrpl_address(address: str) -> bool:

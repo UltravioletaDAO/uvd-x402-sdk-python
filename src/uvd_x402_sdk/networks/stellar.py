@@ -13,10 +13,14 @@ Stellar USDC Details:
 - Freighter wallet required for signing (Bitget doesn't support Stellar)
 """
 
+from decimal import Decimal
+from typing import Union
+
 from uvd_x402_sdk.networks.base import (
     NetworkConfig,
     NetworkType,
     register_network,
+    to_base_units,
 )
 
 # Stellar fee payer addresses are defined in uvd_x402_sdk.facilitator
@@ -82,17 +86,26 @@ def stroops_to_usd(stroops: int) -> float:
     return stroops / 10_000_000
 
 
-def usd_to_stroops(usd: float) -> int:
+def usd_to_stroops(usd: Union[Decimal, float, int, str]) -> int:
     """
     Convert USD amount to stroops (7 decimals).
+
+    Converted with :func:`~uvd_x402_sdk.networks.base.to_base_units`, as the
+    settle converts: float noise rounds to the nearest stroop (``2.01`` is
+    20100000, where scaling the float gave 20099999), and a real digit below
+    one stroop raises.
 
     Args:
         usd: USD amount
 
     Returns:
         Amount in stroops
+
+    Raises:
+        ValueError: If the amount has a real digit below one stroop
+            (``1.00000005``), is negative or is not finite.
     """
-    return int(usd * 10_000_000)
+    return to_base_units(usd, 7, unit="USDC on Stellar")
 
 
 def is_valid_stellar_address(address: str) -> bool:
