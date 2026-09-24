@@ -114,17 +114,22 @@ evento va a un dead-letter **persistido**, desde el que se puede reentregar.
 
 ### R5.9 · El receptor es idempotente por `(source, event_id)`
 
-Un evento que ya procesó se contesta **200 `{"status": "already_processed"}`**, nunca 409.
+Un evento que ya procesó se contesta **200 `{"status": "already_processed"}`**, nunca 409 por ser un
+duplicado. La autenticación va antes que la deduplicación: una firma que no verifica es un 401, y un
+nonce que ya vio es un 409 `nonce_replayed` ([R3.6](03-autenticacion.md)), sea o no un duplicado el
+evento que trae. Por eso cada intento lleva un nonce nuevo ([R3.7](03-autenticacion.md)).
 
 - **Por qué:** un reintento tras una respuesta perdida es el caso normal de toda entrega con
   reintentos; si se contestara con un error, el despachador lo mandaría a dead-letter o lo daría por
   entregado sin saber si se procesó.
 - **Sale de:** meshrelay (idempotente por `event_id`, 200 `already_processed`).
+- **Vector:** [`vectors/r5-9-reintento-de-entrega.json`](vectors/r5-9-reintento-de-entrega.json).
 
 ### R5.10 · El receptor ordena por `sequence`
 
-Un evento cuya `sequence` es menor o igual a la última que el receptor aplicó para ese sujeto se
-contesta **200 `{"status": "stale_sequence"}`** y no se aplica.
+Un evento **distinto** de los que ya procesó cuya `sequence` es menor o igual a la última que el
+receptor aplicó para ese sujeto se contesta **200 `{"status": "stale_sequence"}`** y no se aplica. La
+deduplicación de R5.9 va antes: el reintento de un evento ya procesado es `already_processed`.
 
 | Respuesta del receptor | Cuándo |
 |---|---|
