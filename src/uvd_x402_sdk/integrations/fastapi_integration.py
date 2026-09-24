@@ -9,7 +9,7 @@ Provides:
 
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, Optional, Tuple, TypeVar, Union
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
@@ -329,9 +329,32 @@ def fastapi_require_payment(
     return decorator
 
 
+def _requested_paths(scope: Any) -> Tuple[str, ...]:
+    """The path this request asks for, as ``protected_paths`` names routes.
+
+    Read from the ASGI scope the application routes on (``scope["path"]``,
+    already decoded, and ``scope["root_path"]``), never from ``request.url``,
+    which Starlette rebuilds from the ``Host`` header and a re-parsed path.
+
+    A protected path is the full path, mount included. The ASGI specification
+    puts ``root_path`` inside ``path`` (current servers do), compared by whole
+    segments; a server that passes it only in ``root_path`` gives two readings,
+    ``root_path + path`` and ``path`` as given (what ``request.url.path``
+    returned there on Starlette after 0.27), and either one matches.
+    """
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path") or ""
+    if not root_path or path == root_path or path.startswith(root_path + "/"):
+        return (path,)
+    return (root_path + path, path)
+
+
 class X402Middleware(BaseHTTPMiddleware):
     """
     Middleware that automatically handles x402 payments for configured paths.
+
+    ``protected_paths`` are matched against the path of the ASGI scope, mount
+    (``root_path``) included, independent of the ``Host`` header.
 
     Example:
         >>> from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
@@ -358,10 +381,11 @@ class X402Middleware(BaseHTTPMiddleware):
         self._protected_paths = protected_paths
 
     async def dispatch(self, request: Request, call_next: Any) -> Any:
-        path = request.url.path
-
         # Check if path is protected
-        if path not in self._protected_paths:
+        path = next(
+            (p for p in _requested_paths(request.scope) if p in self._protected_paths), None
+        )
+        if path is None:
             return await call_next(request)
 
         required_amount = self._protected_paths[path]
