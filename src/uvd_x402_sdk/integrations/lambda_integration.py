@@ -304,7 +304,7 @@ def lambda_handler(
         >>> def calculate_price(event):
         ...     body = json.loads(event.get("body", "{}"))
         ...     pixels = body.get("pixels", 1)
-        ...     return Decimal(str(pixels * 0.01))  # $0.01 per pixel
+        ...     return Decimal(pixels) * Decimal("0.01")  # $0.01 per pixel
         >>>
         >>> @lambda_handler(amount_callback=calculate_price, recipient_address="0x...")
         >>> def handler(event, context, payment_result=None):

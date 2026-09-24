@@ -48,7 +48,7 @@ def handler_method1(event: LambdaEvent, context: Any) -> LambdaResponse:
 
     # Calculate price based on request
     quantity = body.get("quantity", 1)
-    price_usd = Decimal(str(quantity * 0.01))  # $0.01 per unit
+    price_usd = Decimal(quantity) * Decimal("0.01")  # $0.01 per unit
 
     # Process payment or return 402
     result = x402.process_or_require(event, price_usd)
@@ -114,7 +114,7 @@ def calculate_price(event: LambdaEvent) -> Decimal:
     """Calculate price based on request."""
     body = json.loads(event.get("body", "{}"))
     pixels = body.get("pixels", 1)
-    return Decimal(str(pixels * 0.01))  # $0.01 per pixel
+    return Decimal(pixels) * Decimal("0.01")  # $0.01 per pixel
 
 
 @lambda_handler(amount_callback=calculate_price, config=config)
@@ -184,7 +184,7 @@ def purchase_handler(event: LambdaEvent, context: Any) -> LambdaResponse:
 
         # Calculate price ($0.01 per pixel)
         total_pixels = sum(p.get("width", 1) * p.get("height", 1) for p in pixels)
-        price_usd = Decimal(str(total_pixels * 0.01))
+        price_usd = Decimal(total_pixels) * Decimal("0.01")
 
         # Process payment
         result = x402.process_or_require(event, price_usd)
