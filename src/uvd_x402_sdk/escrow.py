@@ -39,6 +39,14 @@ from typing import Any, Literal, Optional
 import httpx
 from pydantic import BaseModel, Field
 
+from uvd_x402_sdk.stack_key import (
+    no_redirect_kwargs,
+    refuse_redirect_hook,
+    stack_key_headers,
+    stack_key_request_kwargs,
+    usable_stack_key,
+)
+
 
 class EscrowStatus(str, Enum):
     """Escrow payment status."""
@@ -201,6 +209,9 @@ class EscrowClient:
         base_url: str = "https://escrow.ultravioletadao.xyz",
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        *,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
         """
         Initialize the Escrow client.
@@ -209,11 +220,22 @@ class EscrowClient:
             base_url: Base URL of the Escrow API
             api_key: API key for authenticated operations
             timeout: Request timeout in seconds
+            stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO
+                (see ``uvd_x402_sdk.stack_key``), sent on every request when
+                ``base_url`` is a facilitator of Ultravioleta DAO, and to no
+                other host (the default ``base_url`` is not one). Not for third
+                parties.
+            stack_key_hosts: Hosts added to ``facilitator.ultravioletadao.xyz``
+                as facilitators the key may travel to.
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
+        self._client = httpx.AsyncClient(
+            timeout=timeout, event_hooks={"response": [refuse_redirect_hook]}
+        )
 
     async def __aenter__(self) -> "EscrowClient":
         return self
@@ -229,7 +251,13 @@ class EscrowClient:
         }
         if authenticated and self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        headers.update(stack_key_headers(self._stack_key, self.base_url, self._stack_key_hosts))
         return headers
+
+    def _request_kwargs(self, authenticated: bool = False) -> dict[str, Any]:
+        """``headers=``, and redirects off when the stack key is among them."""
+        headers = self._get_headers(authenticated)
+        return {"headers": headers, **no_redirect_kwargs(headers)}
 
     async def create_escrow(
         self,
@@ -268,7 +296,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json=payload,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return EscrowPayment.model_validate(response.json())
@@ -287,7 +315,7 @@ class EscrowClient:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/escrow/{escrow_id}"
-        response = await self._client.get(url, headers=self._get_headers())
+        response = await self._client.get(url, **self._request_kwargs())
         response.raise_for_status()
         return EscrowPayment.model_validate(response.json())
 
@@ -309,7 +337,7 @@ class EscrowClient:
         url = f"{self.base_url}/escrow/{escrow_id}/release"
         response = await self._client.post(
             url,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return EscrowPayment.model_validate(response.json())
@@ -349,7 +377,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json=payload,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return RefundRequest.model_validate(response.json())
@@ -380,7 +408,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json=payload,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return RefundRequest.model_validate(response.json())
@@ -403,7 +431,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json={"reason": reason},
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return RefundRequest.model_validate(response.json())
@@ -422,7 +450,7 @@ class EscrowClient:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/refund/{refund_id}"
-        response = await self._client.get(url, headers=self._get_headers())
+        response = await self._client.get(url, **self._request_kwargs())
         response.raise_for_status()
         return RefundRequest.model_validate(response.json())
 
@@ -456,7 +484,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json=payload,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return Dispute.model_validate(response.json())
@@ -479,7 +507,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json={"evidence": evidence},
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return Dispute.model_validate(response.json())
@@ -498,7 +526,7 @@ class EscrowClient:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/dispute/{dispute_id}"
-        response = await self._client.get(url, headers=self._get_headers())
+        response = await self._client.get(url, **self._request_kwargs())
         response.raise_for_status()
         return Dispute.model_validate(response.json())
 
@@ -539,7 +567,7 @@ class EscrowClient:
         response = await self._client.get(
             url,
             params=params,
-            headers=self._get_headers(authenticated=True),
+            **self._request_kwargs(authenticated=True),
         )
         response.raise_for_status()
         return EscrowListResponse.model_validate(response.json())
@@ -580,7 +608,7 @@ class EscrowClient:
         response = await self._client.post(
             url,
             json=payload,
-            headers=self._get_headers(),
+            **self._request_kwargs(),
         )
         response.raise_for_status()
         return response.json()
@@ -594,7 +622,10 @@ class EscrowClient:
         """
         try:
             url = f"{self.base_url}/health"
-            response = await self._client.get(url)
+            response = await self._client.get(
+                url,
+                **stack_key_request_kwargs(self._stack_key, url, self._stack_key_hosts),
+            )
             return response.is_success
         except Exception:
             return False

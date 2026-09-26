@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, Mapping, Optional
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from uvd_x402_sdk.stack_key import no_redirect_kwargs, refuse_redirect, stack_key_headers
+
 ISSUER = "https://facilitator.ultravioletadao.xyz"
 STATES = {"verified", "pending", "confirmed", "rejected", "unknown"}
 
@@ -268,11 +270,24 @@ def fetch_with_receipt(client: Any, url: str, *, context: PurchaseContext,
         return FetchReceiptResult(None, receipt, "unknown", context, error=error)
 
 
-def get_receipt(http: httpx.Client, receipt_id: str, context: PurchaseContext, *, issuer: str = ISSUER) -> FacilitatorReceipt:
+def get_receipt(
+    http: httpx.Client,
+    receipt_id: str,
+    context: PurchaseContext,
+    *,
+    issuer: str = ISSUER,
+    stack_key: str | None = None,
+    stack_key_hosts: list[str] | None = None,
+) -> FacilitatorReceipt:
     # Receipt IDs are paths, not attacker-controlled URLs.
     uuid.UUID(receipt_id)
-    response = http.get(issuer.rstrip("/") + "/receipts/" + receipt_id,
-                        headers={"Authorization": "Bearer " + context.access_token})
+    url = issuer.rstrip("/") + "/receipts/" + receipt_id
+    # `stack_key`: the X-UVD-Stack-Key of a service of Ultravioleta DAO, only
+    # when `issuer` is one of its facilitators (see uvd_x402_sdk.stack_key).
+    headers = {"Authorization": "Bearer " + context.access_token}
+    headers.update(stack_key_headers(stack_key, url, stack_key_hosts))
+    response = http.get(url, headers=headers, **no_redirect_kwargs(headers, http))
+    refuse_redirect(response, "receipt")
     response.raise_for_status()
     receipt = parse_receipt(response.json().get("receipt"))
     if receipt is None or receipt.issuer != issuer or receipt.purchaseId != context.purchase_id:

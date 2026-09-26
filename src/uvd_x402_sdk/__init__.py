@@ -96,6 +96,13 @@ from uvd_x402_sdk.config import (
     MultiPaymentConfig,
     FACILITATOR_FALLBACK_KEY,
 )
+from uvd_x402_sdk.stack_key import (
+    DEFAULT_STACK_KEY_HOSTS,
+    STACK_KEY_ENV,
+    STACK_KEY_HEADER,
+    stack_key_allowed,
+    usable_stack_key,
+)
 from uvd_x402_sdk.bindings import (
     Binding,
     BindingStore,
@@ -127,6 +134,7 @@ from uvd_x402_sdk.exceptions import (
     NoAcceptablePaymentError,
     PolicyRefusedError,
     FacilitatorError,
+    StackKeyRedirectError,
     LookupInconclusiveError,
     RegistrationPendingError,
     ConfigurationError,
@@ -544,6 +552,12 @@ __all__ = [
     "NetworkConfig",
     "MultiPaymentConfig",
     "FACILITATOR_FALLBACK_KEY",
+    # An Ultravioleta DAO service's credential at the facilitator (X-UVD-Stack-Key)
+    "DEFAULT_STACK_KEY_HOSTS",
+    "STACK_KEY_ENV",
+    "STACK_KEY_HEADER",
+    "stack_key_allowed",
+    "usable_stack_key",
     # Decorators
     "require_payment",
     "x402_required",
@@ -559,6 +573,7 @@ __all__ = [
     "NoAcceptablePaymentError",
     "PolicyRefusedError",
     "FacilitatorError",
+    "StackKeyRedirectError",
     "LookupInconclusiveError",
     "RegistrationPendingError",
     "ConfigurationError",
