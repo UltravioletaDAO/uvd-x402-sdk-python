@@ -48,6 +48,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from uvd_x402_sdk.exceptions import FacilitatorError
+from uvd_x402_sdk.stack_key import stack_key_headers, usable_stack_key
 
 #: Default facilitator, matching the rest of the SDK.
 DEFAULT_FACILITATOR_URL = "https://facilitator.ultravioletadao.xyz"
@@ -204,6 +205,10 @@ class TrafficEventStream:
             keepalive is what proves the connection is alive.
         headers: Extra headers, for a facilitator deployment that gates the
             stream behind authorization.
+        stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO,
+            sent when ``base_url`` is a facilitator of Ultravioleta DAO
+            (``stack_key_hosts`` adds hosts); see ``uvd_x402_sdk.stack_key``.
+            Kept out of ``headers``. Not for third parties.
     """
 
     def __init__(
@@ -214,8 +219,12 @@ class TrafficEventStream:
         kinds: Optional[Sequence[str]] = None,
         connect_timeout: float = 10.0,
         headers: Optional[Dict[str, str]] = None,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
         self.base_url = base_url.rstrip("/")
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
         self.networks = {n.lower() for n in networks} if networks else None
         self.kinds = {k.lower() for k in kinds} if kinds else None
         self.headers = {"Accept": "text/event-stream", **(headers or {})}
@@ -230,6 +239,13 @@ class TrafficEventStream:
     @property
     def url(self) -> str:
         return f"{self.base_url}/events"
+
+    def _request_headers(self) -> dict[str, str]:
+        """``headers`` and, for a facilitator of Ultravioleta DAO, the stack key."""
+        return {
+            **self.headers,
+            **stack_key_headers(self._stack_key, self.url, self._stack_key_hosts),
+        }
 
     def _wanted(self, event: TrafficEvent) -> bool:
         if self.kinds is not None and event.kind.lower() not in self.kinds:
@@ -275,7 +291,7 @@ class TrafficEventStream:
         """Yield events until the connection ends or the caller stops iterating."""
         if self._client is None or self._client.is_closed:
             self._client = httpx.Client(timeout=self._timeout)
-        with self._client.stream("GET", self.url, headers=self.headers) as response:
+        with self._client.stream("GET", self.url, headers=self._request_headers()) as response:
             if response.status_code != 200:
                 _raise_for_stream_status(response, response.read().decode("utf-8", "replace"))
             for frame in _sse_events(response.iter_lines()):
@@ -299,7 +315,9 @@ class TrafficEventStream:
     async def __aiter__(self) -> AsyncIterator[TrafficEvent]:
         if self._aclient is None or self._aclient.is_closed:
             self._aclient = httpx.AsyncClient(timeout=self._timeout)
-        async with self._aclient.stream("GET", self.url, headers=self.headers) as response:
+        async with self._aclient.stream(
+            "GET", self.url, headers=self._request_headers()
+        ) as response:
             if response.status_code != 200:
                 body = (await response.aread()).decode("utf-8", "replace")
                 _raise_for_stream_status(response, body)

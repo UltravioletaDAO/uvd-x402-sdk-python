@@ -35,6 +35,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
+from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
+
 #: Maximum length of the free-text `q` filter. Mirrors the facilitator's
 #: `MAX_SEARCH_LEN`; longer needles are rejected server-side with a 400.
 MAX_SEARCH_LEN = 128
@@ -258,10 +260,22 @@ class BazaarClient:
         self,
         base_url: str = "https://facilitator.ultravioletadao.xyz",
         timeout: float = 30.0,
+        *,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
+        """``stack_key``: the ``X-UVD-Stack-Key`` of a service of Ultravioleta
+        DAO, sent on every request when ``base_url`` is a facilitator of
+        Ultravioleta DAO (``stack_key_hosts`` adds hosts); see
+        ``uvd_x402_sdk.stack_key``. Not for third parties."""
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
         self._client = httpx.AsyncClient(timeout=timeout)
+
+    def _stack_key_kwargs(self) -> dict[str, Any]:
+        return stack_key_request_kwargs(self._stack_key, self.base_url, self._stack_key_hosts)
 
     async def __aenter__(self) -> "BazaarClient":
         return self
@@ -331,7 +345,7 @@ class BazaarClient:
         params.update({k: v for k, v in optional.items() if v is not None})
 
         url = f"{self.base_url}/discovery/resources"
-        response = await self._client.get(url, params=params)
+        response = await self._client.get(url, params=params, **self._stack_key_kwargs())
         response.raise_for_status()
         return DiscoveryResponse.model_validate(response.json())
 
@@ -383,6 +397,6 @@ class BazaarClient:
             payload["metadata"] = metadata
 
         endpoint = f"{self.base_url}/discovery/register"
-        response = await self._client.post(endpoint, json=payload)
+        response = await self._client.post(endpoint, json=payload, **self._stack_key_kwargs())
         response.raise_for_status()
         return response.json()

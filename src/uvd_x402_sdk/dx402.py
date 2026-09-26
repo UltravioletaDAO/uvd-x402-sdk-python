@@ -30,6 +30,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from uvd_x402_sdk.stack_key import stack_key_request_kwargs
+
 __all__ = [
     "payment_challenge_from",
     "available_backends",
@@ -1069,6 +1071,8 @@ def anchor_evidence(
     facilitator: str = "https://facilitator.ultravioletadao.xyz",
     timeout: float = 15.0,
     client: "object | None" = None,
+    stack_key: str | None = None,
+    stack_key_hosts: list[str] | None = None,
 ) -> dict:
     """Seal a response body, anchor it, and return the `X-Durable-Evidence` value.
 
@@ -1104,6 +1108,9 @@ def anchor_evidence(
       it receives the digest and returns the signature without the seed ever
       leaving it. Without a signer the anchor is **provisional** — it holds the
       slot but a signed anchor for the same payment supersedes it.
+    - `stack_key`: the `X-UVD-Stack-Key` of a service of Ultravioleta DAO, sent
+      only when `facilitator` is one of its facilitators (`stack_key_hosts`
+      adds hosts); see `uvd_x402_sdk.stack_key`. Not for third parties.
     """
     try:
         recipients = [(ROLE_PAYER, payer_key)]
@@ -1166,14 +1173,14 @@ def anchor_evidence(
         if pointer is None and len(json.dumps(payload).encode()) > ANCHOR_MAX_REQUEST_BYTES:
             return {"v": 1, "skipped": "too_large"}
 
+        url = f"{facilitator.rstrip('/')}/dx402/anchor"
+        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts)
         if client is None:
             import httpx
 
-            response = httpx.post(
-                f"{facilitator.rstrip('/')}/dx402/anchor", json=payload, timeout=timeout
-            )
+            response = httpx.post(url, json=payload, timeout=timeout, **key)
         else:
-            response = client.post(f"{facilitator.rstrip('/')}/dx402/anchor", json=payload)
+            response = client.post(url, json=payload, **key)
 
         # Carry the facilitator's own diagnosis out rather than flattening every
         # failure to "anchor_failed". A rejected signature answers 422
@@ -1204,6 +1211,8 @@ def available_backends(
     *,
     timeout: float = 10.0,
     client: "object | None" = None,
+    stack_key: str | None = None,
+    stack_key_hosts: list[str] | None = None,
 ) -> list:
     """Ask a facilitator which storage backends it actually offers.
 
@@ -1228,12 +1237,13 @@ def available_backends(
     """
     try:
         url = f"{facilitator.rstrip('/')}/dx402/stats"
+        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts)
         if client is None:
             import httpx
 
-            response = httpx.get(url, timeout=timeout)
+            response = httpx.get(url, timeout=timeout, **key)
         else:
-            response = client.get(url)
+            response = client.get(url, **key)
         if response.status_code >= 400:
             return []
         return response.json().get("backends") or []

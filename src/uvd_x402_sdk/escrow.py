@@ -39,6 +39,8 @@ from typing import Any, Literal, Optional
 import httpx
 from pydantic import BaseModel, Field
 
+from uvd_x402_sdk.stack_key import stack_key_headers, stack_key_request_kwargs, usable_stack_key
+
 
 class EscrowStatus(str, Enum):
     """Escrow payment status."""
@@ -201,6 +203,9 @@ class EscrowClient:
         base_url: str = "https://escrow.ultravioletadao.xyz",
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        *,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
         """
         Initialize the Escrow client.
@@ -209,10 +214,19 @@ class EscrowClient:
             base_url: Base URL of the Escrow API
             api_key: API key for authenticated operations
             timeout: Request timeout in seconds
+            stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO
+                (see ``uvd_x402_sdk.stack_key``), sent on every request when
+                ``base_url`` is a facilitator of Ultravioleta DAO, and to no
+                other host (the default ``base_url`` is not one). Not for third
+                parties.
+            stack_key_hosts: Hosts added to ``facilitator.ultravioletadao.xyz``
+                as facilitators the key may travel to.
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
         self._client = httpx.AsyncClient(timeout=timeout)
 
     async def __aenter__(self) -> "EscrowClient":
@@ -229,6 +243,7 @@ class EscrowClient:
         }
         if authenticated and self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        headers.update(stack_key_headers(self._stack_key, self.base_url, self._stack_key_hosts))
         return headers
 
     async def create_escrow(
@@ -594,7 +609,10 @@ class EscrowClient:
         """
         try:
             url = f"{self.base_url}/health"
-            response = await self._client.get(url)
+            response = await self._client.get(
+                url,
+                **stack_key_request_kwargs(self._stack_key, url, self._stack_key_hosts),
+            )
             return response.is_success
         except Exception:
             return False

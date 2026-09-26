@@ -75,6 +75,7 @@ from eth_account.messages import encode_typed_data
 from web3 import Web3
 
 from uvd_x402_sdk.networks import get_network_by_chain_id
+from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
 
 if TYPE_CHECKING:
     from uvd_x402_sdk.wallet import WalletAdapter
@@ -697,6 +698,8 @@ class AdvancedEscrowClient:
         contracts: Optional[dict] = None,
         operator_address: Optional[str] = None,
         gas_limit: int = 300000,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
         """
         Initialize the Advanced Escrow client.
@@ -721,6 +724,12 @@ class AdvancedEscrowClient:
                               the multi-chain registry (which only provides the factory).
                               Ignored when explicit ``contracts`` dict is passed.
             gas_limit: Gas limit for on-chain transactions
+            stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO
+                (see ``uvd_x402_sdk.stack_key``), sent on the escrow settles and
+                the state query when ``facilitator_url`` is a facilitator of
+                Ultravioleta DAO; never to the RPC. Not for third parties.
+            stack_key_hosts: Hosts added to ``facilitator.ultravioletadao.xyz``
+                as facilitators the key may travel to.
 
         Raises:
             ValueError: If neither ``private_key`` nor ``wallet`` is provided,
@@ -754,6 +763,8 @@ class AdvancedEscrowClient:
             self.payer = wallet.get_address()
 
         self.facilitator_url = facilitator_url.rstrip("/")
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
         self.chain_id = chain_id
         self.gas_limit = gas_limit
 
@@ -1102,6 +1113,7 @@ class AdvancedEscrowClient:
                 f"{self.facilitator_url}/settle",
                 json=payload,
                 timeout=120,
+                **self._stack_key_kwargs(),
             )
             result = response.json()
 
@@ -1205,6 +1217,16 @@ class AdvancedEscrowClient:
     # Gasless facilitator-proxied methods (v1.32.0+)
     # ----------------------------------------------------------------
 
+    def _stack_key_kwargs(self) -> dict:
+        """The ``headers=`` keyword of a request to the facilitator: the stack
+        key, or nothing at all (the call is then made exactly as before). A
+        client built without ``__init__`` has no key."""
+        return stack_key_request_kwargs(
+            getattr(self, "_stack_key", None),
+            self.facilitator_url,
+            getattr(self, "_stack_key_hosts", None),
+        )
+
     def _payment_info_to_camel_dict(self, pi: PaymentInfo) -> dict:
         """Convert a PaymentInfo dataclass to a camelCase dict for the facilitator API."""
         return {
@@ -1305,6 +1327,7 @@ class AdvancedEscrowClient:
                 f"{self.facilitator_url}/settle",
                 json=payload,
                 timeout=120,
+                **self._stack_key_kwargs(),
             )
             result = response.json()
 
@@ -1467,6 +1490,7 @@ class AdvancedEscrowClient:
             f"{self.facilitator_url}/escrow/state",
             json=payload,
             timeout=30,
+            **self._stack_key_kwargs(),
         )
         result = response.json()
 
