@@ -75,7 +75,11 @@ from eth_account.messages import encode_typed_data
 from web3 import Web3
 
 from uvd_x402_sdk.networks import get_network_by_chain_id
-from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
+from uvd_x402_sdk.stack_key import (
+    refuse_redirect,
+    stack_key_request_kwargs,
+    usable_stack_key,
+)
 
 if TYPE_CHECKING:
     from uvd_x402_sdk.wallet import WalletAdapter
@@ -1115,6 +1119,7 @@ class AdvancedEscrowClient:
                 timeout=120,
                 **self._stack_key_kwargs(),
             )
+            refuse_redirect(response, "settle")
             result = response.json()
 
             if result.get("success"):
@@ -1329,6 +1334,7 @@ class AdvancedEscrowClient:
                 timeout=120,
                 **self._stack_key_kwargs(),
             )
+            refuse_redirect(response, "settle")
             result = response.json()
 
             if result.get("success"):
@@ -1492,6 +1498,7 @@ class AdvancedEscrowClient:
             timeout=30,
             **self._stack_key_kwargs(),
         )
+        refuse_redirect(response, "escrow_state")
         result = response.json()
 
         if "error" in result or "errorReason" in result:

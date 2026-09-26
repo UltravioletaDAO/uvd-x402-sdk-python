@@ -35,7 +35,11 @@ from typing import Any, Dict, List, Optional
 import httpx
 from pydantic import BaseModel, Field, field_validator
 
-from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
+from uvd_x402_sdk.stack_key import (
+    refuse_redirect_hook,
+    stack_key_request_kwargs,
+    usable_stack_key,
+)
 
 #: Maximum length of the free-text `q` filter. Mirrors the facilitator's
 #: `MAX_SEARCH_LEN`; longer needles are rejected server-side with a 400.
@@ -272,7 +276,9 @@ class BazaarClient:
         self.timeout = timeout
         self._stack_key = usable_stack_key(stack_key)
         self._stack_key_hosts = stack_key_hosts
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx.AsyncClient(
+            timeout=timeout, event_hooks={"response": [refuse_redirect_hook]}
+        )
 
     def _stack_key_kwargs(self) -> dict[str, Any]:
         return stack_key_request_kwargs(self._stack_key, self.base_url, self._stack_key_hosts)

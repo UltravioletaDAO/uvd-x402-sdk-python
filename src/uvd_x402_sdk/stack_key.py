@@ -22,26 +22,43 @@ plain ``http``, a facilitator that ``facilitator_by_network`` routes to a third
 party) gets no header, and a warning says so once per process, naming the host
 and nothing about the key. Plain ``http`` is accepted only to ``127.0.0.1`` or
 ``localhost``, and only when ``stack_key_hosts`` names it: a local stand-in for
-tests.
+tests. The host is the one the HTTP library will contact, read by that
+library's own parser (httpx, and urllib3 for a ``requests`` session): a URL
+they read as different hosts gets the key only if every reading is allowed.
+
+The key does not follow redirects. A request that carries it is sent with
+redirects off, whatever the HTTP client would do, and a redirect answered to
+it raises :class:`~uvd_x402_sdk.exceptions.StackKeyRedirectError`; the key is
+never sent again.
 
 A key read badly must never break a payment. A value read from a file with a
-trailing carriage return or line feed is an invalid header value: httpx raises
-``LocalProtocolError`` before sending, with the value in its message, so every
-``/verify`` and ``/settle`` of the client would fail and the key would land in
-the error. The value is therefore stripped and checked against the format, and
-one that does not match is not sent: the request goes as a third party's, the
-payment goes through, and a warning says so once per process, without the
-value. The key never appears in an error, a log, a repr or a message.
+byte order mark, or a trailing carriage return or line feed, is an invalid
+header value: httpx raises ``LocalProtocolError`` before sending, with the
+value in its message, so every ``/verify`` and ``/settle`` of the client would
+fail and the key would land in the error. So a leading U+FEFF and the
+whitespace at both ends are removed, the rest is checked against the format,
+and a value that does not match is not sent: the request goes as a third
+party's, the payment goes through, and a warning says so once per process,
+without the value. The key never appears in an error, a log, a repr, a pickle
+or a ``dataclasses.asdict``.
 
 Without a key to send, a request is made exactly as before this existed: no
-``headers`` keyword is added where there was none.
+``headers`` or redirect keyword is added where there was none.
 """
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any, Optional, Union
-from urllib.parse import urlsplit
+
+import httpx
+
+from uvd_x402_sdk.exceptions import StackKeyRedirectError
+
+try:  # the parser of a ``requests`` session; urllib3 comes with requests
+    from urllib3.util import parse_url as _urllib3_parse_url
+except ImportError:  # pragma: no cover - only without urllib3
+    _urllib3_parse_url = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -62,57 +79,79 @@ StackKeyHosts = Optional[Union[str, Iterable[str]]]
 
 _STACK_KEY_FORMAT = re.compile(r"uvdsk_[A-Za-z0-9_-]{43,128}")
 
+_BYTE_ORDER_MARK = "﻿"
+
 # Set by the first warning of each kind: one per process, whatever the number
 # of clients or requests.
 _warned = False
 _warned_host = False
 
 
+class _StackKey(str):
+    """A usable key: the ``str`` a header needs, which no dump carries.
+
+    ``repr`` hides it, so a ``repr``, ``vars()`` or ``dataclasses.asdict()`` of
+    whatever holds it does not show it; pickling or deep-copying it gives
+    ``None``, so ``pickle.dumps(config)``, ``copy.deepcopy(config)`` and
+    ``dataclasses.asdict(config)`` carry no key (configure it again where the
+    copy is used). ``str(key)`` is the plain value.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "'<X-UVD-Stack-Key>'"
+
+    def __reduce_ex__(self, protocol: Any) -> Any:
+        return (_no_stack_key, ())
+
+
+def _no_stack_key() -> None:
+    return None
+
+
 def usable_stack_key(value: object) -> Optional[str]:
     """The key to send for ``value``, or ``None`` when nothing is sent.
 
-    ``None`` and a blank string mean no key was configured. Any other value is
-    stripped and must match the format; one that does not (or is not a string)
-    gives ``None`` and a warning, the first time only, that never carries the
-    value. Never raises.
+    ``None`` and a blank string mean no key was configured. Any other value
+    loses a leading U+FEFF and the whitespace at both ends and must then match
+    the format; one that does not (or is not a string) gives ``None`` and a
+    warning, the first time only, that never carries the value. Never raises.
     """
     if value is None:
         return None
     if isinstance(value, str):
         key = value.strip()
+        if key.startswith(_BYTE_ORDER_MARK):
+            key = key[1:].strip()
         if not key:
             return None
         if _STACK_KEY_FORMAT.fullmatch(key):
-            return key
+            return _StackKey(key)
     _warn_unusable()
     return None
 
 
-def stack_key_allowed(url: str, hosts: StackKeyHosts = None) -> bool:
+def stack_key_allowed(url: Union[str, httpx.URL], hosts: StackKeyHosts = None) -> bool:
     """Whether the key may travel to ``url``.
 
     ``https`` to a host of :data:`DEFAULT_STACK_KEY_HOSTS` or of ``hosts``;
     plain ``http`` only to ``127.0.0.1`` or ``localhost`` named in ``hosts``.
-    Hosts compare whole and case-insensitively: no prefix, no subdomain, no
-    port. Never raises.
+    The host is the one httpx will contact (``httpx.URL``), lowercased and
+    without a final dot, compared whole: no prefix, no subdomain, no port.
+    When urllib3 (a ``requests`` session) reads another host in the same URL,
+    that reading must be allowed too. Never raises.
     """
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-    except (TypeError, ValueError):
-        return False
-    if not host:
+    readings = _readings(url)
+    if not readings:
         return False
     listed = _listed(hosts)
-    scheme = parts.scheme.lower()
-    if scheme == "https":
-        return host in DEFAULT_STACK_KEY_HOSTS or host in listed
-    if scheme == "http":
-        return host in _LOOPBACK_HOSTS and host in listed
-    return False
+    return all(_reading_allowed(scheme, host, listed) for scheme, host in readings)
 
 
-def stack_key_headers(value: object, url: str, hosts: StackKeyHosts = None) -> dict[str, str]:
+def stack_key_headers(
+    value: object, url: Union[str, httpx.URL], hosts: StackKeyHosts = None
+) -> dict[str, str]:
     """``{"X-UVD-Stack-Key": key}`` for a request to ``url``, or ``{}``.
 
     ``{}`` when ``value`` is no usable key, or when the key may not travel to
@@ -124,23 +163,102 @@ def stack_key_headers(value: object, url: str, hosts: StackKeyHosts = None) -> d
     if not stack_key_allowed(url, hosts):
         _warn_host(url)
         return {}
-    return {STACK_KEY_HEADER: key}
+    return {STACK_KEY_HEADER: str(key)}
+
+
+def no_redirect_kwargs(
+    headers: Optional[Mapping[str, str]], client: object = None
+) -> dict[str, Any]:
+    """The keyword that keeps ``client`` from following a redirect, when
+    ``headers`` carry the key; ``{}`` otherwise.
+
+    ``allow_redirects=False`` for a ``requests`` session, ``follow_redirects=False``
+    for httpx (a client, or the module's functions when ``client`` is None).
+    Per request, so it holds whatever the caller's client was built with.
+    """
+    if not headers or STACK_KEY_HEADER not in headers:
+        return {}
+    if type(client).__module__.split(".")[0] == "requests":
+        return {"allow_redirects": False}
+    return {"follow_redirects": False}
 
 
 def stack_key_request_kwargs(
     value: object,
-    url: str,
+    url: Union[str, httpx.URL],
     hosts: StackKeyHosts = None,
     headers: Optional[dict[str, str]] = None,
+    client: object = None,
 ) -> dict[str, Any]:
-    """The ``headers=`` keyword of a request to ``url``: ``headers`` and the key.
+    """The keywords of a request to ``url``: ``headers`` and the key, and
+    redirects off when the key is among them.
 
     Empty when there is nothing to send, so that a request without a key is
     made exactly as before (a caller's double of the HTTP client that knows no
     ``headers`` keyword keeps working).
     """
     merged = {**(headers or {}), **stack_key_headers(value, url, hosts)}
-    return {"headers": merged} if merged else {}
+    if not merged:
+        return {}
+    return {"headers": merged, **no_redirect_kwargs(merged, client)}
+
+
+def refuse_redirect(response: Any, operation: Optional[str] = None) -> None:
+    """Raise :class:`~uvd_x402_sdk.exceptions.StackKeyRedirectError` when
+    ``response`` answers a request that carried the key with a redirect.
+
+    That request went with redirects off, so nothing followed it; this makes
+    the redirect an error instead of an answer, and nothing is sent again. A
+    request without the key, or an answer that is not a 3xx, passes.
+    """
+    status = getattr(response, "status_code", None)
+    if not isinstance(status, int) or not 300 <= status < 400:
+        return
+    try:
+        sent = response.request.headers
+    except Exception:  # noqa: BLE001 - a double without the request it answered
+        return
+    if sent is not None and STACK_KEY_HEADER in sent:
+        raise StackKeyRedirectError(status, operation)
+
+
+async def refuse_redirect_hook(response: httpx.Response) -> None:
+    """:func:`refuse_redirect` as a response hook of an ``httpx.AsyncClient``."""
+    refuse_redirect(response)
+
+
+def _readings(url: Union[str, httpx.URL]) -> list[tuple[str, str]]:
+    """``(scheme, host)`` as each library the SDK sends through reads ``url``:
+    httpx, and urllib3 when installed. Empty when one of them cannot read it."""
+    try:
+        parsed = httpx.URL(url)
+    except Exception:  # noqa: BLE001 - unreadable = no key
+        return []
+    readings = [(parsed.scheme, parsed.host)]
+    if _urllib3_parse_url is not None:
+        try:
+            other = _urllib3_parse_url(str(url))
+        except Exception:  # noqa: BLE001
+            return []
+        readings.append((other.scheme or "", other.host or ""))
+    return readings
+
+
+def _normal_host(host: str) -> str:
+    host = host.strip("[]").lower()
+    return host[:-1] if host.endswith(".") else host
+
+
+def _reading_allowed(scheme: str, host: str, listed: frozenset) -> bool:
+    host = _normal_host(host)
+    if not host:
+        return False
+    scheme = scheme.lower()
+    if scheme == "https":
+        return host in DEFAULT_STACK_KEY_HOSTS or host in listed
+    if scheme == "http":
+        return host in _LOOPBACK_HOSTS and host in listed
+    return False
 
 
 def _listed(hosts: StackKeyHosts) -> frozenset:
@@ -148,20 +266,20 @@ def _listed(hosts: StackKeyHosts) -> frozenset:
         return frozenset()
     if isinstance(hosts, str):
         hosts = [hosts]
-    return frozenset(h.strip().lower() for h in hosts if isinstance(h, str))
+    return frozenset(_normal_host(h.strip()) for h in hosts if isinstance(h, str))
 
 
-def _origin(url: str) -> str:
-    """``scheme://host[:port]`` of ``url``: never its user info or its path."""
+def _origin(url: Union[str, httpx.URL]) -> str:
+    """``scheme://host[:port]`` of ``url`` as httpx reads it: never its user
+    info or its path."""
     try:
-        parts = urlsplit(url)
-        host = parts.hostname
-        port = parts.port
-    except (TypeError, ValueError):
+        parsed = httpx.URL(url)
+    except Exception:  # noqa: BLE001
         return "an unparseable URL"
-    if not host:
+    if not parsed.host:
         return "a URL without a host"
-    return f"{parts.scheme.lower()}://{host}" + (f":{port}" if port else "")
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{parsed.host}{port}"
 
 
 def _warn_unusable() -> None:
@@ -179,7 +297,7 @@ def _warn_unusable() -> None:
     )
 
 
-def _warn_host(url: str) -> None:
+def _warn_host(url: Union[str, httpx.URL]) -> None:
     global _warned_host
     if _warned_host:
         return

@@ -48,7 +48,12 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from uvd_x402_sdk.exceptions import FacilitatorError
-from uvd_x402_sdk.stack_key import stack_key_headers, usable_stack_key
+from uvd_x402_sdk.stack_key import (
+    no_redirect_kwargs,
+    refuse_redirect,
+    stack_key_headers,
+    usable_stack_key,
+)
 
 #: Default facilitator, matching the rest of the SDK.
 DEFAULT_FACILITATOR_URL = "https://facilitator.ultravioletadao.xyz"
@@ -291,7 +296,11 @@ class TrafficEventStream:
         """Yield events until the connection ends or the caller stops iterating."""
         if self._client is None or self._client.is_closed:
             self._client = httpx.Client(timeout=self._timeout)
-        with self._client.stream("GET", self.url, headers=self._request_headers()) as response:
+        headers = self._request_headers()
+        with self._client.stream(
+            "GET", self.url, headers=headers, **no_redirect_kwargs(headers)
+        ) as response:
+            refuse_redirect(response)
             if response.status_code != 200:
                 _raise_for_stream_status(response, response.read().decode("utf-8", "replace"))
             for frame in _sse_events(response.iter_lines()):
@@ -315,9 +324,11 @@ class TrafficEventStream:
     async def __aiter__(self) -> AsyncIterator[TrafficEvent]:
         if self._aclient is None or self._aclient.is_closed:
             self._aclient = httpx.AsyncClient(timeout=self._timeout)
+        headers = self._request_headers()
         async with self._aclient.stream(
-            "GET", self.url, headers=self._request_headers()
+            "GET", self.url, headers=headers, **no_redirect_kwargs(headers)
         ) as response:
+            refuse_redirect(response)
             if response.status_code != 200:
                 body = (await response.aread()).decode("utf-8", "replace")
                 _raise_for_stream_status(response, body)

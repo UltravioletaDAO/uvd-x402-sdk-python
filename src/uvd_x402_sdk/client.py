@@ -46,6 +46,7 @@ from uvd_x402_sdk.exceptions import (
     PaymentExceedsMaxError,
     NoAcceptablePaymentError,
     PolicyRefusedError,
+    StackKeyRedirectError,
     MAX_RETRY_AFTER_SECONDS,
     _REF_SUFFIX,
     body_tx_hash,
@@ -61,7 +62,12 @@ from uvd_x402_sdk.models import (
     SettleResponse,
 )
 from uvd_x402_sdk.receipts import payment_response_headers
-from uvd_x402_sdk.stack_key import stack_key_headers, stack_key_request_kwargs
+from uvd_x402_sdk.stack_key import (
+    no_redirect_kwargs,
+    refuse_redirect,
+    stack_key_headers,
+    stack_key_request_kwargs,
+)
 from uvd_x402_sdk.policy import (
     AdvertisedQuote,
     Offer,
@@ -1473,8 +1479,11 @@ class X402Client:
                 timeout=self.config.verify_timeout,
                 **self._facilitator_kwargs(facilitator_url),
             )
+            refuse_redirect(response)
             response.raise_for_status()
             data = response.json()
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"GET {facilitator_url}/supported failed: {e.response.status_code}",
@@ -1992,12 +2001,15 @@ class X402Client:
         try:
             client = self._get_http_client()
             facilitator_url = self.facilitator_url_for(payload.network)
+            headers = self._facilitator_headers(facilitator_url, binding.headers())
             response = client.post(
                 f"{facilitator_url}/verify",
                 json=verify_request,
-                headers=self._facilitator_headers(facilitator_url, binding.headers()),
+                headers=headers,
                 timeout=self.config.verify_timeout,
+                **no_redirect_kwargs(headers),
             )
+            refuse_redirect(response, "verify")
 
             if response.status_code != 200:
                 raise FacilitatorError(
@@ -2312,7 +2324,9 @@ class X402Client:
                 json=settle_request,
                 headers=headers,
                 timeout=settle_timeout,
+                **no_redirect_kwargs(headers),
             )
+            refuse_redirect(response, "settle")
 
             if response.status_code != 200:
                 refusal = FacilitatorError(
@@ -2443,6 +2457,9 @@ class X402Client:
                 without a binding never gets the success back.
         """
         url = facilitator_url or self.config.facilitator_url
+        sent_headers = headers or self._facilitator_headers(
+            url, {"Content-Type": "application/json"}
+        )
         client = self._get_http_client()
         deadline = time.monotonic() + SETTLE_IN_FLIGHT_POLL_SECONDS
         in_flight: Optional[FacilitatorError] = None
@@ -2451,10 +2468,11 @@ class X402Client:
                 response = client.post(
                     f"{url}/settle",
                     json=settle_request,
-                    headers=headers
-                    or self._facilitator_headers(url, {"Content-Type": "application/json"}),
+                    headers=sent_headers,
                     timeout=30.0,  # Short timeout for fallback check
+                    **no_redirect_kwargs(sent_headers),
                 )
+                refuse_redirect(response, "settle")
                 if response.status_code == 200:
                     settle_response = SettleResponse(**response.json())
                     if settle_response.success:
@@ -2681,17 +2699,22 @@ class X402Client:
 
         try:
             client = self._get_http_client()
+            headers = self._facilitator_headers(
+                facilitator_url, {"Content-Type": "application/json"}
+            )
             response = client.post(
                 url,
                 json=payload,
-                headers=self._facilitator_headers(
-                    facilitator_url, {"Content-Type": "application/json"}
-                ),
+                headers=headers,
                 timeout=self.config.verify_timeout,
+                **no_redirect_kwargs(headers),
             )
+            refuse_redirect(response, "accepts")
             response.raise_for_status()
             data = response.json()
             return data.get("accepts", [])
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"Facilitator /accepts error: {e.response.status_code}",
@@ -2747,8 +2770,11 @@ class X402Client:
                 f"{self.config.facilitator_url}/version",
                 **self._facilitator_kwargs(self.config.facilitator_url),
             )
+            refuse_redirect(response)
             response.raise_for_status()
             return response.json()
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"GET /version failed: {e.response.status_code}",
@@ -2784,8 +2810,11 @@ class X402Client:
             response = client.get(
                 f"{base_url}/supported", **self._facilitator_kwargs(base_url)
             )
+            refuse_redirect(response)
             response.raise_for_status()
             return response.json()
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"GET /supported failed: {e.response.status_code}",
@@ -2859,8 +2888,11 @@ class X402Client:
                 f"{self.config.facilitator_url}{path}",
                 **self._facilitator_kwargs(self.config.facilitator_url),
             )
+            refuse_redirect(response)
             response.raise_for_status()
             return response.json()
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"GET {path} failed: {e.response.status_code}",
@@ -2890,8 +2922,11 @@ class X402Client:
                 f"{self.config.facilitator_url}/blacklist",
                 **self._facilitator_kwargs(self.config.facilitator_url),
             )
+            refuse_redirect(response)
             response.raise_for_status()
             return response.json()
+        except StackKeyRedirectError:
+            raise
         except httpx.HTTPStatusError as e:
             raise FacilitatorError(
                 message=f"GET /blacklist failed: {e.response.status_code}",

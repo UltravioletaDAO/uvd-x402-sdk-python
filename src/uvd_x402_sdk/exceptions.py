@@ -682,6 +682,32 @@ class FacilitatorError(X402Error):
         )
 
 
+#: ``reason`` of :class:`StackKeyRedirectError`.
+STACK_KEY_REDIRECT = "stack_key_redirect"
+
+
+class StackKeyRedirectError(FacilitatorError):
+    """A request that carried ``X-UVD-Stack-Key`` was answered with a redirect.
+
+    Such a request is sent with redirects off, whatever the HTTP client would
+    do, so nothing followed it, and the key is never sent again: the target
+    of a redirect is not a host the key was checked against. Raised where the
+    facilitator's other invalid answers are.
+    """
+
+    def __init__(self, status_code: int, operation: Optional[str] = None) -> None:
+        super().__init__(
+            message=(
+                f"The facilitator answered {status_code} (a redirect) to a request "
+                "that carried X-UVD-Stack-Key: the key does not follow redirects, "
+                "and the request was not sent again"
+            ),
+            status_code=status_code,
+            reason=STACK_KEY_REDIRECT,
+            operation=operation,
+        )
+
+
 class LookupInconclusiveError(X402Error):
     """
     Raised when a lookup could not reach a verdict and should be retried.

@@ -30,7 +30,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-from uvd_x402_sdk.stack_key import stack_key_request_kwargs
+from uvd_x402_sdk.exceptions import StackKeyRedirectError
+from uvd_x402_sdk.stack_key import refuse_redirect, stack_key_request_kwargs
 
 __all__ = [
     "payment_challenge_from",
@@ -1174,13 +1175,22 @@ def anchor_evidence(
             return {"v": 1, "skipped": "too_large"}
 
         url = f"{facilitator.rstrip('/')}/dx402/anchor"
-        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts)
+        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts, client=client)
         if client is None:
             import httpx
 
             response = httpx.post(url, json=payload, timeout=timeout, **key)
         else:
             response = client.post(url, json=payload, **key)
+        try:
+            refuse_redirect(response, "anchor")
+        except StackKeyRedirectError as redirect:
+            return {
+                "v": 1,
+                "skipped": "anchor_failed",
+                "status": redirect.status_code,
+                "error": redirect.reason,
+            }
 
         # Carry the facilitator's own diagnosis out rather than flattening every
         # failure to "anchor_failed". A rejected signature answers 422
@@ -1237,13 +1247,14 @@ def available_backends(
     """
     try:
         url = f"{facilitator.rstrip('/')}/dx402/stats"
-        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts)
+        key = stack_key_request_kwargs(stack_key, url, stack_key_hosts, client=client)
         if client is None:
             import httpx
 
             response = httpx.get(url, timeout=timeout, **key)
         else:
             response = client.get(url, **key)
+        refuse_redirect(response, "backends")
         if response.status_code >= 400:
             return []
         return response.json().get("backends") or []

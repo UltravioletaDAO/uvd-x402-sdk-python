@@ -42,7 +42,11 @@ from pydantic import BaseModel, Field
 
 from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
 from uvd_x402_sdk.networks.base import to_base_units
-from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
+from uvd_x402_sdk.stack_key import (
+    refuse_redirect_hook,
+    stack_key_request_kwargs,
+    usable_stack_key,
+)
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
@@ -980,10 +984,14 @@ class Erc8004Client:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         # Per request, never a default header of `_client`: `resolve_agent_uri`
-        # sends that same client to a URL the agent's owner chose.
+        # sends that same client to a URL the agent's owner chose. A request
+        # with the key goes with redirects off, and a redirect answered to it
+        # raises (the hook).
         self._stack_key = usable_stack_key(stack_key)
         self._stack_key_hosts = stack_key_hosts
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = httpx.AsyncClient(
+            timeout=timeout, event_hooks={"response": [refuse_redirect_hook]}
+        )
 
     def _stack_key_kwargs(self, headers: Optional[dict[str, str]] = None) -> dict[str, Any]:
         """The ``headers=`` keyword of a request to the facilitator: ``headers``
