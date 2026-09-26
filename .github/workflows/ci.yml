@@ -3,7 +3,50 @@ name: CI
 on:
   push:
     branches: [main]
+    # CI runs only when a file it reads changes. Each entry, and who reads it:
+    #   src/**            the package: both jobs install it; cross-language also
+    #                     puts src/ on PYTHONPATH and compares the ERC-8128
+    #                     vectors in it byte for byte with the TypeScript SDK
+    #   tests/**          the suite and its fixtures (`python -m pytest -q`)
+    #   pyproject.toml    the manifest: dependencies, extras, pytest config (this
+    #                     repo has no lockfile)
+    #   .gitattributes    decides the bytes the checkout writes, and the vectors
+    #                     are compared as bytes
+    #   .github/workflows/ci.yml       this file
+    #   .github/workflows/publish.yml  read by tests/interop (TestPublishGate)
+    #   README.md         the package readme (pyproject `readme`); two tests pin
+    #                     its examples (test_readme_eurc_networks,
+    #                     test_exact_amount)
+    #   examples/**       run or scanned by test_dx402_examples, test_exact_amount
+    #   interop/**        the interop contract: tests/interop validates its
+    #                     schemas, fixtures and vectors, and reads the rules its
+    #                     *.md write down
+    # Everything else is left out: docs/, CHANGELOG.md and the other root *.md,
+    # scripts/ (no job runs one), LICENSE. One of them IS read: test_exact_amount
+    # scans docs/ for the float price form, so a docs-only change that brings it
+    # back goes red on the next run, not on its own.
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.gitattributes'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/publish.yml'
+      - 'README.md'
+      - 'examples/**'
+      - 'interop/**'
   pull_request:
+    # The same list as `push`, entry for entry.
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.gitattributes'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/publish.yml'
+      - 'README.md'
+      - 'examples/**'
+      - 'interop/**'
 
 jobs:
   test:
