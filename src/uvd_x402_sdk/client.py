@@ -61,6 +61,7 @@ from uvd_x402_sdk.models import (
     SettleResponse,
 )
 from uvd_x402_sdk.receipts import payment_response_headers
+from uvd_x402_sdk.stack_key import stack_key_headers, stack_key_request_kwargs
 from uvd_x402_sdk.policy import (
     AdvertisedQuote,
     Offer,
@@ -1468,7 +1469,9 @@ class X402Client:
         try:
             client = self._get_http_client()
             response = client.get(
-                f"{facilitator_url}/supported", timeout=self.config.verify_timeout
+                f"{facilitator_url}/supported",
+                timeout=self.config.verify_timeout,
+                **self._facilitator_kwargs(facilitator_url),
             )
             response.raise_for_status()
             data = response.json()
@@ -1504,6 +1507,31 @@ class X402Client:
                 )
             )
         return self._http_client
+
+    def _facilitator_headers(
+        self, facilitator_url: str, headers: Optional[dict[str, str]] = None
+    ) -> dict[str, str]:
+        """``headers`` plus ``X-UVD-Stack-Key`` for a request to ``facilitator_url``.
+
+        Per request, never a default header of the HTTP client: ``fetch()``
+        sends its requests to sellers through that same client. And only to a
+        facilitator of Ultravioleta DAO (``uvd_x402_sdk.stack_key``): a
+        facilitator that ``facilitator_by_network`` routes to a third party
+        never sees the key.
+        """
+        return {
+            **(headers or {}),
+            **stack_key_headers(
+                self.config.stack_key, facilitator_url, self.config.stack_key_hosts
+            ),
+        }
+
+    def _facilitator_kwargs(self, facilitator_url: str) -> dict[str, Any]:
+        """The ``headers=`` keyword of a GET to ``facilitator_url``: empty
+        without a key to send, so the call is made exactly as before."""
+        return stack_key_request_kwargs(
+            self.config.stack_key, facilitator_url, self.config.stack_key_hosts
+        )
 
     def close(self) -> None:
         """Close the HTTP client."""
@@ -1963,10 +1991,11 @@ class X402Client:
 
         try:
             client = self._get_http_client()
+            facilitator_url = self.facilitator_url_for(payload.network)
             response = client.post(
-                f"{self.facilitator_url_for(payload.network)}/verify",
+                f"{facilitator_url}/verify",
                 json=verify_request,
-                headers=binding.headers(),
+                headers=self._facilitator_headers(facilitator_url, binding.headers()),
                 timeout=self.config.verify_timeout,
             )
 
@@ -2268,7 +2297,7 @@ class X402Client:
         # Use per-network timeout (Ethereum L1 = 900s, L2s = 90s)
         settle_timeout = self._get_settle_timeout(payload.network)
         facilitator_url = self.facilitator_url_for(payload.network)
-        headers = binding.headers()
+        headers = self._facilitator_headers(facilitator_url, binding.headers())
         logger.info(
             f"Settling payment on {payload.network} for ${expected_amount_usd} "
             f"(x402 v{envelope_version} envelope, timeout={settle_timeout}s, "
@@ -2422,7 +2451,8 @@ class X402Client:
                 response = client.post(
                     f"{url}/settle",
                     json=settle_request,
-                    headers=headers or {"Content-Type": "application/json"},
+                    headers=headers
+                    or self._facilitator_headers(url, {"Content-Type": "application/json"}),
                     timeout=30.0,  # Short timeout for fallback check
                 )
                 if response.status_code == 200:
@@ -2642,7 +2672,8 @@ class X402Client:
             >>> enriched = client.negotiate_accepts(requirements)
             >>> # enriched[0]["extra"]["feePayer"] is now set
         """
-        url = f"{self._accepts_facilitator_url(payment_requirements)}/accepts"
+        facilitator_url = self._accepts_facilitator_url(payment_requirements)
+        url = f"{facilitator_url}/accepts"
         payload = {
             "x402Version": x402_version,
             "accepts": payment_requirements,
@@ -2653,7 +2684,9 @@ class X402Client:
             response = client.post(
                 url,
                 json=payload,
-                headers={"Content-Type": "application/json"},
+                headers=self._facilitator_headers(
+                    facilitator_url, {"Content-Type": "application/json"}
+                ),
                 timeout=self.config.verify_timeout,
             )
             response.raise_for_status()
@@ -2710,7 +2743,10 @@ class X402Client:
         """
         try:
             client = self._get_http_client()
-            response = client.get(f"{self.config.facilitator_url}/version")
+            response = client.get(
+                f"{self.config.facilitator_url}/version",
+                **self._facilitator_kwargs(self.config.facilitator_url),
+            )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -2745,7 +2781,9 @@ class X402Client:
         base_url = self.facilitator_url_for(network) if network else self.config.facilitator_url
         try:
             client = self._get_http_client()
-            response = client.get(f"{base_url}/supported")
+            response = client.get(
+                f"{base_url}/supported", **self._facilitator_kwargs(base_url)
+            )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -2817,7 +2855,10 @@ class X402Client:
         """GET a facilitator endpoint and return its JSON."""
         try:
             client = self._get_http_client()
-            response = client.get(f"{self.config.facilitator_url}{path}")
+            response = client.get(
+                f"{self.config.facilitator_url}{path}",
+                **self._facilitator_kwargs(self.config.facilitator_url),
+            )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -2845,7 +2886,10 @@ class X402Client:
         """
         try:
             client = self._get_http_client()
-            response = client.get(f"{self.config.facilitator_url}/blacklist")
+            response = client.get(
+                f"{self.config.facilitator_url}/blacklist",
+                **self._facilitator_kwargs(self.config.facilitator_url),
+            )
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -2872,7 +2916,9 @@ class X402Client:
         base_url = self.facilitator_url_for(network) if network else self.config.facilitator_url
         try:
             client = self._get_http_client()
-            response = client.get(f"{base_url}/health")
+            response = client.get(
+                f"{base_url}/health", **self._facilitator_kwargs(base_url)
+            )
             return response.is_success
         except Exception:
             return False

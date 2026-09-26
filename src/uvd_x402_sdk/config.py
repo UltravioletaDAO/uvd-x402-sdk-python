@@ -15,6 +15,8 @@ from typing import Dict, List, Optional, Any, Literal
 import json
 import os
 
+from uvd_x402_sdk.stack_key import STACK_KEY_ENV, usable_stack_key
+
 
 # Reserved key inside ``facilitator_by_network`` meaning "every other network".
 # Its presence is the ONLY thing that authorises falling back to a facilitator
@@ -93,6 +95,19 @@ class X402Config:
             handling, random unless the call brings ``idempotency_key`` or
             ``idempotency_scope``; see ``client.new_idempotency_key``
         multi_payment: Multi-payment configuration for accepting multiple networks
+        stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO (see
+            ``uvd_x402_sdk.stack_key``), sent on every request to a facilitator
+            of Ultravioleta DAO: ``https`` to ``facilitator.ultravioletadao.xyz``
+            or to a host of ``stack_key_hosts``, never to any other host (a
+            third-party facilitator that ``facilitator_by_network`` routes to
+            included). Stripped here; a value that is not a well-formed key
+            becomes ``None`` (nothing is sent, one warning without the value).
+            Left out of ``repr()`` and ``to_dict()``. Not for third parties:
+            without it nothing changes.
+        stack_key_hosts: Hosts ADDED to ``facilitator.ultravioletadao.xyz`` as
+            facilitators the key may travel to, over ``https``; plain ``http``
+            only to ``127.0.0.1`` or ``localhost`` named here (a local stand-in
+            for tests). Bare host names, compared whole and case-insensitively.
     """
 
     facilitator_url: str = "https://facilitator.ultravioletadao.xyz"
@@ -167,8 +182,16 @@ class X402Config:
     # Multi-payment configuration
     multi_payment: Optional[MultiPaymentConfig] = None
 
+    # Last on purpose: a field added before the others would shift a
+    # positional construction.
+    stack_key: Optional[str] = field(default=None, repr=False)
+    stack_key_hosts: Optional[list[str]] = None
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
+        # First, so that no other check can fail with the raw value still here.
+        self.stack_key = usable_stack_key(self.stack_key)
+
         if not self.facilitator_url:
             raise ValueError("facilitator_url is required")
 
@@ -369,6 +392,8 @@ class X402Config:
             X402_SETTLE_TIMEOUT: Settle request timeout
             X402_RESOURCE_URL: Resource URL for facilitator
             X402_DESCRIPTION: Description for facilitator
+            UVD_STACK_KEY: The service's X-UVD-Stack-Key (Ultravioleta DAO
+                services only)
         """
         return cls(
             facilitator_url=os.environ.get(
@@ -392,6 +417,7 @@ class X402Config:
             settle_timeout=float(os.environ.get("X402_SETTLE_TIMEOUT", "55")),
             resource_url=os.environ.get("X402_RESOURCE_URL", ""),
             description=os.environ.get("X402_DESCRIPTION", "x402 payment"),
+            stack_key=os.environ.get(STACK_KEY_ENV),
         )
 
     @staticmethod

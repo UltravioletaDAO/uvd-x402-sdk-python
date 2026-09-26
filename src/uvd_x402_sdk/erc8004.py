@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
 from uvd_x402_sdk.networks.base import to_base_units
+from uvd_x402_sdk.stack_key import stack_key_request_kwargs, usable_stack_key
 
 # ERC-8004 extension identifier
 ERC8004_EXTENSION_ID = "8004-reputation"
@@ -956,6 +957,9 @@ class Erc8004Client:
         self,
         base_url: str = "https://facilitator.ultravioletadao.xyz",
         timeout: float = 30.0,
+        *,
+        stack_key: Optional[str] = None,
+        stack_key_hosts: Optional[list[str]] = None,
     ):
         """
         Initialize the ERC-8004 client.
@@ -963,10 +967,30 @@ class Erc8004Client:
         Args:
             base_url: Base URL of the facilitator API
             timeout: Request timeout in seconds
+            stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO (see
+                ``uvd_x402_sdk.stack_key``), sent on every read and write to
+                ``base_url`` when it is a facilitator of Ultravioleta DAO, and
+                never to the URL :meth:`resolve_agent_uri` fetches. A value that
+                is not a well-formed key is not sent (one warning, without the
+                value). Not for third parties.
+            stack_key_hosts: Hosts added to ``facilitator.ultravioletadao.xyz``
+                as facilitators the key may travel to (see
+                :func:`uvd_x402_sdk.stack_key.stack_key_allowed`).
         """
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        # Per request, never a default header of `_client`: `resolve_agent_uri`
+        # sends that same client to a URL the agent's owner chose.
+        self._stack_key = usable_stack_key(stack_key)
+        self._stack_key_hosts = stack_key_hosts
         self._client = httpx.AsyncClient(timeout=timeout)
+
+    def _stack_key_kwargs(self, headers: Optional[dict[str, str]] = None) -> dict[str, Any]:
+        """The ``headers=`` keyword of a request to the facilitator: ``headers``
+        and the key, or nothing at all when there is neither."""
+        return stack_key_request_kwargs(
+            self._stack_key, self.base_url, self._stack_key_hosts, headers
+        )
 
     async def __aenter__(self) -> "Erc8004Client":
         return self
@@ -993,7 +1017,7 @@ class Erc8004Client:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/identity/{_wire(network)}/{agent_id}"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return AgentIdentity.model_validate(response.json())
 
@@ -1026,7 +1050,7 @@ class Erc8004Client:
                 other non-success status.
         """
         url = f"{self.base_url}/identity/{_wire(network)}/owner/{address}"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         if response.status_code == 503:
             raise LookupInconclusiveError(
                 f"Owner lookup for {address} on {network} was inconclusive; retry",
@@ -1055,6 +1079,7 @@ class Erc8004Client:
             cid = agent_uri.replace("ipfs://", "")
             url = f"https://ipfs.io/ipfs/{cid}"
 
+        # Not the facilitator: no stack key here.
         response = await self._client.get(url)
         response.raise_for_status()
         return AgentRegistrationFile.model_validate(response.json())
@@ -1098,7 +1123,9 @@ class Erc8004Client:
             params["clientAddresses"] = client_addresses
 
         url = f"{self.base_url}/reputation/{_wire(network)}/{agent_id}"
-        response = await self._client.get(url, params=params or None)
+        response = await self._client.get(
+            url, params=params or None, **self._stack_key_kwargs()
+        )
         response.raise_for_status()
         return ReputationResponse.model_validate(response.json())
 
@@ -1188,6 +1215,7 @@ class Erc8004Client:
             response = await self._client.post(
                 url,
                 json=request.model_dump(by_alias=True, exclude_none=True),
+                **self._stack_key_kwargs(),
             )
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
@@ -1315,7 +1343,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/evm/prepare"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1425,7 +1453,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/evm/submit"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1544,7 +1572,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/solana/prepare"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return PrepareSolanaFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1647,7 +1675,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/solana/submit"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1714,7 +1742,7 @@ class Erc8004Client:
                 original.pop(key, None)
             payload["originalFeedback"] = original
         try:
-            response = await self._client.post(url, json=payload)
+            response = await self._client.post(url, json=payload, **self._stack_key_kwargs())
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1762,7 +1790,7 @@ class Erc8004Client:
             Endpoint information for /feedback
         """
         url = f"{self.base_url}/feedback"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return response.json()
 
@@ -1825,7 +1853,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/response/evm/prepare"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1881,7 +1909,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/feedback/response/evm/submit"
         try:
-            response = await self._client.post(url, json=body)
+            response = await self._client.post(url, json=body, **self._stack_key_kwargs())
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -1958,7 +1986,7 @@ class Erc8004Client:
             payload["sealHash"] = seal_hash
 
         try:
-            response = await self._client.post(url, json=payload)
+            response = await self._client.post(url, json=payload, **self._stack_key_kwargs())
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -2045,7 +2073,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/register"
         try:
-            response = await self._client.post(url, json=payload)
+            response = await self._client.post(url, json=payload, **self._stack_key_kwargs())
             response.raise_for_status()
             return RegisterAgentResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
@@ -2123,7 +2151,7 @@ class Erc8004Client:
 
         url = f"{self.base_url}/register"
         response = await self._client.post(
-            url, json=payload, headers={"Prefer": "respond-async"}
+            url, json=payload, **self._stack_key_kwargs({"Prefer": "respond-async"})
         )
         response.raise_for_status()
         return RegisterJobResponse.model_validate(response.json())
@@ -2143,7 +2171,7 @@ class Erc8004Client:
                 (terminal jobs are kept for one hour).
         """
         url = f"{self.base_url}/register/status/{job_id}"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return RegisterJobResponse.model_validate(response.json())
 
@@ -2202,7 +2230,7 @@ class Erc8004Client:
             Endpoint information for POST /register
         """
         url = f"{self.base_url}/register"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return response.json()
 
@@ -2227,7 +2255,7 @@ class Erc8004Client:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/identity/{_wire(network)}/{agent_id}/metadata/{key}"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return IdentityMetadataResponse.model_validate(response.json())
 
@@ -2248,7 +2276,7 @@ class Erc8004Client:
             httpx.HTTPStatusError: If the request fails
         """
         url = f"{self.base_url}/identity/{_wire(network)}/total-supply"
-        response = await self._client.get(url)
+        response = await self._client.get(url, **self._stack_key_kwargs())
         response.raise_for_status()
         return IdentityTotalSupplyResponse.model_validate(response.json())
 
