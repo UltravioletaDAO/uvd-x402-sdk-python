@@ -21,9 +21,13 @@ none: ``uvdsk_`` and base64url characters.
 from __future__ import annotations
 
 import base64
+import copy
+import dataclasses
 import inspect
 import json
 import logging
+import pickle
+import socket
 import threading
 import time
 import uuid
@@ -41,7 +45,7 @@ from uvd_x402_sdk.dx402 import anchor_evidence, available_backends
 from uvd_x402_sdk.erc8004 import Erc8004Client
 from uvd_x402_sdk.escrow import EscrowClient
 from uvd_x402_sdk.events import TrafficEventStream
-from uvd_x402_sdk.exceptions import FacilitatorError
+from uvd_x402_sdk.exceptions import FacilitatorError, StackKeyRedirectError
 from uvd_x402_sdk.receipts import PurchaseContext, get_receipt
 from uvd_x402_sdk.stack_key import stack_key_allowed
 
@@ -118,13 +122,30 @@ class _Recorder:
         ]
 
 
-class _Facilitator(_Recorder):
-    """A local stand-in over a real socket (h11 runs on every request)."""
+class _DualStack(ThreadingHTTPServer):
+    """Listens on ``::`` and IPv4, so ``http://localhost:<port>`` reaches it."""
 
-    def __init__(self) -> None:
+    address_family = socket.AF_INET6
+
+    def server_bind(self) -> None:
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
+class _Facilitator(_Recorder):
+    """A local stand-in over a real socket (h11 runs on every request).
+
+    ``dual_stack`` makes it reachable as ``localhost`` (``localhost_url``), a
+    host that ``LOCAL`` does not list. ``redirect_to`` answers every request
+    with ``redirect_status`` to that base URL, path kept.
+    """
+
+    def __init__(self, dual_stack: bool = False) -> None:
         super().__init__()
         self.settle_delays: list[float] = []  # seconds, popped per /settle
         self.fail_verify = False
+        self.redirect_to: str | None = None
+        self.redirect_status = 302
         local = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -141,6 +162,12 @@ class _Facilitator(_Recorder):
                         "stack_key": self.headers.get_all(HEADER) or [],
                     }
                 )
+                if local.redirect_to is not None:
+                    self.send_response(local.redirect_status)
+                    self.send_header("Location", local.redirect_to + self.path)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 status, body = local.answer(method, path)
                 data = json.dumps(body).encode("utf-8")
                 try:
@@ -161,8 +188,13 @@ class _Facilitator(_Recorder):
             def log_message(self, *args: object) -> None:
                 pass
 
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.url = f"http://127.0.0.1:{self._server.server_address[1]}"
+        if dual_stack:
+            self._server: ThreadingHTTPServer = _DualStack(("::", 0), Handler)
+        else:
+            self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        port = self._server.server_address[1]
+        self.url = f"http://127.0.0.1:{port}"
+        self.localhost_url = f"http://localhost:{port}"
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
     def answer(self, method: str, path: str) -> tuple[int, Any]:
@@ -368,6 +400,7 @@ UNUSABLE = {
     "junk-after-a-valid-key": KEY + "!",
     "bearer": "Bearer " + KEY,
     "bytes": KEY.encode("ascii"),
+    "byte-order-mark-at-the-end": KEY + "﻿",  # only a leading one goes
 }
 
 
@@ -583,10 +616,38 @@ def test_a_third_party_facilitator_routed_by_network_never_gets_the_key(mocked):
 
     seller.process_payment(X_PAYMENT, PRICE)
     seller.get_supported(network="base")
+    assert seller.health_check(network="base")
     seller.negotiate_accepts([{"scheme": "exact", "network": "avalanche"}])
+    assert seller.health_check(network="avalanche")
 
-    assert mocked.keys(host="api.cdp.example") == [[], [], []]
-    assert mocked.keys(host="facilitator.ultravioletadao.xyz") == [[KEY]]
+    assert mocked.keys(host="api.cdp.example") == [[], [], [], []]
+    assert mocked.keys(host="facilitator.ultravioletadao.xyz") == [[KEY], [KEY]]
+
+
+@pytest.mark.parametrize(
+    "facilitator_url,resend_to,sent",
+    [
+        (HOUSE, "https://api.cdp.example/x402", False),
+        ("https://api.cdp.example/x402", HOUSE, True),
+    ],
+    ids=["house-config-third-party-resend", "third-party-config-house-resend"],
+)
+def test_the_settle_resend_is_judged_on_the_url_it_goes_to(
+    mocked, facilitator_url, resend_to, sent
+):
+    """The resend after a timeout, called without the settle's headers, still
+    decides on the facilitator it is sent to, not on ``facilitator_url``."""
+    seller = _house_seller(
+        mocked,
+        stack_key=KEY,
+        facilitator_url=facilitator_url,
+        supported_networks=["base"],
+    )
+
+    seller._check_settle_fallback({"x402Version": 1}, 1.0, resend_to)
+
+    assert [r["host"] for r in mocked.requests] == [httpx.URL(resend_to).host]
+    assert mocked.keys() == [[KEY] if sent else []]
 
 
 async def test_erc8004_sends_the_key_to_the_house_and_to_no_other_host(mocked):
@@ -931,11 +992,24 @@ def test_dx402_anchor_and_backends_carry_the_key(facilitator):
 
     anchor_evidence(b"response body", stack_key=KEY, stack_key_hosts=LOCAL, **common)
     available_backends(facilitator.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    with httpx.Client() as own:  # the caller's client, the other branch
+        anchor_evidence(
+            b"response body", stack_key=KEY, stack_key_hosts=LOCAL, client=own, **common
+        )
+        available_backends(facilitator.url, stack_key=KEY, stack_key_hosts=LOCAL, client=own)
     anchor_evidence(b"response body", stack_key_hosts=LOCAL, **common)
     available_backends(facilitator.url, stack_key_hosts=LOCAL)
 
-    assert [r["path"] for r in facilitator.requests] == ["/dx402/anchor", "/dx402/stats"] * 2
-    assert facilitator.keys() == [[KEY], [KEY], [], []]
+    assert [r["path"] for r in facilitator.requests] == ["/dx402/anchor", "/dx402/stats"] * 3
+    assert facilitator.keys() == [[KEY], [KEY], [KEY], [KEY], [], []]
+
+
+def test_dx402_with_a_requests_session_carries_the_key(facilitator):
+    requests = pytest.importorskip("requests")
+    with requests.Session() as session:
+        available_backends(facilitator.url, stack_key=KEY, stack_key_hosts=LOCAL, client=session)
+
+    assert facilitator.keys("/dx402/stats") == [[KEY]]
 
 
 def test_a_receipt_lookup_carries_the_key(facilitator):
@@ -951,3 +1025,308 @@ def test_a_receipt_lookup_carries_the_key(facilitator):
 
     assert [r["path"].rsplit("/", 1)[0] for r in facilitator.requests] == ["/receipts"] * 2
     assert facilitator.keys() == [[KEY], []]
+
+
+# -- The key does not follow redirects (tests/test_stack_key_redirect.py has
+#    more): a request carrying it goes with redirects off,
+#    whatever the HTTP client would do, and a redirect answered to it is an
+#    error; the key is never sent again
+
+
+@pytest.fixture
+def detour():
+    """A listed house (127.0.0.1) that redirects everything to ``localhost``,
+    which ``LOCAL`` does not list."""
+    house = _Facilitator()
+    elsewhere = _Facilitator(dual_stack=True)
+    house.redirect_to = elsewhere.localhost_url
+    yield house, elsewhere
+    house.close()
+    elsewhere.close()
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_x402client_raises_on_a_redirect_and_never_follows_it(detour, status):
+    house, elsewhere = detour
+    house.redirect_status = status
+    with httpx.Client(follow_redirects=True) as follows:
+        seller = X402Client(
+            recipient_address=RECIPIENT, facilitator_url=house.url, stack_key=KEY,
+            stack_key_hosts=LOCAL, http_client=follows, supported_networks=["base"],
+        )
+        payload = seller.extract_payload(X_PAYMENT)
+        calls = [
+            lambda: seller.verify_payment(payload, PRICE),
+            lambda: seller.settle_payment(payload, PRICE),
+            lambda: seller.negotiate_accepts([{"scheme": "exact", "network": "base"}]),
+            seller.get_version,
+            seller.get_supported,
+            seller.get_stats,
+            seller.get_blacklist,
+            seller.verify_routes,
+        ]
+        for call in calls:
+            with pytest.raises(StackKeyRedirectError) as caught:
+                call()
+            assert caught.value.status_code == status
+            assert SECRET not in str(caught.value)
+        assert seller.health_check() is False
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * (len(calls) + 1)
+
+
+def test_the_settle_resend_raises_nothing_new_and_does_not_follow(detour):
+    house, elsewhere = detour
+    with httpx.Client(follow_redirects=True) as follows:
+        seller = X402Client(
+            recipient_address=RECIPIENT, facilitator_url=house.url, stack_key=KEY,
+            stack_key_hosts=LOCAL, http_client=follows,
+        )
+        assert seller._check_settle_fallback({"x402Version": 1}, 1.0, house.url) is None
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]]
+
+
+async def test_the_async_clients_raise_on_a_redirect_and_never_follow_it(detour):
+    house, elsewhere = detour
+    erc8004 = Erc8004Client(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    escrow = EscrowClient(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    bazaar = BazaarClient(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    raising = [
+        lambda: erc8004.get_identity("base", 1),
+        lambda: escrow.get_escrow("e1"),
+        lambda: escrow.release("e1"),
+        lambda: bazaar.list_resources(),
+        lambda: bazaar.register_resource("https://example.invalid/resource"),
+    ]
+    for call in raising:
+        with pytest.raises(StackKeyRedirectError):
+            await call()
+    # An ERC-8004 write answers every failure with success=False, by contract.
+    writes = [
+        lambda: erc8004.prepare_relayed_feedback("base", 1, RATER, 90),
+        lambda: erc8004.submit_relayed_feedback(
+            "base", 1, RATER, 90, deadline=1, nonce="0x01", signature=SIGNATURE
+        ),
+    ]
+    for call in writes:
+        answer = await call()
+        assert answer.success is False
+        assert "does not follow redirects" in answer.error
+    assert await escrow.health_check() is False
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * (len(raising) + len(writes) + 1)
+
+
+async def test_erc8004_does_not_follow_even_through_a_client_that_does(detour):
+    house, elsewhere = detour
+    client = Erc8004Client(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    client._client = httpx.AsyncClient(follow_redirects=True)
+
+    for name in ("get_identity", "get_reputation", "prepare_relayed_feedback"):
+        await _call(client, ERC8004_CALLS, name)
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * 3
+
+
+def test_the_escrow_settles_and_state_refuse_a_redirect(detour):
+    house, elsewhere = detour
+    client = _advanced_escrow(house, stack_key=KEY, stack_key_hosts=LOCAL)
+    info = client.build_payment_info("0x" + "33" * 20, 10_000)
+
+    for name in ("authorize", "release_via_facilitator", "refund_via_facilitator"):
+        result = getattr(client, name)(info)
+        assert result.success is False
+        assert "does not follow redirects" in result.error
+    with pytest.raises(StackKeyRedirectError):
+        client.query_escrow_state(info)
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * 4
+
+
+async def test_the_event_stream_refuses_a_redirect(detour):
+    house, elsewhere = detour
+
+    with pytest.raises(StackKeyRedirectError):
+        list(TrafficEventStream(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL))
+    with pytest.raises(StackKeyRedirectError):
+        async with TrafficEventStream(
+            base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL
+        ) as stream:
+            [event async for event in stream]
+    # Even through clients that follow redirects.
+    following = TrafficEventStream(base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL)
+    following._client = httpx.Client(follow_redirects=True)
+    with pytest.raises(StackKeyRedirectError):
+        list(following)
+    async_following = TrafficEventStream(
+        base_url=house.url, stack_key=KEY, stack_key_hosts=LOCAL
+    )
+    async_following._aclient = httpx.AsyncClient(follow_redirects=True)
+    with pytest.raises(StackKeyRedirectError):
+        [event async for event in async_following]
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * 4
+
+
+def test_receipts_and_dx402_refuse_a_redirect_through_clients_that_follow(detour):
+    requests = pytest.importorskip("requests")
+    pytest.importorskip("cryptography")
+    house, elsewhere = detour
+    common = dict(
+        payment_id_value="0x" + "ab" * 32,
+        network="base",
+        tx_hash="0x" + "cd" * 32,
+        payer="0x" + "11" * 20,
+        payee="0x" + "22" * 20,
+        payer_key=bytes(range(32)),
+        facilitator=house.url,
+    )
+    refused = {"v": 1, "skipped": "anchor_failed", "status": 302, "error": "stack_key_redirect"}
+
+    with httpx.Client(follow_redirects=True) as follows, requests.Session() as session:
+        for http in (follows, session):
+            with pytest.raises(StackKeyRedirectError):
+                get_receipt(
+                    http, str(uuid.uuid4()), PurchaseContext(),
+                    issuer=house.url, stack_key=KEY, stack_key_hosts=LOCAL,
+                )
+        for client in (None, follows, session):
+            answer = anchor_evidence(
+                b"response body", stack_key=KEY, stack_key_hosts=LOCAL, client=client, **common
+            )
+            assert answer == refused
+            backends = available_backends(
+                house.url, stack_key=KEY, stack_key_hosts=LOCAL, client=client
+            )
+            assert backends == []
+
+    assert elsewhere.requests == []
+    assert house.keys() == [[KEY]] * 8
+
+
+def test_without_a_key_a_redirect_is_handled_as_before(detour):
+    """No key: a client that follows redirects follows them, and one that does
+    not gets the error it always got, not the stack key's."""
+    house, elsewhere = detour
+    with httpx.Client(follow_redirects=True) as follows:
+        seller = X402Client(
+            recipient_address=RECIPIENT, facilitator_url=house.url, http_client=follows
+        )
+        assert seller.get_version() == {}
+
+    default = X402Client(recipient_address=RECIPIENT, facilitator_url=house.url)
+    with pytest.raises(FacilitatorError) as caught:
+        default.get_version()
+    assert not isinstance(caught.value, StackKeyRedirectError)
+
+    assert house.keys() == [[], []]
+    assert elsewhere.keys() == [[]]
+
+
+# -- The gate reads the host the HTTP library will contact, with its own parser
+
+DISAGREEING = [
+    ("https://FACILITATOR.ULTRAVIOLETADAO.XYZ./v", True),  # capitals and a final dot
+    ("https://facilitator.ultravioletadao.xyz.:8443/v", True),  # and a port
+    ("https://evil.example@facilitator.ultravioletadao.xyz/v", True),  # user info
+    ("https://facilitator.ultravioletadao.xyz@evil.example/v", False),
+    # httpx and urlsplit read the house, urllib3 (a requests session) evil.example
+    ("https://evil.example\\@facilitator.ultravioletadao.xyz/v", False),
+    ("https://facilitator.ultravioletadao.xyz\\@evil.example/v", False),
+    ("https://facilitator.ultravioletadao.xyz .evil.example/v", False),
+    ("https://facilitator.ultravioletadao.xyz /v", False),
+    (" https://facilitator.ultravioletadao.xyz/v", False),
+    ("https://evil.example\t@facilitator.ultravioletadao.xyz/v", False),
+    ("https://facilitator.ultravioletadao.xyz:443:80/v", False),
+    ("https://facilitator.ultravioletadao.xyz。evil.example/v", False),
+]
+
+
+@pytest.mark.parametrize("url,allowed", DISAGREEING)
+def test_the_gate_reads_the_url_as_the_library_that_sends_it(url, allowed):
+    assert stack_key_allowed(url) is allowed
+
+
+@pytest.mark.parametrize("url,allowed", DISAGREEING)
+def test_through_httpx_the_key_goes_only_to_the_house_host_it_contacts(mocked, url, allowed):
+    try:
+        _house_seller(mocked, stack_key=KEY, facilitator_url=url).get_version()
+    except Exception:  # noqa: BLE001 - a URL httpx cannot read sends nothing
+        pass
+
+    assert [bool(keys) for keys in mocked.keys()] == ([allowed] if mocked.requests else [])
+    for request in mocked.requests:
+        if request["stack_key"]:
+            assert request["host"].rstrip(".") == "facilitator.ultravioletadao.xyz"
+
+
+def test_through_requests_a_url_it_reads_as_another_host_does_not_carry_the_key():
+    """``http://localhost:<p>\\@127.0.0.1:<q>``: httpx and urlsplit read the
+    listed 127.0.0.1, urllib3 connects to localhost. Decided on either of the
+    first two alone, the key would ride a requests session to localhost."""
+    requests = pytest.importorskip("requests")
+    house = _Facilitator()
+    elsewhere = _Facilitator(dual_stack=True)
+    try:
+        port = elsewhere.url.rsplit(":", 1)[1]
+        url = f"http://localhost:{port}\\@{house.url[len('http://'):]}"
+        with requests.Session() as session:
+            available_backends(url, stack_key=KEY, stack_key_hosts=LOCAL, client=session)
+
+        assert elsewhere.keys() == [[]]  # it went there, without the key
+        assert house.requests == []
+    finally:
+        house.close()
+        elsewhere.close()
+
+
+# -- No dump of a config (or of a client) carries the key; a byte order mark goes
+
+
+def test_no_dump_of_a_config_carries_the_key():
+    config = X402Config(recipient_evm=RECIPIENT, stack_key=KEY)
+    pickled = pickle.dumps(config)
+    dumps = [
+        repr(dataclasses.asdict(config)),
+        json.dumps(dataclasses.asdict(config), default=str),
+        repr(vars(config)),
+        str(vars(config)),
+    ]
+    for holder in (
+        Erc8004Client(stack_key=KEY), EscrowClient(stack_key=KEY),
+        BazaarClient(stack_key=KEY), TrafficEventStream(stack_key=KEY),
+    ):
+        dumps.append(repr(vars(holder)))
+
+    assert all(SECRET not in text for text in dumps)
+    assert SECRET.encode() not in pickled
+    # The bytes this test just produced, nothing from outside.
+    assert pickle.loads(pickled).stack_key is None  # noqa: S301
+    assert copy.deepcopy(config).stack_key is None
+    # What is not a dump keeps it.
+    assert config.stack_key == KEY and str(config.stack_key) == KEY
+    assert dataclasses.replace(config).stack_key == KEY
+    assert copy.copy(config).stack_key == KEY
+
+
+@pytest.mark.parametrize(
+    "read",
+    ["﻿" + KEY, "﻿" + KEY + "\r\n", " ﻿" + KEY + " \r\n"],
+    ids=["bom", "bom-crlf", "space-bom-crlf"],
+)
+def test_a_key_read_with_a_byte_order_mark_is_sent_without_it(facilitator, caplog, read):
+    caplog.set_level(logging.DEBUG)
+    seller = _seller(facilitator, stack_key=read)
+
+    assert seller.process_payment(X_PAYMENT, PRICE).success
+
+    assert seller.config.stack_key == KEY
+    assert facilitator.keys() == [[KEY], [KEY]]
+    assert _warnings(caplog) == []
