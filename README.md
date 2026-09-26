@@ -950,6 +950,50 @@ endpoints that are not network-scoped — `/version`, `/blacklist`, `/api/stats`
 `/transactions` — use `facilitator_url`; `get_supported()` and `health_check()`
 accept an optional `network=` to target one facilitator.
 
+### Stack key (`X-UVD-Stack-Key`) — services of Ultravioleta DAO only
+
+The Ultravioleta facilitator exempts the services of its own stack from its
+policy rate limits (the `429`s of its per-address budgets) when a request
+carries the service's key. Ultravioleta DAO issues one key per service
+(`uvdsk_` followed by 43 to 128 base64url characters); the service keeps it in
+its secret store and hands it to the SDK as `UVD_STACK_KEY`:
+
+```python
+import os
+from uvd_x402_sdk import X402Client, X402Config
+from uvd_x402_sdk.erc8004 import Erc8004Client
+
+client = X402Client(config=X402Config.from_env())  # reads UVD_STACK_KEY
+erc8004 = Erc8004Client(stack_key=os.environ.get("UVD_STACK_KEY"))
+```
+
+- **Not for third parties.** There is nothing to request or configure: without
+  a key the SDK sends no header and every request is made exactly as before. A
+  facilitator that does not know the header ignores it.
+- **Only to a facilitator of Ultravioleta DAO.** The key travels over `https`
+  to `facilitator.ultravioletadao.xyz` and to no other host: not to a
+  third-party facilitator that `facilitator_by_network` routes to, not over
+  plain `http`, not to a look-alike (`facilitator.ultravioletadao.xyz.evil`,
+  a subdomain, the name in a path). `stack_key_hosts=[...]` ADDS hosts (a
+  staging facilitator); it never removes the default. Plain `http` is accepted
+  only to `127.0.0.1` or `localhost` named there, for a local test double. A
+  request to any other host goes without the key, and one warning per process
+  names its origin (`stack key not sent: <origin> is not a house facilitator`).
+- **Every client of the facilitator carries it, and nothing else does.**
+  `X402Client` (`/verify`, `/settle` and its re-check after a timeout,
+  `/accepts`, `/supported`, `/version` and the other reads), `Erc8004Client`
+  (every read and write), `AdvancedEscrowClient` (escrow settles and
+  `/escrow/state`), `EscrowClient`, `BazaarClient`, `TrafficEventStream`,
+  `anchor_evidence()` / `available_backends()` and `get_receipt()` all take
+  `stack_key=` and `stack_key_hosts=`. The key is a header of each request,
+  never a default of an HTTP client, so the sellers `fetch()` reaches and the
+  URL `resolve_agent_uri()` fetches never see it.
+- **A key read badly never breaks a payment.** The value is stripped (a
+  trailing `\r\n` from a file goes away) and checked against the format. One
+  that does not match is not sent: the request goes as a third party's, the
+  payment goes through, and the SDK logs one warning per process, without the
+  value. The key is never in a `repr()`, `to_dict()`, an error or a log.
+
 ---
 
 ## Facilitator Addresses
