@@ -974,11 +974,18 @@ erc8004 = Erc8004Client(stack_key=os.environ.get("UVD_STACK_KEY"))
   to `facilitator.ultravioletadao.xyz` and to no other host: not to a
   third-party facilitator that `facilitator_by_network` routes to, not over
   plain `http`, not to a look-alike (`facilitator.ultravioletadao.xyz.evil`,
-  a subdomain, the name in a path). `stack_key_hosts=[...]` ADDS hosts (a
-  staging facilitator); it never removes the default. Plain `http` is accepted
-  only to `127.0.0.1` or `localhost` named there, for a local test double. A
-  request to any other host goes without the key, and one warning per process
-  names its origin (`stack key not sent: <origin> is not a house facilitator`).
+  a subdomain, the name in a path). The host is the one the HTTP library will
+  contact, read with its own parser (httpx, and urllib3 for a `requests`
+  session); a URL they read differently gets the key only if every reading is
+  allowed. `stack_key_hosts=[...]` ADDS hosts (a staging facilitator); it
+  never removes the default. Plain `http` is accepted only to `127.0.0.1` or
+  `localhost` named there, for a local test double. A request to any other
+  host goes without the key, and one warning per process names its origin
+  (`stack key not sent: <origin> is not a house facilitator`).
+- **The key does not follow redirects.** A redirect answered to a request that
+  carries it raises `StackKeyRedirectError` (a `FacilitatorError`), and
+  nothing is sent again. The functions that never raise report it their own
+  way (`success=False`, `anchor_failed`, `[]`).
 - **Every client of the facilitator carries it, and nothing else does.**
   `X402Client` (`/verify`, `/settle` and its re-check after a timeout,
   `/accepts`, `/supported`, `/version` and the other reads), `Erc8004Client`
@@ -988,11 +995,13 @@ erc8004 = Erc8004Client(stack_key=os.environ.get("UVD_STACK_KEY"))
   `stack_key=` and `stack_key_hosts=`. The key is a header of each request,
   never a default of an HTTP client, so the sellers `fetch()` reaches and the
   URL `resolve_agent_uri()` fetches never see it.
-- **A key read badly never breaks a payment.** The value is stripped (a
-  trailing `\r\n` from a file goes away) and checked against the format. One
-  that does not match is not sent: the request goes as a third party's, the
-  payment goes through, and the SDK logs one warning per process, without the
-  value. The key is never in a `repr()`, `to_dict()`, an error or a log.
+- **A key read badly never breaks a payment.** A leading byte order mark and
+  the whitespace at both ends (a trailing `\r\n` from a file) go away, and the
+  rest is checked against the format. One that does not match is not sent:
+  the request goes as a third party's, the payment goes through, and the SDK
+  logs one warning per process, without the value. The key is never in a
+  `repr()`, `to_dict()`, `vars()`, `dataclasses.asdict()`, a pickle, an error
+  or a log (a pickled or deep-copied config carries no key).
 
 ---
 
