@@ -64,6 +64,34 @@ Usage::
 Requires ``pip install uvd-x402-sdk[wallet]`` (eth-account pulls in
 ``eth_abi`` / ``eth_utils``). The module itself imports lazily — a base
 install can import it; the eth libs are only required when signing.
+
+Public API (stable)
+-------------------
+This module is the one implementation of the escrow EIP-3009 signature.
+Execution Market (``em_plugin_sdk.escrow_signing``) and Karmakadabra
+(``agents_sdk.escrow_signing``) each kept a copy; they import it from here.
+The names in ``__all__`` are the contract: none is renamed or removed and
+no positional parameter moves, and ``tests/test_escrow_signing_api.py``
+pins the list and every signature, so a change that would break an
+importer turns a test red here first.
+
+* Signing: :func:`build_escrow_pre_auth` (the ``X-Payment-Auth`` header),
+  :func:`compute_escrow_nonce` (``AuthCaptureEscrow.getHash``), and the
+  lifecycle orders (:func:`build_lifecycle_typed_data`,
+  :func:`build_lifecycle_auth`, :func:`lifecycle_auth_from_signature`).
+* The signed types: ``RECEIVE_WITH_AUTHORIZATION_TYPES``,
+  ``PAYMENT_INFO_TYPE``, ``PAYMENT_INFO_ABI``,
+  ``ESCROW_PAYMENT_INFO_TYPEHASH`` and the ``LIFECYCLE_*`` constants.
+* The guards' tables: ``VERIFIED_USDC_DOMAINS`` (chain id -> the USDC
+  EIP-712 name/version read on-chain), ``REQUIRED_NETWORK_KEYS``,
+  ``ESCROW_DEPOSIT_LIMIT_USD``, ``OPERATOR_FEE_BPS``,
+  ``DEFAULT_MIN_FEE_BPS`` / ``DEFAULT_MAX_FEE_BPS``, ``USDC_DECIMALS``.
+* The windows: ``ESCROW_TIER_WINDOWS``, ``REVIEW_WINDOW_SEC``,
+  ``REFUND_WINDOW_SEC``.
+
+What each byte of the signature is, per chain, is pinned by the golden
+vectors in ``tests/test_escrow_vectors.py`` (this SDK's own, Execution
+Market's and Karmakadabra's).
 """
 
 from __future__ import annotations
@@ -83,6 +111,39 @@ from . import erc7702 as _erc7702
 from .networks.base import to_base_units
 
 _log = logging.getLogger("uvd_x402_sdk.escrow_signing")
+
+__all__ = [
+    # signing
+    "build_escrow_pre_auth",
+    "compute_escrow_nonce",
+    "build_lifecycle_typed_data",
+    "build_lifecycle_auth",
+    "lifecycle_auth_from_signature",
+    # the signed types
+    "RECEIVE_WITH_AUTHORIZATION_TYPES",
+    "PAYMENT_INFO_TYPE",
+    "PAYMENT_INFO_ABI",
+    "ESCROW_PAYMENT_INFO_TYPEHASH",
+    "LIFECYCLE_ACTIONS",
+    "LIFECYCLE_DEFAULT_DEADLINE_SECS",
+    "LIFECYCLE_DOMAIN_NAME",
+    "LIFECYCLE_DOMAIN_VERSION",
+    "LIFECYCLE_MAX_DEADLINE_SECS",
+    "LIFECYCLE_ORDER_TYPES",
+    "LIFECYCLE_PRIMARY_TYPE",
+    # the guards' tables
+    "VERIFIED_USDC_DOMAINS",
+    "REQUIRED_NETWORK_KEYS",
+    "ESCROW_DEPOSIT_LIMIT_USD",
+    "OPERATOR_FEE_BPS",
+    "DEFAULT_MIN_FEE_BPS",
+    "DEFAULT_MAX_FEE_BPS",
+    "USDC_DECIMALS",
+    # the windows
+    "ESCROW_TIER_WINDOWS",
+    "REVIEW_WINDOW_SEC",
+    "REFUND_WINDOW_SEC",
+]
 
 # ── Dominios EIP-712 de USDC VERIFICADOS ON-CHAIN ────────────────────────────
 # El servidor manda `usdc_domain_name`/`usdc_domain_version` en la config de pago, y
@@ -149,6 +210,25 @@ _PAYMENT_INFO_ABI = (
     "(address,address,address,address,uint120,uint48,uint48,uint48,"
     "uint16,uint16,address,uint256)"
 )
+PAYMENT_INFO_ABI = _PAYMENT_INFO_ABI
+
+# AuthCaptureEscrow's PaymentInfo struct, whose keccak is the typehash the
+# getHash nonce starts with. Same struct on every escrow chain (Arc's x402r
+# escrow included: tests/fixtures/arc-escrow-d.json records its getHash).
+PAYMENT_INFO_TYPE = (
+    "PaymentInfo(address operator,address payer,address receiver,"
+    "address token,uint120 maxAmount,uint48 preApprovalExpiry,"
+    "uint48 authorizationExpiry,uint48 refundExpiry,uint16 minFeeBps,"
+    "uint16 maxFeeBps,address feeReceiver,uint256 salt)"
+)
+
+# keccak256(PAYMENT_INFO_TYPE), 0x-prefixed: what the marketplace serves as
+# ``escrow.payment_info_typehash``. Equal to advanced_escrow.PAYMENT_INFO_TYPEHASH
+# (bytes); kept as a literal so this module never needs eth-utils to import.
+# Both equalities are pinned in tests/test_escrow_signing_api.py.
+ESCROW_PAYMENT_INFO_TYPEHASH = (
+    "0x" + "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591"
+)
 
 # Canonical fallback — same values as advanced_escrow.TIER_TIMINGS for the
 # micro/standard tiers (kept as a plain dict so importing this module never
@@ -175,6 +255,8 @@ _REQUIRED_NETWORK_KEYS = (
     "usdc_domain_name",
     "usdc_domain_version",
 )
+# The keys one network of ``payment_config["escrow"]["networks"]`` must carry.
+REQUIRED_NETWORK_KEYS = _REQUIRED_NETWORK_KEYS
 
 
 def _require_eth_libs() -> tuple[Any, Any, Any]:
@@ -346,6 +428,19 @@ def build_escrow_pre_auth(
         raise ValueError(
             "payment_config.escrow.payment_info_typehash is missing — cannot "
             "compute the AuthCaptureEscrow.getHash nonce."
+        )
+    # The typehash is a constant of the escrow contract, not a setting: the
+    # nonce hashes it, and a nonce that is not the escrow's getHash can never
+    # be used by the token collector. Checked here, as Karmakadabra checked it
+    # in its own copy, so the lock fails before signing instead of on-chain.
+    if str(typehash).strip().lower().removeprefix("0x") != (
+        ESCROW_PAYMENT_INFO_TYPEHASH.removeprefix("0x")
+    ):
+        raise ValueError(
+            f"payment_config.escrow.payment_info_typehash is {typehash!r}, not "
+            f"AuthCaptureEscrow's PaymentInfo typehash {ESCROW_PAYMENT_INFO_TYPEHASH} "
+            "— refusing to sign: the nonce would not be the escrow's getHash and "
+            "the lock would revert."
         )
 
     amount = Decimal(str(amount_usd))

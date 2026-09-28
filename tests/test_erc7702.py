@@ -117,7 +117,10 @@ def test_el_resolvedor_por_RPC_sin_endpoints_es_None():
 # ── integración con el escrow: la parte que mueve plata ──────────────────────
 
 def _config():
-    return {"escrow": {"payment_info_typehash": "0x" + "ab" * 32, "networks": {"base": {
+    # El typehash real: desde que el builder rechaza uno que no es el de
+    # AuthCaptureEscrow, un relleno aca cortaria antes de llegar a la delegacion.
+    from uvd_x402_sdk.escrow_signing import ESCROW_PAYMENT_INFO_TYPEHASH
+    return {"escrow": {"payment_info_typehash": ESCROW_PAYMENT_INFO_TYPEHASH, "networks": {"base": {
         "chain_id": 8453,
         "operator": "0x1111111111111111111111111111111111111111",
         "escrow": "0x2222222222222222222222222222222222222222",
