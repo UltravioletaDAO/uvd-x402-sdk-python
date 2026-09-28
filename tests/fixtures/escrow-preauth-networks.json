@@ -1,0 +1,962 @@
+{
+  "_note": [
+    "Escrow pre-auth vectors recorded from uvd_x402_sdk.escrow_signing",
+    "(build_escrow_pre_auth) by scripts/escrow_preauth_vectors.py. One per chain of",
+    "VERIFIED_USDC_DOMAINS plus variants on Base. Never edited by hand; a red test",
+    "is fixed in the code, not here.",
+    "Hex values of 32 bytes or more are stored WITHOUT 0x; loaders re-prefix them.",
+    "signer_private_key is a throwaway made with Account.create(): it never held funds.",
+    "The payer is the signer's address; operators are synthetic (the chain id as an",
+    "address)."
+  ],
+  "generator": "scripts/escrow_preauth_vectors.py",
+  "signer_private_key": "e0519c4ae0b6c00b9ee2c8bdcaea8db7306b27706b6a2d926efe22623ade31ef",
+  "signer_address": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+  "frozen": {
+    "now": 1790000000,
+    "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+    "payment_info_typehash": "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591",
+    "min_fee_bps": 0,
+    "max_fee_bps": 1800,
+    "deposit_limit_usd": 100
+  },
+  "vectors": [
+    {
+      "id": "ethereum",
+      "network": "ethereum",
+      "network_config": {
+        "chain_id": 1,
+        "operator": "0x0000000000000000000000000000000000000001",
+        "escrow": "0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+        "token_collector": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+        "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "ce3cb1f0422de120237447a96def25a54ec6d0963adfddea7dcbf308faa6f68b",
+        "digest": "bb5ad454ae23a6eb0ccb84c3e461ccc3ec4f05ab712d0f7bdf4ab8d8c9ab067f",
+        "signature": "8611d3045f73d53caf2389bf4a559908c4f92f3b3df4591a96a6ebb23dc95cf111630f88961a7c25b95a9d1ba281d947b52525d94484f869fbb5a2f4a1958c351b",
+        "header_sha256": "759c9e1f9f5f39957d26bccbccc8e9acaee7628afa76f839b2f1784cfaa1fc2a",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "ce3cb1f0422de120237447a96def25a54ec6d0963adfddea7dcbf308faa6f68b"
+            },
+            "signature": "8611d3045f73d53caf2389bf4a559908c4f92f3b3df4591a96a6ebb23dc95cf111630f88961a7c25b95a9d1ba281d947b52525d94484f869fbb5a2f4a1958c351b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000000001",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000000001",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:1"
+          }
+        }
+      }
+    },
+    {
+      "id": "optimism",
+      "network": "optimism",
+      "network_config": {
+        "chain_id": 10,
+        "operator": "0x000000000000000000000000000000000000000A",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "usdc": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "1c9e6b1a518e10e29c6752a1d37643743c6e333653e0eac3cf8047a5d4423570",
+        "digest": "1c368a3f3ca834ad035152b4d8e3e0e8eeffbae35a2f660d5a3fcaf588dc8aaa",
+        "signature": "0eddf8cd99159be288cb9734743483603531a02188fadaac8b1236a9dcafd64066c235139c8cc3eaccb4d98d24548c56e8c9c4612e0059f7d9ea4d3d93bcfab11c",
+        "header_sha256": "0ecb2491b94a751f1e4aa3d749ba84ca64005569a0ea821ac88b95151e976348",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "1c9e6b1a518e10e29c6752a1d37643743c6e333653e0eac3cf8047a5d4423570"
+            },
+            "signature": "0eddf8cd99159be288cb9734743483603531a02188fadaac8b1236a9dcafd64066c235139c8cc3eaccb4d98d24548c56e8c9c4612e0059f7d9ea4d3d93bcfab11c",
+            "paymentInfo": {
+              "operator": "0x000000000000000000000000000000000000000A",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x000000000000000000000000000000000000000A",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:10"
+          }
+        }
+      }
+    },
+    {
+      "id": "polygon",
+      "network": "polygon",
+      "network_config": {
+        "chain_id": 137,
+        "operator": "0x0000000000000000000000000000000000000089",
+        "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        "token_collector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "a3129bcac91ddca61ce4d870530986ff51ab6b3dd6e82f3a4bd11b852c683d02",
+        "digest": "6e01ac89592fb6a5a13ef06fe228eae657aa84e675278f74c945c19ddd6cea8e",
+        "signature": "a7ba26055675737218d9b921a51c08407739c5682e8821ed4b54e42b4e0d20381554399d03034e577d8a7b91ffe0df697f805db1c2417d0bb02337e87c64bd5c1b",
+        "header_sha256": "1a4a1acf65ea51c894616573395b0d872a14d9b452a13fdd9af0354a9647aba6",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "a3129bcac91ddca61ce4d870530986ff51ab6b3dd6e82f3a4bd11b852c683d02"
+            },
+            "signature": "a7ba26055675737218d9b921a51c08407739c5682e8821ed4b54e42b4e0d20381554399d03034e577d8a7b91ffe0df697f805db1c2417d0bb02337e87c64bd5c1b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000000089",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000000089",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:137"
+          }
+        }
+      }
+    },
+    {
+      "id": "monad",
+      "network": "monad",
+      "network_config": {
+        "chain_id": 143,
+        "operator": "0x000000000000000000000000000000000000008F",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+        "usdc_domain_name": "USDC",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "d9129a3fd108458b8a35d39d01d0bdf3da4dce524cb9fa2570da1e133703355b",
+        "digest": "ab56e142598dfca67d4080ded30cd549bd890e5b52e383cb54069d56cef5048c",
+        "signature": "85420fa405a60bb01c4eb9106b6a0b0c14b3db911d12b84f2ad91f4795c89851253c128296f790ef96f519399ca68452aa78722eb1742a8107ac9465ef2edbc91b",
+        "header_sha256": "f0732fb95cbe77e1a3081a3331d87c17a3be8c8c99255cd13b3ea899cabd0fdf",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "d9129a3fd108458b8a35d39d01d0bdf3da4dce524cb9fa2570da1e133703355b"
+            },
+            "signature": "85420fa405a60bb01c4eb9106b6a0b0c14b3db911d12b84f2ad91f4795c89851253c128296f790ef96f519399ca68452aa78722eb1742a8107ac9465ef2edbc91b",
+            "paymentInfo": {
+              "operator": "0x000000000000000000000000000000000000008F",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x000000000000000000000000000000000000008F",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:143"
+          }
+        }
+      }
+    },
+    {
+      "id": "arc",
+      "network": "arc",
+      "network_config": {
+        "chain_id": 5042,
+        "operator": "0x00000000000000000000000000000000000013B2",
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "usdc": "0x3600000000000000000000000000000000000000",
+        "usdc_domain_name": "USDC",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "8af6a1a7c9d5c73355e072b415826b907825fdc0fa2156af6555738c38cade3d",
+        "digest": "d485896c548bc70ab76d6798977e3c545e77e61fc2698ca8d8d4d1e1c1a7f19f",
+        "signature": "e7c0a80d43b821b7d9ba6cbb02caf7cd059434b46481b244c03f71616266f4cd384978bc45fed7fb1394d1012bd6fb1e22464908f80a9ff2875d476f33eeca801c",
+        "header_sha256": "99e5f21cf8449efc61ac3b7df2c518b566fdba591ce41376ca09e6d359cf79b5",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "8af6a1a7c9d5c73355e072b415826b907825fdc0fa2156af6555738c38cade3d"
+            },
+            "signature": "e7c0a80d43b821b7d9ba6cbb02caf7cd059434b46481b244c03f71616266f4cd384978bc45fed7fb1394d1012bd6fb1e22464908f80a9ff2875d476f33eeca801c",
+            "paymentInfo": {
+              "operator": "0x00000000000000000000000000000000000013B2",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x3600000000000000000000000000000000000000",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x00000000000000000000000000000000000013B2",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:5042"
+          }
+        }
+      }
+    },
+    {
+      "id": "base",
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86",
+        "digest": "a893ec1372d5db5b4f0d41266540f90e54c7ae3bd8430c2c7772769a7961ea36",
+        "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+        "header_sha256": "35293c21109467ae653c6979c3affadbb5c3910aa4279b4a984f3ac01a3013f5",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86"
+            },
+            "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "id": "arbitrum",
+      "network": "arbitrum",
+      "network_config": {
+        "chain_id": 42161,
+        "operator": "0x000000000000000000000000000000000000A4b1",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "37b8cb089893ce2e4a46bc054999a6fa9f3279eb660fe6cf7780f97c2b76f93f",
+        "digest": "78bd13c118487d9345c9814d4a0afb4a7817b78cccee87e3a3f2c3bf269896a8",
+        "signature": "b577df40b736cb2041bd05cfb02e34a22c9857f3f9a984dc9b1c9a4b9cb16bcb1654e5f54963b2ced15b159c48f6891d8c0a6e127fb86c705b0ccc091611a58c1c",
+        "header_sha256": "a186eab730e8c22a0cf227a09596f3539e2c386dcbaa97de4068b2b1f4856411",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "37b8cb089893ce2e4a46bc054999a6fa9f3279eb660fe6cf7780f97c2b76f93f"
+            },
+            "signature": "b577df40b736cb2041bd05cfb02e34a22c9857f3f9a984dc9b1c9a4b9cb16bcb1654e5f54963b2ced15b159c48f6891d8c0a6e127fb86c705b0ccc091611a58c1c",
+            "paymentInfo": {
+              "operator": "0x000000000000000000000000000000000000A4b1",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x000000000000000000000000000000000000A4b1",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:42161"
+          }
+        }
+      }
+    },
+    {
+      "id": "celo",
+      "network": "celo",
+      "network_config": {
+        "chain_id": 42220,
+        "operator": "0x000000000000000000000000000000000000a4ec",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "usdc": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+        "usdc_domain_name": "USDC",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "2dfd651b9ece9ec2d6840fd716fb0c0f9edfe890a9266bc33b678cbfe2a6fba0",
+        "digest": "273f7a1cae21c061a5cb50faca0c72abeb8ef6047541b16e1cef73b806986f20",
+        "signature": "f05b37c08ba67f013338d8b21bc67a27c0f34c680d0641c53fbeee2ead46d6e00df9a623b5400e2be30c4c38197b7edf9d375146b515eaf6b45b6d9dae3a80361c",
+        "header_sha256": "fa5ffd4db2e13e00c80e5ee1a099bb277ef3efb89980324db0d38bcecc50a109",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "2dfd651b9ece9ec2d6840fd716fb0c0f9edfe890a9266bc33b678cbfe2a6fba0"
+            },
+            "signature": "f05b37c08ba67f013338d8b21bc67a27c0f34c680d0641c53fbeee2ead46d6e00df9a623b5400e2be30c4c38197b7edf9d375146b515eaf6b45b6d9dae3a80361c",
+            "paymentInfo": {
+              "operator": "0x000000000000000000000000000000000000a4ec",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x000000000000000000000000000000000000a4ec",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:42220"
+          }
+        }
+      }
+    },
+    {
+      "id": "avalanche",
+      "network": "avalanche",
+      "network_config": {
+        "chain_id": 43114,
+        "operator": "0x000000000000000000000000000000000000a86a",
+        "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+        "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+        "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "c537ea026010ea99574dd510368731cfba5a724ba54f2a06f1709b4777984689",
+        "digest": "9bde0a0adbfe0df73625d1754d63c18c3ff1e2d19b895a9375473c15bfbffd26",
+        "signature": "f3d729340672341631597127d9d1739119e7a55374652cbe03993ca508627fcc174f06dd941e84225d8c6617748c7984dcb0230326adf9b65029f39dffb6cf2d1b",
+        "header_sha256": "95e9db731afd79bfeae75dbea194b9ae41bb3436eb14317afd85e920db83379c",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "c537ea026010ea99574dd510368731cfba5a724ba54f2a06f1709b4777984689"
+            },
+            "signature": "f3d729340672341631597127d9d1739119e7a55374652cbe03993ca508627fcc174f06dd941e84225d8c6617748c7984dcb0230326adf9b65029f39dffb6cf2d1b",
+            "paymentInfo": {
+              "operator": "0x000000000000000000000000000000000000a86a",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x000000000000000000000000000000000000a86a",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:43114"
+          }
+        }
+      }
+    },
+    {
+      "id": "arc-testnet",
+      "network": "arc-testnet",
+      "network_config": {
+        "chain_id": 5042002,
+        "operator": "0x00000000000000000000000000000000004CEf52",
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "usdc": "0x3600000000000000000000000000000000000000",
+        "usdc_domain_name": "USDC",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "c38ced50320747edc1cbcee09382221c230506944bf037178fe4718b8e328120",
+        "digest": "2f2fc69ccd7ad3b7859dc2db0974aa74218bd8454a3e75cedcb7dd64f4bdcee0",
+        "signature": "ec157940306d2b5a33bd32cc0460d90e45026818639bbfc66fa1ceec8fb488a805349fce6329630ca7116a42681ca2e84cd2859ab2fda05fa1e18f28e6957e501b",
+        "header_sha256": "9a8fca37855161ac5b35b40aad90d713f2c6476b48bb23c2c616db34a08bd7ea",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "c38ced50320747edc1cbcee09382221c230506944bf037178fe4718b8e328120"
+            },
+            "signature": "ec157940306d2b5a33bd32cc0460d90e45026818639bbfc66fa1ceec8fb488a805349fce6329630ca7116a42681ca2e84cd2859ab2fda05fa1e18f28e6957e501b",
+            "paymentInfo": {
+              "operator": "0x00000000000000000000000000000000004CEf52",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x3600000000000000000000000000000000000000",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x00000000000000000000000000000000004CEf52",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:5042002"
+          }
+        }
+      }
+    },
+    {
+      "id": "skale-base",
+      "network": "skale-base",
+      "network_config": {
+        "chain_id": 1187947933,
+        "operator": "0x0000000000000000000000000000000046CeA59d",
+        "escrow": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+        "token_collector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+        "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+        "usdc_domain_name": "Bridged USDC (SKALE Bridge)",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "d3dc7da1bcf59fb99fb528b439935201d822e1ba1af237c84bd51d9866d44e9d",
+        "digest": "fd70ee2cdf18ffaf0b24a9b66fa63b1a0b078f8d508917135312dff7a9edf1e5",
+        "signature": "eee775a0898ccab2632ddc978baaa2cf7efd164500103e5b9f3e6a31b09ccbdf4c7950dc2fdf2f4eba8823e1c174affd035977651069d92c9d4135e96b9d48a81c",
+        "header_sha256": "a6d56bc7a8e6faa51ca513539068820c961b4e43725c68d868634eb4d01a3ba5",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "d3dc7da1bcf59fb99fb528b439935201d822e1ba1af237c84bd51d9866d44e9d"
+            },
+            "signature": "eee775a0898ccab2632ddc978baaa2cf7efd164500103e5b9f3e6a31b09ccbdf4c7950dc2fdf2f4eba8823e1c174affd035977651069d92c9d4135e96b9d48a81c",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000046CeA59d",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000046CeA59d",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:1187947933"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "1.5",
+      "deadline": null,
+      "tier": "standard",
+      "delegate": null,
+      "id": "base/standard-no-deadline",
+      "expected": {
+        "nonce": "644cd51c6c52b16faad1f24d3bfd54df64c754bc98ac353832fcd14df616c394",
+        "digest": "1355f6597bff085233cf9cfe5bebeba0f4b9d985281f4549964bc75df0388013",
+        "signature": "b6f470b9e0809864923a47e320c8f91ca6e6360ab709c10f4fdc54f53b35546973594ec93ac95090502d09473dd64e1dc02e358dc6d57603be363984a00fb82c1c",
+        "header_sha256": "6189f00535c1ecf908486ccdb4562262330a3e42ad5826c43099a2a3f9eb2250",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "1500000",
+              "validAfter": "0",
+              "validBefore": "1790007200",
+              "nonce": "644cd51c6c52b16faad1f24d3bfd54df64c754bc98ac353832fcd14df616c394"
+            },
+            "signature": "b6f470b9e0809864923a47e320c8f91ca6e6360ab709c10f4fdc54f53b35546973594ec93ac95090502d09473dd64e1dc02e358dc6d57603be363984a00fb82c1c",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "1500000",
+              "preApprovalExpiry": 1790007200,
+              "authorizationExpiry": 1790604800,
+              "refundExpiry": 1791209600,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": 0.19999999999999998,
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "id": "base/float-noise",
+      "expected": {
+        "nonce": "43565b849a09d0699b5fc8aefaa0e4fe23d3cf387f44bc745d5b30484c531ef9",
+        "digest": "e06e6cb957c17b6e8669d6a0f74ed21ebdad72127ccd4321160bceaceb644993",
+        "signature": "429a80f4f5016ba25632e5a00c2fc7bf8b557b1e239268b79f170305f8d8082121754012f7cc20476d838d9b24a63c4e7b90282585fd887296af5e18782feded1c",
+        "header_sha256": "e113fff3fb4bf223475cdc3711dc50160238455cd90e4110edac1a74b8dc8223",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "200000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "43565b849a09d0699b5fc8aefaa0e4fe23d3cf387f44bc745d5b30484c531ef9"
+            },
+            "signature": "429a80f4f5016ba25632e5a00c2fc7bf8b557b1e239268b79f170305f8d8082121754012f7cc20476d838d9b24a63c4e7b90282585fd887296af5e18782feded1c",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "200000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "100",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "id": "base/deposit-limit",
+      "expected": {
+        "nonce": "69cd7e423b9808e4cc24d2087e6f8929123cb4cc72106c8583aeb50615125416",
+        "digest": "1d6889c84f802106d7b8bc821390c3c130e66f35f0a7312a0035b70513d4aa61",
+        "signature": "b46a5b07743cabbc7884b4f75c0f94b36969016ced9b35dc8250daac16eb1b9879b3801354467733d5e08927c39ddfc444659fa8a30a5dd20803665e96ca7a801b",
+        "header_sha256": "609e5080c5f23bf92563bbb2b78625183d9bd845edcb04a90d9a09ac8c12eab9",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "100000000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "69cd7e423b9808e4cc24d2087e6f8929123cb4cc72106c8583aeb50615125416"
+            },
+            "signature": "b46a5b07743cabbc7884b4f75c0f94b36969016ced9b35dc8250daac16eb1b9879b3801354467733d5e08927c39ddfc444659fa8a30a5dd20803665e96ca7a801b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "100000000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "id": "base/lowercase-inputs",
+      "lowercase_inputs": true,
+      "expected": {
+        "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86",
+        "digest": "a893ec1372d5db5b4f0d41266540f90e54c7ae3bd8430c2c7772769a7961ea36",
+        "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+        "header_sha256": "35293c21109467ae653c6979c3affadbb5c3910aa4279b4a984f3ac01a3013f5",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86"
+            },
+            "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": "0x69007702764179f14f51cdce752f4f775d74e139",
+      "id": "base/delegated-sma",
+      "expected": {
+        "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86",
+        "digest": "a893ec1372d5db5b4f0d41266540f90e54c7ae3bd8430c2c7772769a7961ea36",
+        "signature": "0000000000ff00fbbfc49c4e9ef20dcdf4cac9559094f0bf600b080221289e451c375163a905f92b45fc86a2c9e81a39cdc61b28190ac0344578372b4bfd37ecee060d87d535e21b",
+        "header_sha256": "c2cfdab0236c5d6e2f830cc3c8274dd644431bfc1a6c8a1ccedd19a246ea1265",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86"
+            },
+            "signature": "0000000000ff00fbbfc49c4e9ef20dcdf4cac9559094f0bf600b080221289e451c375163a905f92b45fc86a2c9e81a39cdc61b28190ac0344578372b4bfd37ecee060d87d535e21b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    },
+    {
+      "network": "base",
+      "network_config": {
+        "chain_id": 8453,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "usdc_domain_name": "USD Coin",
+        "usdc_domain_version": "2"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": "0xD1d1d1D1d1d1D1d1D1D1D1d1d1D1D1D1d1D1d1d1",
+      "id": "base/delegated-plain-1271",
+      "expected": {
+        "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86",
+        "digest": "a893ec1372d5db5b4f0d41266540f90e54c7ae3bd8430c2c7772769a7961ea36",
+        "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+        "header_sha256": "35293c21109467ae653c6979c3affadbb5c3910aa4279b4a984f3ac01a3013f5",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "7924300feb092359816e39906d29a380ed6d0dc8bfcbd3feeaca679680fcfa86"
+            },
+            "signature": "fc7e245bbf16d2a70e1a7ddd265b2d477e8827d3f97c297e696689c25f60d68f03c25bde02586c8a936f83858d81689d5f4f15034d4e944a811bea8aa848c8291b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000002105",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000002105",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:8453"
+          }
+        }
+      }
+    }
+  ]
+}

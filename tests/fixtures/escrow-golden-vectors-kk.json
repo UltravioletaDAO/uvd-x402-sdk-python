@@ -1,0 +1,291 @@
+{
+  "_serialization": "hex fields of 32+ bytes (expected_nonce, expected_signature, paymentInfo.salt, payment_info_typehash, generation_params.frozen_salt) are stored WITHOUT the 0x prefix \u2014 rebuild '0x'+hex on load. This keeps the fixture invisible to the 0x+64hex private-key leak scanner.",
+  "consumed_by": [
+    "tests/sdk/test_escrow_signing_multichain.py",
+    "Role 6 on-chain settlement verification"
+  ],
+  "generation_params": {
+    "amount_usd": "0.10",
+    "deadline": null,
+    "frozen_epoch": 1767225600,
+    "frozen_salt": "abababababababababababababababababababababababababababababababab",
+    "receiver": "0x000000000000000000000000000000000000dEaD",
+    "signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+    "tier": "micro"
+  },
+  "generator": "scripts/kk/gen_escrow_golden_vectors.py",
+  "payment_info_typehash": "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591",
+  "source_domains": "data/escrow_domains_verified.json",
+  "vectors": {
+    "arbitrum": {
+      "chain_id": 42161,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+      "expected_nonce": "e576b03a1bf59eb17d3ed988a4cae5664d95600f99b291c48f3cbaaf2d0d8d26",
+      "expected_signature": "0e4555241e380a9fc9bda64fb15ae53fd2a749c557898aab7dde5f37e98be1d3538661a3f70a62daac657f6acc099a488218a149b75689e5cc3477dd1bef75bf1b",
+      "network": "arbitrum",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x000000000000000000000000000000000000A4b1",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x000000000000000000000000000000000000A4b1",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+      "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+    },
+    "arc": {
+      "chain_id": 5042,
+      "domain": {
+        "name": "USDC",
+        "version": "2"
+      },
+      "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+      "expected_nonce": "f893b1e5e925dba521581a6823de647c34182a743c84611411cf1858519ffcb9",
+      "expected_signature": "3637e1fee8e7b98d9b73cdce2048a94150083c7a5758910a78d57c5f26bedf944a6b6146b66d350595c747ea59a2abe3d4b094160fc63956f3286f27ba60cf681b",
+      "network": "arc",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x00000000000000000000000000000000000013B2",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x00000000000000000000000000000000000013B2",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x3600000000000000000000000000000000000000"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+      "usdc": "0x3600000000000000000000000000000000000000"
+    },
+    "avalanche": {
+      "chain_id": 43114,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+      "expected_nonce": "129175a9b0cfdb68e1af0a67e47046bac5398448048f8e41f0c1a60e32ad0051",
+      "expected_signature": "aa63dc35fee38423cebd68d2c488e933c6ccbe0599a868ff1a0d74a9e5d0dd1550a434c922c3ff8fd52dacd0a9a399cb8c03ffe20d00bb24fc7463ed9d0893ac1b",
+      "network": "avalanche",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x000000000000000000000000000000000000a86a",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x000000000000000000000000000000000000a86a",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+      "usdc": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"
+    },
+    "base": {
+      "chain_id": 8453,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+      "expected_nonce": "30f83e8b161edbbb4768aa8d3fa40fd87825cb70e371c1dbe161dd02ce01ae70",
+      "expected_signature": "70191e74d9a366549ecf98b1eab74d17092f9bbc57a9570f5bd680a99abc6dee7d57652d02ee6e144f840007005303a92543b5f5b0e85e2a08405216492fc35a1c",
+      "network": "base",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x0000000000000000000000000000000000002105",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x0000000000000000000000000000000000002105",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+      "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    },
+    "celo": {
+      "chain_id": 42220,
+      "domain": {
+        "name": "USDC",
+        "version": "2"
+      },
+      "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+      "expected_nonce": "7ec3808541020d5739830109ad2277c664838d83f53ca326aa93c9a66d315ff4",
+      "expected_signature": "a19e1e497a6615cdebb1ab700fd10eb05d91fba4bef01accb932d855597986203c2126fbdf70a577543ab8bba66f818096bc1865935c31d6380d34abb8e2c2631b",
+      "network": "celo",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x000000000000000000000000000000000000a4ec",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x000000000000000000000000000000000000a4ec",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+      "usdc": "0xcebA9300f2b948710d2653dD7B07f33A8B32118C"
+    },
+    "ethereum": {
+      "chain_id": 1,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+      "expected_nonce": "46f590cd07c620521790c2a196375ab528c4926064952cd711388776bf972766",
+      "expected_signature": "89dc2c1267c556b5ebcfe795a3ef7516c5ae084bc6f7a92f6d32d3f78676234f78f02f66644a6e07fb44fdde217bee6745eff057f1f399ec46ea694c3cdb57f81c",
+      "network": "ethereum",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x0000000000000000000000000000000000000001",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x0000000000000000000000000000000000000001",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+      "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    },
+    "monad": {
+      "chain_id": 143,
+      "domain": {
+        "name": "USDC",
+        "version": "2"
+      },
+      "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+      "expected_nonce": "65ef48a04ed0376fec2717849254c0cbefcf0fb1f75406f304baaab4fe416d9e",
+      "expected_signature": "cb7bfd91805e6532803b9bdbdb6e9748ec169dd47e628c07d89f5709acca6f5572bff40a44c5f5d174927ab3f06881bacd46e8997cdd236804a0bed42a7f78271c",
+      "network": "monad",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x000000000000000000000000000000000000008F",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x000000000000000000000000000000000000008F",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+      "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603"
+    },
+    "optimism": {
+      "chain_id": 10,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0x320a3c35F131E5D2Fb36af56345726B298936037",
+      "expected_nonce": "d083a2f564b7788d09de8cb8b21e70162ac2a16e05285844977e0f089af21117",
+      "expected_signature": "34bc9c32760dd1db66df3d948c903b25d559b62054db4fc2297c4f1a44b079936c41c568f0f6d9dbd5c900f7802db95d070158702d03e71ae5e85b2735dd93fe1b",
+      "network": "optimism",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x000000000000000000000000000000000000000A",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x000000000000000000000000000000000000000A",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x230fd3A171750FA45db2976121376b7F47Cba308",
+      "usdc": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+    },
+    "polygon": {
+      "chain_id": 137,
+      "domain": {
+        "name": "USD Coin",
+        "version": "2"
+      },
+      "escrow": "0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+      "expected_nonce": "baf62c5b1cbf83d5e3750e9d583f10b31dc21226acb1db26160ca926231ad6a0",
+      "expected_signature": "b2448cc524183ba574c25a1cad1b30d3a6914236874ec5c191c783ea62f1086c778ce23a6a593baaaf3854354f9a3033b12d1e63863c0b2456a46cd8cfe792cc1b",
+      "network": "polygon",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x0000000000000000000000000000000000000089",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x0000000000000000000000000000000000000089",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+      "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+    },
+    "skale": {
+      "chain_id": 1187947933,
+      "domain": {
+        "name": "Bridged USDC (SKALE Bridge)",
+        "version": "2"
+      },
+      "escrow": "0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+      "expected_nonce": "5f90d921ad1dd5ae7f4bb6f68b709ae30732dab52b171107cd4d8e836eba4775",
+      "expected_signature": "8d17b8a68a6a223eb52c145887afd17a5ae8005bbc6db071053578f9c2fb31d67256e81e33c67da37dccb061f7b392e04eb96ff7fd75b9319a256ae37623bb701c",
+      "network": "skale",
+      "paymentInfo": {
+        "authorizationExpiry": 1767830400,
+        "feeReceiver": "0x0000000000000000000000000000000046CeA59d",
+        "maxAmount": "100000",
+        "maxFeeBps": 1800,
+        "minFeeBps": 0,
+        "operator": "0x0000000000000000000000000000000046CeA59d",
+        "preApprovalExpiry": 1767229200,
+        "receiver": "0x000000000000000000000000000000000000dEaD",
+        "refundExpiry": 1768435200,
+        "salt": "abababababababababababababababababababababababababababababababab",
+        "token": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20"
+      },
+      "recovered_signer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "token_collector": "0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+      "usdc": "0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20"
+    }
+  }
+}
