@@ -130,7 +130,7 @@ payment_requirements = {
 ### WalletAdapter Protocol (wallet.py)
 - `WalletAdapter` - Abstract Protocol interface for any wallet backend
 - `EnvKeyAdapter` - Uses raw private key from env var or direct param
-- `OWSWalletAdapter` - Stub for Open Wallet Standard (not yet on PyPI)
+- `OWSWalletAdapter` - signs in an Open Wallet Standard vault; written against `open-wallet-standard` **1.4.2** (module `ows`: wallet by name or id, `chain` explicit as `eip155:<id>`, typed data as a JSON string, results are dicts). `tests/ows_double.py` has the library's signatures, pinned by `inspect.signature` in `tests/test_ows_wallet_adapter.py` (which also signs in a temporary vault and recovers with eth-account); a new ows release is a new API to measure, bump the pin in `dev` with it
 - `EIP3009Params` / `EIP3009Authorization` / `SignedTypedData` - TypedDict types
 - Requires `pip install uvd-x402-sdk[wallet]` or `uvd-x402-sdk[signer]`
 - Auto-detects USDC contract addresses and EIP-712 domain names per network

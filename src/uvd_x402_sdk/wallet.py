@@ -3,7 +3,7 @@ WalletAdapter -- abstract interface for wallet signing operations.
 
 Provides a unified Protocol for any wallet backend:
 - EnvKeyAdapter: uses a raw private key from environment or direct param
-- OWSWalletAdapter: stub for Open Wallet Standard (when available on PyPI)
+- OWSWalletAdapter: signs inside an Open Wallet Standard vault (open-wallet-standard)
 
 The WalletAdapter protocol can be passed to X402Client or used standalone
 for signing EIP-3009 ReceiveWithAuthorization messages.
@@ -27,6 +27,7 @@ Requires: pip install uvd-x402-sdk[wallet]  (eth-account>=0.11.0)
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import time
@@ -140,7 +141,7 @@ class WalletAdapter(Protocol):
 
     Implementations:
     - EnvKeyAdapter: raw private key from env var or direct param
-    - OWSWalletAdapter: Open Wallet Standard (future)
+    - OWSWalletAdapter: Open Wallet Standard vault
     """
 
     def get_address(self) -> str:
@@ -490,27 +491,119 @@ class EnvKeyAdapter:
 
 
 # =============================================================================
-# OWSWalletAdapter (Stub)
+# OWSWalletAdapter
 # =============================================================================
+
+# The EIP-712 domain fields in the order EIP-712 lists them, which is the order
+# eth-account derives ``EIP712Domain`` in. The digest depends on it.
+_EIP712_DOMAIN_FIELDS = (
+    ("name", "string"),
+    ("version", "string"),
+    ("chainId", "uint256"),
+    ("verifyingContract", "address"),
+    ("salt", "bytes32"),
+)
+
+
+def _ows_json_value(value: Any) -> Any:
+    """``value`` in the form ``ows.sign_typed_data`` reads from its JSON.
+
+    Measured on ows 1.4.2: ``bytes`` are not JSON at all; ``2**255`` as a JSON
+    number is refused, and above ``2**128`` a decimal string is refused too
+    ("use hex encoding"); an odd-length hex string is refused. So every
+    integer goes as a decimal string up to ``2**128`` and as even-length hex
+    above it, and bytes go as 0x-hex.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return "0x" + bytes(value).hex()
+    if isinstance(value, int):
+        if value >= 2**128:
+            digits = format(value, "x")
+            return "0x" + "0" * (len(digits) % 2) + digits
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _ows_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_ows_json_value(item) for item in value]
+    return value
+
+
+def _primary_type(types: Dict[str, Any]) -> str:
+    """The struct no other struct references: the root eth-account picks."""
+    structs = [name for name in types if name != "EIP712Domain"]
+    referenced = {field["type"].split("[", 1)[0] for name in structs for field in types[name]}
+    roots = [name for name in structs if name not in referenced]
+    if len(roots) != 1:
+        raise ValueError(f"typed data has no single root struct ({roots}); pass 'primaryType'")
+    return roots[0]
+
+
+def _ows_typed_data_json(typed_data: dict) -> str:
+    """The typed data as the JSON document ``ows.sign_typed_data`` takes.
+
+    ows refuses a document without ``EIP712Domain`` in ``types`` or without
+    ``primaryType``. eth-account derives both and this SDK's producers leave
+    ``EIP712Domain`` out, so both are added here the way eth-account derives
+    them: the digest is the one ``EnvKeyAdapter`` signs.
+    """
+    domain = typed_data["domain"]
+    types = dict(typed_data["types"])
+    if "EIP712Domain" not in types:
+        types["EIP712Domain"] = [
+            {"name": name, "type": kind} for name, kind in _EIP712_DOMAIN_FIELDS if name in domain
+        ]
+    document = {
+        "types": types,
+        "primaryType": typed_data.get("primaryType") or _primary_type(types),
+        "domain": domain,
+        "message": typed_data["message"],
+    }
+    return json.dumps(_ows_json_value(document))
+
+
+def _ows_signature(result: Dict[str, Any]) -> bytes:
+    """The 65 bytes ``r || s || v`` of an ows signing result, ``v`` as 27/28.
+
+    ows returns a dict, ``{"signature": <hex without 0x>, "recovery_id": int}``,
+    with the recovery byte already at the end of ``signature``: 27/28 for
+    messages and typed data, 0/1 for transactions (measured on 1.4.2).
+    """
+    signature = bytes.fromhex(str(result["signature"]).removeprefix("0x"))
+    if len(signature) != 65:
+        raise ValueError(f"ows returned a {len(signature)}-byte signature, not 65")
+    if signature[64] < 27:
+        signature = signature[:64] + bytes([signature[64] + 27])
+    return signature
+
+
+def _eip155_chain(chain_id: Any) -> Optional[str]:
+    """``eip155:<id>`` for a chain id given as int, decimal or hex string."""
+    if isinstance(chain_id, bool) or chain_id is None:
+        return None
+    try:
+        number = int(chain_id, 0) if isinstance(chain_id, str) else int(chain_id)
+    except (TypeError, ValueError):
+        return None
+    return f"eip155:{number}"
 
 
 class OWSWalletAdapter:
     """
-    WalletAdapter using Open Wallet Standard (OWS).
+    WalletAdapter over an Open Wallet Standard (OWS) vault.
 
-    OWS provides secure, local, multi-chain wallet management for AI agents.
-    Private keys are encrypted locally (AES-256-GCM) and never leave the vault.
+    OWS keeps the keys encrypted in a local vault and signs inside it; the key
+    never reaches this process. Written against ``open-wallet-standard`` 1.4.2
+    (module ``ows``), whose functions take the wallet by name or id and the
+    chain explicitly, and return dicts.
 
-    As of April 2026, the OWS Python package is not yet on PyPI.
-    Use EnvKeyAdapter as the primary adapter, or the OWS MCP Server (TypeScript)
-    for signing operations.
-
-    When the OWS Python SDK becomes available:
-        pip install open-wallet-standard
+    Requires: ``pip install open-wallet-standard`` (and ``eth-account``, the
+    ``signer`` extra, for ``sign_transaction`` only).
 
     Example:
         >>> from uvd_x402_sdk.wallet import OWSWalletAdapter
-        >>> wallet = OWSWalletAdapter(wallet_name="my-agent-wallet")
+        >>> wallet = OWSWalletAdapter(wallet_name="my-agent-wallet", network="base")
         >>> print(wallet.get_address())
     """
 
@@ -518,85 +611,160 @@ class OWSWalletAdapter:
         self,
         wallet_name: str,
         passphrase: Optional[str] = None,
+        network: str = "base",
+        vault_path: Optional[str] = None,
     ) -> None:
         """
         Initialize with an OWS wallet.
 
         Args:
-            wallet_name: Name of the wallet in the OWS vault.
-            passphrase: Vault passphrase. Falls back to OWS_PASSPHRASE env var.
+            wallet_name: Name or id of the wallet in the OWS vault.
+            passphrase: Vault passphrase (or OWS API key). Falls back to the
+                OWS_PASSPHRASE env var.
+            network: EVM network this adapter signs for (SDK name or CAIP-2,
+                e.g. ``"base"`` or ``"eip155:8453"``). It is the ``chain`` ows
+                is given, which is what an OWS policy decides on. Typed data
+                and transactions that carry their own chain id are signed on
+                that chain instead.
+            vault_path: OWS vault directory. None = the ows default.
 
         Raises:
             ImportError: If the OWS Python SDK is not installed.
+            ValueError: If ``network`` is not a known EVM network.
         """
         try:
-            import ows as _ows  # type: ignore[import-not-found]
+            import ows as _ows  # type: ignore[import-not-found,unused-ignore]
 
             self._ows = _ows
         except ImportError:
             raise ImportError(
                 "OWS Python SDK not available. Install: pip install open-wallet-standard\n"
-                "Note: As of April 2026, the package is not yet on PyPI.\n"
-                "Use EnvKeyAdapter or the OWS MCP Server (TypeScript) instead."
+                "Or use EnvKeyAdapter instead."
             )
+        from uvd_x402_sdk.networks.base import NetworkType, get_network, normalize_network
+
+        try:
+            network_config = get_network(normalize_network(network))
+        except ValueError:
+            network_config = None
+        if network_config is None or network_config.network_type != NetworkType.EVM:
+            raise ValueError(f"OWSWalletAdapter signs for an EVM network; got {network!r}")
+
         self._wallet_name = wallet_name
         self._passphrase = passphrase or os.environ.get("OWS_PASSPHRASE")
+        self._chain = f"eip155:{network_config.chain_id}"
+        self._vault_path = vault_path
 
     def get_address(self) -> str:
         """Get the EVM wallet address from OWS vault."""
-        wallet = self._ows.get_wallet(self._wallet_name, passphrase=self._passphrase)
-        return wallet.address
+        wallet = self._ows.get_wallet(name_or_id=self._wallet_name, vault_path_opt=self._vault_path)
+        for account in wallet["accounts"]:
+            if str(account["chain_id"]).startswith("eip155:"):
+                return str(account["address"])
+        raise ValueError(f"OWS wallet {self._wallet_name!r} has no EVM account")
 
     def sign_message(self, message: str) -> str:
         """Sign a message using EIP-191 personal_sign via OWS."""
         result = self._ows.sign_message(
-            wallet_name=self._wallet_name,
+            wallet=self._wallet_name,
+            chain=self._chain,
             message=message,
             passphrase=self._passphrase,
+            vault_path_opt=self._vault_path,
         )
-        return result.signature
+        return "0x" + _ows_signature(result).hex()
 
     def sign_typed_data(self, typed_data: dict) -> SignedTypedData:
         """Sign EIP-712 typed data via OWS."""
+        chain = _eip155_chain(typed_data["domain"].get("chainId")) or self._chain
         result = self._ows.sign_typed_data(
-            wallet_name=self._wallet_name,
-            domain=typed_data["domain"],
-            types=typed_data["types"],
-            message=typed_data["message"],
+            wallet=self._wallet_name,
+            chain=chain,
+            typed_data_json=_ows_typed_data_json(typed_data),
             passphrase=self._passphrase,
+            vault_path_opt=self._vault_path,
         )
+        signature = _ows_signature(result)
         return SignedTypedData(
-            signature=result.signature,
-            v=result.v,
-            r=result.r,
-            s=result.s,
+            signature="0x" + signature.hex(),
+            v=signature[64],
+            r="0x" + signature[:32].hex(),
+            s="0x" + signature[32:64].hex(),
         )
 
     def sign_transaction(self, tx: dict) -> str:
         """
         Sign a raw EVM transaction via OWS.
 
-        Delegates transaction signing to the OWS vault. The private key is
-        decrypted in memory, used to sign, then immediately wiped.
+        ows signs the unsigned transaction's bytes and returns only the
+        signature, so the transaction is serialised and re-assembled here with
+        eth-account, the way ``Account.sign_transaction`` does it.
 
         Args:
             tx: Unsigned transaction dict (web3.py format).
 
         Returns:
             Hex-encoded signed raw transaction (0x-prefixed).
+
+        Raises:
+            ImportError: If eth-account is not installed.
         """
+        try:
+            import rlp  # type: ignore[import-untyped,unused-ignore]
+            from eth_account._utils.signing import (
+                encode_transaction,
+                serializable_unsigned_transaction_from_dict,
+                to_eth_v,
+            )
+            from eth_utils import keccak
+        except ImportError:
+            raise ImportError(
+                "eth-account is required for OWSWalletAdapter.sign_transaction. "
+                "Install it with: pip install uvd-x402-sdk[signer]"
+            )
+
+        unsigned = serializable_unsigned_transaction_from_dict(dict(tx))
+        legacy = isinstance(unsigned, rlp.Serializable)
+        if legacy:
+            preimage = rlp.encode(unsigned)
+        else:
+            # EIP-2718: type || rlp([fields]). The signed form minus v, r, s.
+            shape = encode_transaction(unsigned, vrs=(0, 1, 1))
+            preimage = shape[:1] + rlp.encode(rlp.decode(shape[1:])[:-3])
+        if keccak(preimage) != unsigned.hash():
+            raise RuntimeError(
+                "Could not serialise the unsigned transaction as eth-account hashes it; "
+                "nothing was signed"
+            )
+
         result = self._ows.sign_transaction(
-            wallet_name=self._wallet_name,
-            transaction=tx,
+            wallet=self._wallet_name,
+            chain=_eip155_chain(tx.get("chainId")) or self._chain,
+            tx_hex=preimage.hex(),
             passphrase=self._passphrase,
+            vault_path_opt=self._vault_path,
         )
-        return result.raw_transaction
+        signature = _ows_signature(result)
+        y_parity = signature[64] - 27
+        # Legacy: EIP-155 v when the transaction names its chain (eth-account
+        # carries it in ``v`` of the unsigned form), 27/28 when it does not.
+        v = to_eth_v(y_parity, getattr(unsigned, "v", None)) if legacy else y_parity
+        raw = encode_transaction(
+            unsigned,
+            vrs=(
+                v,
+                int.from_bytes(signature[:32], "big"),
+                int.from_bytes(signature[32:64], "big"),
+            ),
+        )
+        return "0x" + bytes(raw).hex()
 
     def sign_eip3009(self, params: EIP3009Params) -> EIP3009Authorization:
         """
         Sign EIP-3009 ReceiveWithAuthorization via OWS.
 
-        Uses the OWS MCP server's ows_sign_eip3009 capability.
+        Builds the same typed data as ``EnvKeyAdapter.sign_eip3009`` and signs
+        it with ``sign_typed_data`` (ows has no EIP-3009 call of its own).
         """
         from uvd_x402_sdk.networks.base import (
             get_network,
@@ -644,29 +812,46 @@ class OWSWalletAdapter:
         chain_id = params.get("chain_id") or network_config.chain_id
         usdc_contract = params.get("usdc_contract") or token_config.address
 
-        result = self._ows.sign_eip3009(
-            wallet_name=self._wallet_name,
-            to=to,
-            value=str(amount_base),
-            valid_after=str(valid_after),
-            valid_before=str(valid_before),
-            nonce=nonce_hex,
-            chain_id=chain_id,
-            token_address=usdc_contract,
-            domain_name=token_config.name,
-            domain_version=token_config.version,
-            passphrase=self._passphrase,
+        from_address = self.get_address()
+        signed = self.sign_typed_data(
+            {
+                "types": {
+                    "ReceiveWithAuthorization": [
+                        {"name": "from", "type": "address"},
+                        {"name": "to", "type": "address"},
+                        {"name": "value", "type": "uint256"},
+                        {"name": "validAfter", "type": "uint256"},
+                        {"name": "validBefore", "type": "uint256"},
+                        {"name": "nonce", "type": "bytes32"},
+                    ],
+                },
+                "primaryType": "ReceiveWithAuthorization",
+                "domain": {
+                    "name": token_config.name,
+                    "version": token_config.version,
+                    "chainId": chain_id,
+                    "verifyingContract": usdc_contract,
+                },
+                "message": {
+                    "from": from_address,
+                    "to": to,
+                    "value": amount_base,
+                    "validAfter": valid_after,
+                    "validBefore": valid_before,
+                    "nonce": "0x" + nonce_hex.removeprefix("0x"),
+                },
+            }
         )
 
         return EIP3009Authorization(
-            from_address=result.from_address,
+            from_address=from_address,
             to=to,
             value=str(amount_base),
             valid_after=str(valid_after),
             valid_before=str(valid_before),
             nonce=nonce_hex,
-            v=result.v,
-            r=result.r,
-            s=result.s,
-            signature=result.signature,
+            v=signed["v"],
+            r=signed["r"],
+            s=signed["s"],
+            signature=signed["signature"],
         )

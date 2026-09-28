@@ -45,6 +45,7 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 
 import uvd_x402_sdk.escrow_signing as escrow_module
+from tests.ows_double import FakeOws
 from tests.test_escrow_signing import PAYMENT_CONFIG
 from uvd_x402_sdk import X402Client, X402Config
 from uvd_x402_sdk import client as client_module
@@ -223,19 +224,6 @@ class RecordingAccount:
         return types.SimpleNamespace(signature=bytes.fromhex("11" * 65), v=27, r=1, s=1)
 
 
-class FakeOws:
-    """The ``ows`` module's ``sign_eip3009``, keeping what it was asked to sign."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def sign_eip3009(self, **kwargs: Any) -> Any:
-        self.calls.append(kwargs)
-        return types.SimpleNamespace(
-            from_address=PAYER, v=27, r="0x" + "22" * 32, s="0x" + "33" * 32, signature=SIGNATURE
-        )
-
-
 class RecordingWallet:
     """A ``WalletAdapter`` for the escrow pre-auth that keeps each typed data."""
 
@@ -292,7 +280,8 @@ def via_env_key_adapter() -> Signer:
 
 
 def via_ows_adapter(monkeypatch: pytest.MonkeyPatch) -> Signer:
-    ows = FakeOws()
+    # The double has ows 1.4.2's signatures (tests/test_ows_wallet_adapter.py).
+    ows = FakeOws(address=PAYER)
     monkeypatch.setitem(sys.modules, "ows", ows)
     adapter = OWSWalletAdapter(wallet_name="test-wallet")
 
@@ -301,9 +290,10 @@ def via_ows_adapter(monkeypatch: pytest.MonkeyPatch) -> Signer:
         try:
             auth = adapter.sign_eip3009({"to": RECIPIENT, "amount_usdc": price, "network": NETWORK})
         except ValueError:
-            assert ows.calls == [], "raised after signing"
+            assert ows.signed("sign_typed_data") == [], "raised after signing"
             return None
-        assert [call["value"] for call in ows.calls] == [auth["value"]]
+        signed = [json.loads(call["typed_data_json"]) for call in ows.signed("sign_typed_data")]
+        assert [document["message"]["value"] for document in signed] == [auth["value"]]
         return str(auth["value"])
 
     return sign

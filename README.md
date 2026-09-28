@@ -2197,7 +2197,7 @@ async with BazaarClient() as bazaar:
 
 ## WalletAdapter
 
-Abstract wallet interface for signing EIP-3009 authorizations. Use `EnvKeyAdapter` for raw private keys or `OWSWalletAdapter` for Open Wallet Standard (future).
+Abstract wallet interface for signing EIP-3009 authorizations. Use `EnvKeyAdapter` for raw private keys or `OWSWalletAdapter` for a key kept in an Open Wallet Standard vault.
 
 ```bash
 pip install uvd-x402-sdk[wallet]
@@ -2228,6 +2228,27 @@ result = wallet.sign_typed_data({
 # Sign a personal message (EIP-191)
 sig = wallet.sign_message("Hello, world!")
 ```
+
+### OWSWalletAdapter (Open Wallet Standard)
+
+The key stays in the OWS vault and is used there; this process never holds it.
+Written against `open-wallet-standard` 1.4.2 (`pip install open-wallet-standard`;
+`sign_transaction` also needs the `signer` extra).
+
+```python
+from uvd_x402_sdk import OWSWalletAdapter
+
+wallet = OWSWalletAdapter(
+    wallet_name="agent-treasury",  # name or id in the vault
+    network="base",                # the chain OWS is told (its policies decide on it)
+    # passphrase=...  (default: OWS_PASSPHRASE), vault_path=...  (default: ows's own)
+)
+auth = wallet.sign_eip3009({"to": "0xRecipient...", "amount_usdc": "0.10", "network": "base"})
+```
+
+Typed data and transactions that name their own chain id are signed on that
+chain. Every method signs the same bytes `EnvKeyAdapter` signs with the same key
+(`tests/test_ows_wallet_adapter.py`).
 
 ### Custom WalletAdapter
 
