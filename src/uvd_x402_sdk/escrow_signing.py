@@ -68,8 +68,8 @@ install can import it; the eth libs are only required when signing.
 Public API (stable)
 -------------------
 This module is the one implementation of the escrow EIP-3009 signature.
-Execution Market (``em_plugin_sdk.escrow_signing``) and Karmakadabra
-(``agents_sdk.escrow_signing``) each kept a copy; they import it from here.
+Execution Market and Karmakadabra each kept a copy; they are to import it
+from here (each drops its copy when it adopts the release that carries this).
 The names in ``__all__`` are the contract: none is renamed or removed and
 no positional parameter moves, and ``tests/test_escrow_signing_api.py``
 pins the list and every signature, so a change that would break an
@@ -442,6 +442,10 @@ def build_escrow_pre_auth(
             "— refusing to sign: the nonce would not be the escrow's getHash and "
             "the lock would revert."
         )
+    # The value the guard accepted, in the one spelling compute_escrow_nonce
+    # reads: a "0X" prefix or surrounding whitespace would otherwise reach
+    # bytes.fromhex and fail there with a message that does not name it.
+    typehash = "0x" + str(typehash).strip().lower().removeprefix("0x")
 
     amount = Decimal(str(amount_usd))
     if amount <= 0:

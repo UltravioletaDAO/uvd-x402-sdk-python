@@ -343,14 +343,26 @@ def test_the_verified_domain_is_the_network_registrys(chain_id):
 
 # ── the typehash guard (from Karmakadabra's copy) ───────────────────────────
 
+def _next_hex(digit: str) -> str:
+    return format((int(digit, 16) + 1) % 16, "x")
+
+
+_CANONICAL_HEX = ESCROW_PAYMENT_INFO_TYPEHASH.removeprefix("0x")
+
 WRONG_TYPEHASHES = [
     "0x" + "ab" * 32,
     # One field renamed: the typehash of another struct.
     "0x" + keccak(text=PAYMENT_INFO_TYPE.replace("salt", "nonce")).hex().removeprefix("0x"),
+    # One hex digit off at each end: a comparison of a prefix, or of a suffix,
+    # lets one of these through.
+    "0x" + _CANONICAL_HEX[:-1] + _next_hex(_CANONICAL_HEX[-1]),
+    "0x" + _next_hex(_CANONICAL_HEX[0]) + _CANONICAL_HEX[1:],
 ]
 
 
-@pytest.mark.parametrize("typehash", WRONG_TYPEHASHES, ids=["filler", "other-struct"])
+@pytest.mark.parametrize(
+    "typehash", WRONG_TYPEHASHES, ids=["filler", "other-struct", "last-digit", "first-digit"]
+)
 def test_another_typehash_is_refused_before_signing(typehash):
     wallet = _Wallet()
     with pytest.raises(ValueError, match="payment_info_typehash"):
@@ -364,8 +376,10 @@ def test_another_typehash_is_refused_before_signing(typehash):
         ESCROW_PAYMENT_INFO_TYPEHASH,
         ESCROW_PAYMENT_INFO_TYPEHASH.removeprefix("0x"),
         "0x" + ESCROW_PAYMENT_INFO_TYPEHASH[2:].upper(),
+        "0X" + ESCROW_PAYMENT_INFO_TYPEHASH[2:],
+        " \t" + ESCROW_PAYMENT_INFO_TYPEHASH + " \n",
     ],
-    ids=["0x", "bare", "upper-hex"],
+    ids=["0x", "bare", "upper-hex", "0X", "surrounding-whitespace"],
 )
 def test_the_canonical_typehash_is_accepted_as_the_marketplace_writes_it(spelling):
     wallet = _Wallet()
