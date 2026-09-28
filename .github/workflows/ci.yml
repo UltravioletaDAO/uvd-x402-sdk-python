@@ -69,6 +69,13 @@ jobs:
         # is skipped, and the ones that import a framework directly fail.
         run: pip install -e '.[signer,dev,dx402,escrow,hedera,fastapi,flask,django]'
 
+      - name: The OWS adapter is tested against the real library
+        # tests/test_ows_wallet_adapter.py skips what needs open-wallet-standard
+        # when it is not installed. Here it must be: without it the adapter goes
+        # untested against the real package while the suite stays green, which
+        # is how it shipped an API nobody had measured.
+        run: python -c "import ows"
+
       - name: Test
         run: python -m pytest -q
 

@@ -2247,8 +2247,22 @@ auth = wallet.sign_eip3009({"to": "0xRecipient...", "amount_usdc": "0.10", "netw
 ```
 
 Typed data and transactions that name their own chain id are signed on that
-chain. Every method signs the same bytes `EnvKeyAdapter` signs with the same key
-(`tests/test_ows_wallet_adapter.py`).
+chain. What the adapter returns is what `EnvKeyAdapter` signs with the same key
+(`tests/test_ows_wallet_adapter.py`), or it raises:
+
+- Typed data is sent normalised by its declared types. A value out of its
+  type's range (ows would sign `2**256` as a `uint256`), a `string` or
+  `address` that is not a str, or a `bool` that is not a bool raises
+  `ValueError` before anything is signed. With eth-account installed, each
+  typed-data signature is recovered against the digest eth-account computes
+  and raises `ValueError` instead of being returned when it is not the
+  wallet's, e.g. for an `EIP712Domain` declared in a non-canonical order,
+  which eth-account ignores.
+- A transaction's `from` (web3's `build_transaction` keeps it) must be the
+  wallet, compared without case; otherwise `TypeError`, and nothing is signed.
+  eth-account compares the checksummed form exactly.
+
+A `vault_path` that does not exist is created by ows, even by a read.
 
 ### Custom WalletAdapter
 

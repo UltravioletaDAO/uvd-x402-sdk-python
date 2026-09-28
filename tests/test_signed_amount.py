@@ -49,6 +49,7 @@ from tests.ows_double import FakeOws
 from tests.test_escrow_signing import PAYMENT_CONFIG
 from uvd_x402_sdk import X402Client, X402Config
 from uvd_x402_sdk import client as client_module
+from uvd_x402_sdk import wallet as wallet_module
 from uvd_x402_sdk.escrow_signing import build_escrow_pre_auth
 from uvd_x402_sdk.hedera import build_hedera_requirements
 from uvd_x402_sdk.models import PaymentPayload
@@ -281,8 +282,12 @@ def via_env_key_adapter() -> Signer:
 
 def via_ows_adapter(monkeypatch: pytest.MonkeyPatch) -> Signer:
     # The double has ows 1.4.2's signatures (tests/test_ows_wallet_adapter.py).
-    ows = FakeOws(address=PAYER)
+    # Like RecordingAccount for EnvKeyAdapter, this path counts WHAT is signed:
+    # a real signature and the adapter's recovery of it cost milliseconds each
+    # in pure-Python ECDSA, over every cent price. Both are tested there.
+    ows = FakeOws(real_signatures=False)
     monkeypatch.setitem(sys.modules, "ows", ows)
+    monkeypatch.setattr(wallet_module, "_check_typed_signature", lambda *args: None)
     adapter = OWSWalletAdapter(wallet_name="test-wallet")
 
     def sign(price: Any) -> str | None:
