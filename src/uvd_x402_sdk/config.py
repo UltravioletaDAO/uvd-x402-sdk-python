@@ -91,12 +91,16 @@ class X402Config:
             ``min(network timeout or settle_timeout, max_settle_timeout)``.
             ``None`` (the default) sets no ceiling and every network keeps its
             own timeout. Set it when the seller has less time to answer than a
-            network's settle can take (a request budget fixed by the platform),
-            so the SDK stops waiting in time to answer. A settle cut short is
-            not a rejection: the SDK's timeout fallback asks the facilitator
-            again (with its own timeouts, which this does not cap), and what
-            is still unknown after that is a transient error (503, present the
-            same payment again), never a 402. Must be > 0 and finite.
+            network's settle can take (a request budget fixed by the platform).
+            It bounds the wait for the first answer of the ``POST /settle``,
+            per attempt (``retry=True`` makes up to three). After a timeout the
+            SDK's fallback asks the facilitator again on its own timeouts,
+            which this does not cap: up to about 60 s more (a resend with a
+            30 s timeout, and polling a ``202`` for up to
+            ``SETTLE_IN_FLIGHT_POLL_SECONDS``, 30 s). A settle cut short is not
+            a rejection: what is still unknown after the fallback is a
+            transient error (503, present the same payment again), never a
+            402. Must be > 0 and finite.
         max_timeout_seconds: The ``maxTimeoutSeconds`` of the payment
             requirements ``verify_payment`` / ``settle_payment`` /
             ``process_payment`` send (default 60). Native Hedera keeps its own
@@ -226,12 +230,16 @@ class X402Config:
 
         if self.max_settle_timeout is not None:
             cap = self.max_settle_timeout
-            if (
-                isinstance(cap, bool)
-                or not isinstance(cap, (int, float))
-                or not math.isfinite(cap)
-                or cap <= 0
-            ):
+            try:
+                valid = (
+                    not isinstance(cap, bool)
+                    and isinstance(cap, (int, float))
+                    and math.isfinite(cap)
+                    and cap > 0
+                )
+            except OverflowError:  # an int too large to be a float
+                valid = False
+            if not valid:
                 raise ValueError(
                     f"max_settle_timeout must be a positive, finite number of seconds "
                     f"or None, got {cap!r}"

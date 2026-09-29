@@ -126,26 +126,33 @@ def test_settle_timeout_is_still_only_the_fallback():
 # ---------------------------------------------------------------------------
 
 
+#: What the facilitator does with one ``/settle``: the request times out; the
+#: opaque ``400`` of an authorization the chain already executed (nothing
+#: confirms it); a success; the same success replayed from its cache.
+TIMEOUT, SPENT, SETTLED, REPLAYED = "timeout", "spent", "settled", "replayed"
+
+
 class _Facilitator:
-    """Records the timeout httpx applies to every ``/settle`` it is sent.
+    """Records the timeout httpx applies to every ``/settle`` it is sent, and
+    its ``Idempotency-Key``. ``answers`` scripts the ``/settle`` requests in
+    order; past the script, every one is ``SETTLED``."""
 
-    ``time_out_first`` makes the first ``/settle`` time out; the fallback's
-    resend then gets the opaque ``400`` of an authorization the chain already
-    executed, so nothing confirms it and the SDK raises its timeout.
-    """
-
-    def __init__(self, network: str, time_out_first: bool = False) -> None:
+    def __init__(self, network: str, answers: tuple = ()) -> None:
         self.network = network
-        self.time_out_first = time_out_first
+        self.answers = answers
         self.settle_timeouts: list = []
+        self.settle_keys: list = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         if request.url.path != "/settle":
             return httpx.Response(404, json={})
         self.settle_timeouts.append(request.extensions["timeout"])
-        if self.time_out_first:
-            if len(self.settle_timeouts) == 1:
-                raise httpx.ReadTimeout("held past the timeout", request=request)
+        self.settle_keys.append(request.headers.get("Idempotency-Key"))
+        turn = len(self.settle_timeouts) - 1
+        answer = self.answers[turn] if turn < len(self.answers) else SETTLED
+        if answer == TIMEOUT:
+            raise httpx.ReadTimeout("held past the timeout", request=request)
+        if answer == SPENT:
             return httpx.Response(400, json={"error": "contract_call_failed (ref: local)"})
         return httpx.Response(
             200,
@@ -155,6 +162,7 @@ class _Facilitator:
                 "network": self.network,
                 "payer": "0xSender",
             },
+            headers={"Idempotent-Replayed": "true"} if answer == REPLAYED else {},
         )
 
 
@@ -194,20 +202,49 @@ def test_the_settle_is_sent_with_the_capped_timeout(network, ceiling, expected):
     assert facilitator.settle_timeouts == [_every_phase(expected)]
 
 
-def test_a_settle_cut_short_by_the_ceiling_reports_the_ceiling_and_stays_transient():
+@pytest.mark.parametrize("ceiling", [50.0, 5.0])
+def test_a_settle_cut_short_by_the_ceiling_reports_the_ceiling_and_stays_transient(ceiling):
     """The timeout the SDK raises names the ceiling, not the network's 900 s,
     and it is transient: the paywall answers 503, never 402. The fallback's
-    resend keeps its own timeout, which the ceiling does not cap."""
-    facilitator = _Facilitator("ethereum", time_out_first=True)
+    resend keeps its own 30 s, which the ceiling does not cap: with a ceiling
+    below 30 s a fallback capped by it would show here."""
+    facilitator = _Facilitator("ethereum", answers=(TIMEOUT, SPENT))
 
     with pytest.raises(X402TimeoutError) as caught:
-        _seller(facilitator, max_settle_timeout=50).settle_payment(_payload("ethereum"), PRICE)
+        _seller(facilitator, max_settle_timeout=ceiling).settle_payment(
+            _payload("ethereum"), PRICE
+        )
 
-    assert caught.value.timeout_seconds == 50.0
+    assert caught.value.timeout_seconds == ceiling
     assert is_transient_error(caught.value)
     first, fallback = facilitator.settle_timeouts
-    assert first == _every_phase(50.0)
+    assert first == _every_phase(ceiling)
     assert fallback == _every_phase(30.0)
+
+
+def test_with_retry_a_settle_cut_short_is_recovered_under_the_same_key():
+    """``retry=True``: the first attempt times out at the ceiling, its fallback
+    gets nothing that confirms it, and the second attempt gets the settle
+    replayed from the facilitator's cache. That replay is this handling's own
+    (its first attempt may have admitted the payment), so it is delivered, not
+    refused as a replay earned by possession of the X-PAYMENT alone. The
+    ceiling is per attempt; the fallback keeps its 30 s."""
+    facilitator = _Facilitator("ethereum", answers=(TIMEOUT, SPENT, REPLAYED))
+
+    settled = _seller(facilitator, max_settle_timeout=5).settle_payment(
+        _payload("ethereum"), PRICE, retry=True
+    )
+
+    assert settled.success
+    assert settled.idempotent_replayed is True
+    assert facilitator.settle_timeouts == [
+        _every_phase(5.0),  # the first attempt
+        _every_phase(30.0),  # its fallback
+        _every_phase(5.0),  # the second attempt
+    ]
+    first_key = facilitator.settle_keys[0]
+    assert first_key and facilitator.settle_keys == [first_key] * 3
+    assert settled.idempotency_key == first_key
 
 
 @pytest.mark.parametrize(
@@ -245,7 +282,19 @@ def test_over_a_real_socket_the_settle_stops_waiting_at_the_ceiling(ceiling, set
 
 
 @pytest.mark.parametrize(
-    "value", [0, 0.0, -1, -0.5, math.inf, -math.inf, math.nan, True, "50"]
+    "value",
+    [
+        0,
+        0.0,
+        -1,
+        -0.5,
+        math.inf,
+        -math.inf,
+        math.nan,
+        True,
+        "50",
+        pytest.param(10**400, id="10**400"),  # an int no float can hold
+    ],
 )
 def test_an_invalid_ceiling_is_refused_at_construction(value):
     with pytest.raises(ValueError, match="max_settle_timeout"):
