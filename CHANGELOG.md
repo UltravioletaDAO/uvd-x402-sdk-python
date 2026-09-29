@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- **Changed: PyPI releases publish by trusted publishing (OIDC), by hand, from `main`, after the owner's approval.** `publish.yml` runs only from `workflow_dispatch` with the version (checked against `pyproject.toml`), tests on `main`, builds without id-token, and uploads from the one job with `id-token: write` in the `pypi` environment; no token, and a `v*` tag no longer triggers it. `tests/test_publish_workflow.py` pins it.
+
 ## [0.93.0] - 2026-09-29
 
 - **Fixed: `OWSWalletAdapter` works against the real Open Wallet Standard library.** It was written before `open-wallet-standard` was on PyPI, against an API nobody had measured, and every method failed against the published package (1.4.2, module `ows`): `get_wallet`, `sign_message`, `sign_typed_data` and `sign_transaction` raised `TypeError` on keywords the library does not take (`passphrase=` on `get_wallet`, `wallet_name=`, `domain=`/`types=`/`message=`, `transaction=`), `sign_eip3009` called a function the library does not have, and the results were read as attributes where the library returns dicts. The suite was green because its double had the same invented signatures. Now, measured on 1.4.2:

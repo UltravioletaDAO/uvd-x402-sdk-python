@@ -24,7 +24,8 @@ What each block catches:
   implementation would pass. Each named mistake must turn its vector red.
 * ``TestCommandLine`` / ``TestPublishGate`` -- the exit codes, ``python -m``,
   the console script, and ``publish.yml`` running this folder before it
-  builds, on tags only.
+  builds. How ``publish.yml`` publishes (by hand, from main, OIDC, the
+  ``pypi`` environment) is ``tests/test_publish_workflow.py``.
 """
 
 from __future__ import annotations
@@ -932,25 +933,21 @@ class TestPublishGate:
 
     def test_the_interop_tests_gate_the_build(self) -> None:
         jobs = _jobs(self.WORKFLOW)
-        assert "run: python -m pytest -q tests/interop" in jobs["interop"]
-        assert "needs: interop" in jobs["publish"]
-        assert "run: python -m build" in jobs["publish"]
-        assert "pytest" not in jobs["publish"]
+        assert "run: python -m pytest -q tests/interop" in jobs["check"]
+        assert "needs: check" in jobs["build"]
+        assert "needs: build" in jobs["publish"]
+        assert "python -m build\n" in jobs["build"]
+        assert "pytest" not in jobs["build"] + jobs["publish"]
 
     def test_the_tests_never_share_a_job_with_the_upload(self) -> None:
-        # Unpinned test dependencies run with read access only, away from the
-        # token and the id-token permission of the upload.
-        interop = _jobs(self.WORKFLOW)["interop"]
-        assert "id-token" not in interop
-        assert "secrets." not in interop
-        assert re.search(r"permissions:\n\s+contents: read\n\s+steps:", interop)
-
-    def test_it_runs_on_tags_and_by_hand_only(self) -> None:
-        # A branch push must not run it: publishing is by tag (and the Actions
-        # budget is spent only where a deploy comes from GitHub).
-        triggers = self.WORKFLOW.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
-        lines = [line.strip() for line in triggers.splitlines() if line.strip()]
-        assert lines == ["workflow_dispatch:", "push:", "tags:", "- 'v*'"]
+        # Unpinned test dependencies run with read access only (the workflow's
+        # contents: read, which check does not widen), away from the id-token
+        # permission of the upload.
+        check = _jobs(self.WORKFLOW)["check"]
+        assert "id-token" not in check
+        assert "secrets" not in check
+        assert "permissions:" not in check
+        assert "\npermissions:\n  contents: read #" in self.WORKFLOW.split("\njobs:\n", 1)[0]
 
     def test_the_folder_it_runs_holds_the_schema_suite_too(self) -> None:
         here = Path(__file__).resolve().parent
