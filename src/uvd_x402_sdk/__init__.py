@@ -413,6 +413,9 @@ from uvd_x402_sdk.erc7702 import (
     wrap_signature,
 )
 from uvd_x402_sdk.escrow_signing import (
+    ESCROW_PAYMENT_INFO_TYPEHASH,
+    RECEIVE_WITH_AUTHORIZATION_TYPES,
+    VERIFIED_USDC_DOMAINS,
     LIFECYCLE_ACTIONS,
     LIFECYCLE_DEFAULT_DEADLINE_SECS,
     LIFECYCLE_DOMAIN_NAME,
@@ -763,9 +766,13 @@ __all__ = [
     "ERC8128_ERROR_STATUS",
     "ERC8128_ERROR_RETRYABLE",
     "run_conformance",
-    # Escrow pre-auth builder (ADR-002 sign-on-assignment)
+    # Escrow pre-auth builder (ADR-002 sign-on-assignment). The whole stable
+    # surface is uvd_x402_sdk.escrow_signing.__all__.
     "build_escrow_pre_auth",
     "compute_escrow_nonce",
+    "ESCROW_PAYMENT_INFO_TYPEHASH",
+    "RECEIVE_WITH_AUTHORIZATION_TYPES",
+    "VERIFIED_USDC_DOMAINS",
     # Signed escrow lifecycle orders (release / refundInEscrow)
     "build_lifecycle_auth",
     "build_lifecycle_typed_data",
