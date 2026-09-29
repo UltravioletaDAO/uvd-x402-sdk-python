@@ -33,7 +33,11 @@ Example:
     ... )
 """
 
+import email.utils
+import math
 import re
+import time
+from datetime import timezone
 from enum import Enum
 from typing import Any, Literal, Optional, Union
 
@@ -163,6 +167,54 @@ def _wire(network: str) -> str:
     rejected at the edge.
     """
     return "base" if network == "base-mainnet" else network
+
+
+def _now() -> float:
+    """Wall clock for the HTTP-date form of ``Retry-After`` (frozen by tests)."""
+    return time.time()
+
+
+def _parse_retry_after_header(value: Optional[str]) -> Optional[int]:
+    """``Retry-After`` in whole seconds, as the server sent it: NOT clamped.
+
+    Both forms of RFC 9110 section 10.2.3: ``delay-seconds`` (digits only) and
+    an HTTP-date, turned into the seconds from now (rounded up, so a caller
+    never comes back early; a date already past is ``0``). Absent, empty or
+    anything else (a negative or fractional number, garbage) is ``None``.
+
+    Bounding it is the caller's decision, not this parser's: a daily cap
+    answers hours, and that is the information. For a bounded wait see
+    :data:`uvd_x402_sdk.exceptions.MAX_RETRY_AFTER_SECONDS`.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if re.fullmatch(r"[0-9]+", text):
+        return int(text)
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except Exception:  # ValueError on 3.10+, TypeError / IndexError before
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0, math.ceil(when.timestamp() - _now()))
+
+
+def _http_error_fields(exc: httpx.HTTPStatusError) -> tuple[int, Optional[int]]:
+    """``(status_code, retry_after)`` of the facilitator's error answer.
+
+    The one place every write of :class:`Erc8004Client` reads them from, so the
+    caller can relay a ``429`` with its ``Retry-After`` instead of parsing the
+    ``error`` string (which stays exactly as it was).
+    """
+    response = exc.response
+    return response.status_code, _parse_retry_after_header(
+        response.headers.get("retry-after")
+    )
 
 
 class Erc8004ContractAddresses(BaseModel):
@@ -632,6 +684,12 @@ class FeedbackResponse(BaseModel):
     transaction: Optional[str] = None
     feedback_index: Optional[int] = Field(None, alias="feedbackIndex")
     error: Optional[str] = None
+    status_code: Optional[int] = None
+    """HTTP status of the facilitator's error answer; ``None`` on success and
+    when no answer came back (timeout, connection error)."""
+    retry_after: Optional[int] = None
+    """The answer's ``Retry-After`` in seconds, not clamped (seconds or
+    HTTP-date); ``None`` when absent, unreadable or no answer came back."""
     network: str
 
     class Config:
@@ -734,6 +792,12 @@ class PrepareRelayFeedbackResponse(BaseModel):
     """The account nonce to put in the EIP-7702 authorization, when needed."""
     chain_id: int = Field(0, alias="chainId")
     error: Optional[str] = None
+    status_code: Optional[int] = None
+    """HTTP status of the facilitator's error answer; ``None`` on success and
+    when no answer came back (timeout, connection error)."""
+    retry_after: Optional[int] = None
+    """The answer's ``Retry-After`` in seconds, not clamped (seconds or
+    HTTP-date); ``None`` when absent, unreadable or no answer came back."""
     network: str
 
     class Config:
@@ -780,6 +844,12 @@ class PrepareSolanaFeedbackResponse(BaseModel):
     build.
     """
     error: Optional[str] = None
+    status_code: Optional[int] = None
+    """HTTP status of the facilitator's error answer; ``None`` on success and
+    when no answer came back (timeout, connection error)."""
+    retry_after: Optional[int] = None
+    """The answer's ``Retry-After`` in seconds, not clamped (seconds or
+    HTTP-date); ``None`` when absent, unreadable or no answer came back."""
     network: str
 
     class Config:
@@ -802,6 +872,12 @@ class RegisterAgentResponse(BaseModel):
     transfer_transaction: Optional[str] = Field(None, alias="transferTransaction")
     owner: Optional[str] = None
     error: Optional[str] = None
+    status_code: Optional[int] = None
+    """HTTP status of the facilitator's error answer; ``None`` on success and
+    when no answer came back (timeout, connection error)."""
+    retry_after: Optional[int] = None
+    """The answer's ``Retry-After`` in seconds, not clamped (seconds or
+    HTTP-date); ``None`` when absent, unreadable or no answer came back."""
     network: str
 
     class Config:
@@ -1228,10 +1304,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(
@@ -1355,10 +1434,13 @@ class Erc8004Client:
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return PrepareRelayFeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return PrepareRelayFeedbackResponse(
@@ -1465,10 +1547,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(
@@ -1584,10 +1669,13 @@ class Erc8004Client:
             response.raise_for_status()
             return PrepareSolanaFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return PrepareSolanaFeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return PrepareSolanaFeedbackResponse(
@@ -1687,10 +1775,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(
@@ -1754,10 +1845,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(
@@ -1865,10 +1959,13 @@ class Erc8004Client:
             response.raise_for_status()
             return PrepareRelayFeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return PrepareRelayFeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return PrepareRelayFeedbackResponse(
@@ -1921,10 +2018,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(success=False, error=str(e), network=network)
@@ -1998,10 +2098,13 @@ class Erc8004Client:
             response.raise_for_status()
             return FeedbackResponse.model_validate(response.json())
         except httpx.HTTPStatusError as e:
+            status_code, retry_after = _http_error_fields(e)
             return FeedbackResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return FeedbackResponse(
@@ -2093,6 +2196,7 @@ class Erc8004Client:
             # Flattening it into a bare string threw away the only thing that
             # lets a caller resolve instead of re-POSTing, and re-POSTing a mint
             # is exactly how duplicate agents get created. Keep the body.
+            status_code, retry_after = _http_error_fields(e)
             parsed: Optional[RegisterAgentResponse] = None
             try:
                 parsed = RegisterAgentResponse.model_validate(e.response.json())
@@ -2103,11 +2207,16 @@ class Erc8004Client:
                 parsed.success = False
                 if not parsed.error:
                     parsed.error = f"Facilitator error: {e.response.status_code}"
+                # The HTTP answer's, never the body's.
+                parsed.status_code = status_code
+                parsed.retry_after = retry_after
                 return parsed
             return RegisterAgentResponse(
                 success=False,
                 error=f"Facilitator error: {e.response.status_code} - {e.response.text}",
                 network=network,
+                status_code=status_code,
+                retry_after=retry_after,
             )
         except Exception as e:
             return RegisterAgentResponse(
