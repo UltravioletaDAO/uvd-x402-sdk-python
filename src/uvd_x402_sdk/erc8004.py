@@ -180,7 +180,8 @@ def _parse_retry_after_header(value: Optional[str]) -> Optional[int]:
     Both forms of RFC 9110 section 10.2.3: ``delay-seconds`` (digits only) and
     an HTTP-date, turned into the seconds from now (rounded up, so a caller
     never comes back early; a date already past is ``0``). Absent, empty or
-    anything else (a negative or fractional number, garbage) is ``None``.
+    anything else (a negative or fractional number, garbage, digits past what
+    ``int()`` will read) is ``None``.
 
     Bounding it is the caller's decision, not this parser's: a daily cap
     answers hours, and that is the information. For a bounded wait see
@@ -192,7 +193,10 @@ def _parse_retry_after_header(value: Optional[str]) -> Optional[int]:
     if not text:
         return None
     if re.fullmatch(r"[0-9]+", text):
-        return int(text)
+        try:
+            return int(text)
+        except ValueError:  # beyond CPython's int() digit limit
+            return None
     try:
         when = email.utils.parsedate_to_datetime(text)
     except Exception:  # ValueError on 3.10+, TypeError / IndexError before
@@ -209,12 +213,16 @@ def _http_error_fields(exc: httpx.HTTPStatusError) -> tuple[int, Optional[int]]:
 
     The one place every write of :class:`Erc8004Client` reads them from, so the
     caller can relay a ``429`` with its ``Retry-After`` instead of parsing the
-    ``error`` string (which stays exactly as it was).
+    ``error`` string (which stays exactly as it was). Never raises: it runs
+    inside the ``except`` of every write, and an unreadable ``Retry-After`` is
+    ``None`` with the status kept.
     """
     response = exc.response
-    return response.status_code, _parse_retry_after_header(
-        response.headers.get("retry-after")
-    )
+    try:
+        retry_after = _parse_retry_after_header(response.headers.get("retry-after"))
+    except Exception:  # noqa: BLE001 - a header read must not break error handling
+        retry_after = None
+    return response.status_code, retry_after
 
 
 class Erc8004ContractAddresses(BaseModel):

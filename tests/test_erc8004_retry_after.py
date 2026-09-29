@@ -19,7 +19,9 @@ leaves the process):
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import os
+import time
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -118,15 +120,21 @@ def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
         # A daily cap answers hours: reported as is, never clamped.
         (429, {"Retry-After": "43200"}, 43200),
         (429, {"Retry-After": "Tue, 29 Sep 2026 12:02:00 GMT"}, 120),
+        # The shapes x402-rs sends besides 429 (src/handlers.rs:1352, :1741).
+        (503, {"Retry-After": "5"}, 5),
+        (502, {"Retry-After": "30"}, 30),
         (503, {}, None),
         (400, {}, None),
         (429, {"Retry-After": "soon"}, None),
         (429, {"Retry-After": "-5"}, None),
         (429, {"Retry-After": "1.5"}, None),
+        # Past CPython's int() digit limit: unreadable, not an exception.
+        (429, {"Retry-After": "9" * 4301}, None),
     ],
     ids=[
-        "429-seconds", "429-hours", "429-http-date", "503-none",
-        "400", "garbage", "negative", "fraction",
+        "429-seconds", "429-hours", "429-http-date", "503-seconds",
+        "502-seconds", "503-none", "400", "garbage", "negative", "fraction",
+        "4301-digits",
     ],
 )
 async def test_an_http_error_carries_status_and_retry_after(
@@ -211,11 +219,43 @@ async def test_register_agent_structured_4xx_body_takes_the_http_answers_fields(
         ("Tue, 29 Sep 2026 12:00:00 GMT", 0),
         ("Tue, 29 Sep 2026 11:00:00 GMT", 0),  # already past
         ("Tue, 29 Sep 2026 12:00:00 +0100", 0),  # an hour ago
-        ("Tue, 29 Sep 2026 13:00:00 -0000", 3600),
         ("²", None),  # a digit to str.isdigit, not to HTTP
+        ("\u0661\u0662\u0660", None),  # "120" in Arabic-Indic digits: a \d, not an HTTP digit
+        ("9" * 4301, None),  # past CPython's int() digit limit
         ("0x10", None),
         ("Tue, 32 Sep 2026 12:00:00 GMT", None),
     ],
 )
 def test_parse_retry_after_header(value, expected, frozen_clock):
     assert erc8004._parse_retry_after_header(value) == expected
+
+
+def test_an_http_date_rounds_up_against_a_fractional_clock(monkeypatch):
+    """119.6 s away is 120, never 119: a caller must not come back early."""
+    monkeypatch.setattr(erc8004, "_now", lambda: NOW + 0.4)
+    assert erc8004._parse_retry_after_header("Tue, 29 Sep 2026 12:02:00 GMT") == 120
+
+
+@pytest.fixture
+def local_zone_not_utc() -> Iterator[None]:
+    """A local zone other than UTC, so a naive date read as local time shows."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("time.tzset is not available on this platform")
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = "America/Bogota"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()
+
+
+def test_a_date_with_minus_zero_zone_is_utc_whatever_the_local_zone(
+    frozen_clock, local_zone_not_utc
+):
+    """``-0000`` parses to a naive datetime; it is UTC, not local time."""
+    assert erc8004._parse_retry_after_header("Tue, 29 Sep 2026 13:00:00 -0000") == 3600

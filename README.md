@@ -1861,7 +1861,7 @@ Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; 
 > Name Base as `"base"`. The old `"base-mainnet"` spelling is rejected by the facilitator
 > (`400 Invalid network`); the SDK now rewrites it for you, but new code should use `"base"`.
 
-The writes (`submit_feedback`, the relayed and Solana `prepare_*` / `submit_*`, `revoke_feedback`, `append_response`, `register_agent`) never raise on an HTTP error: they answer `success=False` with `error="Facilitator error: <status> - <body>"`, plus `status_code` (the HTTP status) and `retry_after` (the `Retry-After` in seconds, from seconds or an HTTP-date, not clamped; `None` when absent or unreadable). Both are `None` on success and when no answer came back.
+The writes (`submit_feedback`, the relayed and Solana `prepare_*` / `submit_*`, `revoke_feedback`, `append_response`, `register_agent`) answer an HTTP error without raising, except `register_agent(use_async_transport=True)`, which raises `httpx.HTTPStatusError` as before (and `RegistrationPendingError` when the wait times out). Otherwise they answer `success=False` with `error="Facilitator error: <status> - <body>"`, plus `status_code` (the HTTP status) and `retry_after` (the `Retry-After` in seconds, from seconds or an HTTP-date, not clamped; `None` when absent or unreadable). Both are `None` on success and when no answer came back.
 
 On EVM networks, agent IDs are sequential `uint256` integers. On Solana, agent IDs are base58 pubkey strings (NFT asset addresses). The `AgentId` type (`Union[int, str]`) handles both.
 
