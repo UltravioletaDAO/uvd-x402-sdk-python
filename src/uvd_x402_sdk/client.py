@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -1118,27 +1119,199 @@ def _undelivered_response(exc: X402Error) -> Optional[Tuple[int, Dict[str, Any],
     The anti-double-settle guard in :func:`is_transient_error` is unchanged:
     the SDK still does not re-send any of them. The receipt, when there is one,
     travels in ``PAYMENT-RESPONSE``.
+
+    The same decision as :func:`payment_failure_verdict` with
+    ``settle_attempted=True``, read from the same place (:func:`_failure_answer`),
+    so the two cannot disagree.
     """
+    return _failure_answer(exc, settle_attempted=True)[1]
+
+
+#: A payment failure after which nothing moved: the buyer may be asked for a new
+#: payment (the integrations answer their own ``402``).
+PAYMENT_REJECTED = "rejected"
+#: No verdict yet: answer ``503`` + ``Retry-After`` and have the buyer present
+#: the SAME credential again. Never a new payment.
+PAYMENT_TRANSIENT = "transient"
+#: The payment may have moved: do not ask for another one; reconcile first
+#: (the transaction, the receipt, the facilitator's payment id).
+PAYMENT_UNCONFIRMED = "unconfirmed"
+
+_Answer = tuple[int, dict[str, Any], dict[str, str]]
+
+#: ``error`` of the ``500`` answered for an exception outside the SDK's
+#: hierarchy once a settle was attempted.
+_OUTCOME_UNKNOWN_CODE = "PAYMENT_OUTCOME_UNKNOWN"
+
+
+def _outcome_unknown_response(exc: BaseException) -> _Answer:
+    """``500`` for a failure the SDK cannot read, raised after a settle was sent.
+
+    Nothing of the exception reaches the body but its class name: its text is
+    not the facilitator's and may carry anything.
+    """
+    body: dict[str, Any] = {
+        "error": _OUTCOME_UNKNOWN_CODE,
+        "message": _MAY_HAVE_SETTLED_NO_TRANSACTION_MESSAGE,
+        "details": {"exception": type(exc).__name__},
+        "retryable": False,
+        "safeToReplay": False,
+    }
+    return 500, body, {"Content-Type": "application/json"}
+
+
+def _failure_answer(
+    exc: BaseException, settle_attempted: bool
+) -> tuple[str, Optional[_Answer]]:
+    """The verdict on a payment-path failure and the answer that goes with it.
+
+    The ONE place both :func:`_undelivered_response` (with
+    ``settle_attempted=True``) and :func:`payment_failure_verdict` read. The
+    answer is ``None`` exactly when the verdict is :data:`PAYMENT_REJECTED`;
+    ``503`` is :data:`PAYMENT_TRANSIENT`, ``409`` and ``500`` are
+    :data:`PAYMENT_UNCONFIRMED`. Order as in :func:`_undelivered_response`.
+
+    ``settle_attempted`` only reaches the steps that exist because a settle was
+    sent: a ``5xx`` the facilitator said not to resend, a settle ``4xx`` that
+    was not a refusal of the request, and an exception outside the SDK's
+    hierarchy. A failure the facilitator reports as a settle's
+    (``FacilitatorError.operation == "settle"``) counts as one whatever the
+    caller passed: the evidence beats the label.
+    """
+    if not isinstance(exc, X402Error):
+        # Nothing the SDK can read. Integrations never answer these (they
+        # catch X402Error only, and the framework answers 500).
+        if settle_attempted:
+            return PAYMENT_UNCONFIRMED, _outcome_unknown_response(exc)
+        return PAYMENT_REJECTED, None
     if isinstance(exc, PaymentBindingError):
-        return _binding_refusal_response(exc)
+        answer = _binding_refusal_response(exc)
+        return _kind_of(answer), answer
     conflict = payment_conflict_response(exc)
     if conflict is not None:
-        return conflict
+        return _kind_of(conflict), conflict
     transient = is_transient_error(exc)
     transaction = _broadcast_transaction(exc)
     if transaction is not None and not transient:
-        return _may_have_settled_response(exc, transaction)
+        return PAYMENT_UNCONFIRMED, _may_have_settled_response(exc, transaction)
     evidence = spent_nonce_evidence(exc)
     if evidence is not None:
-        return _spent_authorization_response(exc, evidence)
+        return PAYMENT_UNCONFIRMED, _spent_authorization_response(exc, evidence)
     if transient:
         body, headers = transient_503_response(exc)
-        return 503, body, _with_receipt(headers, exc)
-    if isinstance(exc, FacilitatorError) and (
+        return PAYMENT_TRANSIENT, (503, body, _with_receipt(headers, exc))
+    settled = settle_attempted or getattr(exc, "operation", None) == "settle"
+    if settled and isinstance(exc, FacilitatorError) and (
         (exc.status_code or 0) >= 500 or _settle_refused_after_verify(exc)
     ):
-        return _may_have_settled_response(exc, None)
-    return None
+        return PAYMENT_UNCONFIRMED, _may_have_settled_response(exc, None)
+    return PAYMENT_REJECTED, None
+
+
+def _kind_of(answer: _Answer) -> str:
+    """The verdict an answer carries: ``503`` is transient, the rest may have moved."""
+    return PAYMENT_TRANSIENT if answer[0] == 503 else PAYMENT_UNCONFIRMED
+
+
+@dataclass(frozen=True)
+class PaymentFailureVerdict:
+    """What a failed payment means for the buyer, and what to answer them.
+
+    * ``kind``: :data:`PAYMENT_REJECTED`, :data:`PAYMENT_TRANSIENT` or
+      :data:`PAYMENT_UNCONFIRMED`.
+    * ``transaction`` / ``payment_id``: what the facilitator named, to
+      reconcile against. ``None`` when it named none.
+    * ``error_code``: the facilitator's machine-readable ``error`` (or
+      ``reason``), when it sent one.
+    * ``retry_after``: seconds, for :data:`PAYMENT_TRANSIENT` only (the
+      ``Retry-After`` of the answer, rounded up).
+    * ``body`` / ``headers``: the answer the SDK's integrations give
+      (``503``, ``409`` or ``500``; the receipt, when there is one, in
+      ``PAYMENT-RESPONSE``). ``None`` for :data:`PAYMENT_REJECTED`, where each
+      seller answers its own ``402``.
+    """
+
+    kind: str
+    transaction: Optional[str] = None
+    payment_id: Optional[str] = None
+    error_code: Optional[str] = None
+    retry_after: Optional[int] = None
+    body: Optional[dict[str, Any]] = None
+    headers: Optional[dict[str, str]] = None
+
+    @property
+    def may_have_moved(self) -> bool:
+        """The payment may have moved: never ask for another one; reconcile."""
+        return self.kind == PAYMENT_UNCONFIRMED
+
+    @property
+    def may_ask_new_payment(self) -> bool:
+        """Nothing moved: a ``402`` asking for a new payment is safe."""
+        return self.kind == PAYMENT_REJECTED
+
+
+def _answer_retry_after(headers: Optional[dict[str, str]]) -> Optional[int]:
+    value = parse_retry_after((headers or {}).get("Retry-After"))
+    return None if value is None else int(math.ceil(value))
+
+
+def payment_failure_verdict(
+    exc: BaseException, settle_attempted: bool = False
+) -> PaymentFailureVerdict:
+    """Classify a failure of the payment path in three: may the buyer be asked
+    to pay again?
+
+    * :data:`PAYMENT_REJECTED`: nothing moved. A ``402`` asking for a new
+      payment is safe.
+    * :data:`PAYMENT_TRANSIENT`: no verdict yet. Answer ``503`` +
+      ``Retry-After``; the buyer presents the SAME credential again.
+    * :data:`PAYMENT_UNCONFIRMED`: the payment may have moved (a transaction
+      was named, the authorization was already used or admitted, or a settle
+      failed in a way that may come after the broadcast). Do not ask for
+      another payment; reconcile with ``transaction`` / ``payment_id``.
+
+    ``settle_attempted``: whether a ``/settle`` was sent for this payment.
+    ``False`` means only ``/verify`` ran, which never moves money: a ``5xx``
+    the facilitator said not to resend is then a rejection, and so is an
+    exception outside the SDK's hierarchy. With ``True``, the verdict is
+    exactly what the SDK's integrations answer (``_undelivered_response``):
+    rejected when they answer their own ``402``, transient when ``503``,
+    unconfirmed when ``409`` or ``500``; ``body`` and ``headers`` are that
+    answer. A failure the facilitator reports as a settle's
+    (``FacilitatorError.operation == "settle"``) counts as attempted either way.
+
+    Never raises. If classifying fails, the verdict is
+    :data:`PAYMENT_UNCONFIRMED` when a settle was attempted and
+    :data:`PAYMENT_REJECTED` otherwise, with nothing else filled in.
+    """
+    try:
+        kind, answer = _failure_answer(exc, settle_attempted)
+        transaction = payment_id = error_code = None
+        if isinstance(exc, X402Error):
+            transaction = _broadcast_transaction(exc)
+            payment_id = getattr(exc, "payment_id", None)
+            error_code = (
+                admitted_authorization_code(exc)
+                or getattr(exc, "error_code", None)
+                or facilitator_reason(exc)
+            )
+        body = headers = None
+        if answer is not None:
+            _, body, headers = answer
+        return PaymentFailureVerdict(
+            kind=kind,
+            transaction=transaction,
+            payment_id=payment_id if isinstance(payment_id, str) else None,
+            error_code=error_code if isinstance(error_code, str) else None,
+            retry_after=_answer_retry_after(headers) if kind == PAYMENT_TRANSIENT else None,
+            body=body,
+            headers=headers,
+        )
+    except Exception:  # noqa: BLE001 - a verdict must never become the failure
+        logger.exception("payment_failure_verdict could not classify %r", type(exc).__name__)
+        return PaymentFailureVerdict(
+            kind=PAYMENT_UNCONFIRMED if settle_attempted else PAYMENT_REJECTED
+        )
 
 
 def _validated_eip712_domain(domain: Dict[str, str]) -> Dict[str, str]:
