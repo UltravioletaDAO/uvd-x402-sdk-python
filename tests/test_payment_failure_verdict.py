@@ -6,9 +6,13 @@ have moved, never ask for another one). No network: the exceptions are the
 SDK's own, built the way the client raises them.
 
 The rule pinned by ``TestSameDecisionAsTheIntegrations``: with
-``settle_attempted=True`` the verdict is exactly what the integrations answer
-(``_undelivered_response``): rejected iff ``None``, transient iff ``503``,
+``settle_attempted=True`` the verdict is the decision the integrations answer
+with (``_undelivered_response``): rejected iff ``None``, transient iff ``503``,
 unconfirmed iff ``409`` or ``500``, and ``body`` / ``headers`` are that answer.
+That half is true by construction (one function decides both), so
+``TestTheHttpAnswerOfEveryEntryPoint`` checks it where it is not: the status
+each of the 12 entry points answers over a real socket, against the verdict on
+the exception the client raises for the same facilitator answer.
 """
 import dataclasses
 import json
@@ -18,11 +22,15 @@ import pytest
 
 import uvd_x402_sdk
 import uvd_x402_sdk.client as client_module
+from tests.receipt_rail import PAYER, RECIPIENT, _receipt, x_payment
+from tests.test_integrations_replay import PRICE, SITES
+from tests.test_integrations_undelivered import SETTLED, VERIFIED, Answer, scripted  # noqa: F401
 from uvd_x402_sdk import (
     PAYMENT_REJECTED,
     PAYMENT_TRANSIENT,
     PAYMENT_UNCONFIRMED,
     PaymentFailureVerdict,
+    X402Client,
     payment_failure_verdict,
 )
 from uvd_x402_sdk.exceptions import (
@@ -38,6 +46,7 @@ from uvd_x402_sdk.exceptions import (
 from uvd_x402_sdk.exceptions import (
     TimeoutError as X402TimeoutError,
 )
+from uvd_x402_sdk.receipts import parse_receipt
 
 TX = "0x" + "ab" * 32
 PAYMENT_ID = "0x" + "cd" * 32
@@ -54,6 +63,12 @@ def facilitator(
         response_body=None if body is None else json.dumps(body),
         **kwargs,
     )
+
+
+def _parsed(status: str) -> Any:
+    receipt = parse_receipt(_receipt(status, None, None))
+    assert receipt is not None and receipt.status == status
+    return receipt
 
 
 class Case(NamedTuple):
@@ -148,6 +163,27 @@ CASES: dict[str, Case] = {
     "binding: already used": Case(
         lambda: PaymentBindingError(PAYMENT_ALREADY_USED, "another resource"), U, U
     ),
+    # A receipt that says the payment has no outcome yet: the same credential
+    # later, never a new payment.
+    "settle success:false with a pending receipt": Case(
+        lambda: PaymentSettlementError(
+            "not settled", reason="unexpected", receipt=_parsed("pending")
+        ),
+        T, T,
+    ),
+    "verify isValid:false with an unknown receipt": Case(
+        lambda: PaymentVerificationError(
+            "not valid", reason="unexpected", receipt=_parsed("unknown")
+        ),
+        T, T,
+    ),
+    "400 on verify with a pending receipt": Case(
+        lambda: facilitator(
+            400, {"error": "unexpected", "receipt": _receipt("pending", None, None)},
+            operation="verify",
+        ),
+        T, T,
+    ),
     # Outside the SDK's hierarchy: after a settle nobody can say it did not move.
     "ValueError": Case(lambda: ValueError("boom"), U, R),
 }
@@ -165,7 +201,24 @@ def test_verdict_after_a_settle(name: str) -> None:
 def test_verdict_when_only_verify_ran(name: str) -> None:
     case = CASES[name]
     assert payment_failure_verdict(case.make(), settle_attempted=False).kind == case.verified_only
-    assert payment_failure_verdict(case.make()).kind == case.verified_only
+
+
+#: The rows whose failure says it came from /verify. Every other row, without
+#: ``settle_attempted``, counts as a settle.
+VERIFY_SIDE = {
+    "verify authorization_in_flight",
+    "400 contract_call_failed (ref) on verify",
+    "verification error",
+    "verify isValid:false with an unknown receipt",
+    "400 on verify with a pending receipt",
+}
+
+
+@pytest.mark.parametrize("name", IDS)
+def test_without_settle_attempted_the_side_is_read_from_the_failure(name: str) -> None:
+    case = CASES[name]
+    expected = case.verified_only if name in VERIFY_SIDE else case.settled
+    assert payment_failure_verdict(case.make()).kind == expected
 
 
 class TestSameDecisionAsTheIntegrations:
@@ -259,11 +312,72 @@ class _UnreadableError(X402Error):
         raise RuntimeError("cannot serialise")
 
 
-@pytest.mark.parametrize("settle_attempted, kind", [(True, U), (False, R)])
-def test_never_raises(settle_attempted: bool, kind: str) -> None:
-    exc = _UnreadableError("x", details={"retryable": True})
-    verdict = payment_failure_verdict(exc, settle_attempted=settle_attempted)
+class _UnreadableFacilitatorError(FacilitatorError):
+    def to_dict(self) -> dict[str, Any]:
+        raise RuntimeError("cannot serialise")
+
+
+def _unreadable(status: int, body: dict[str, Any], **kwargs: Any) -> FacilitatorError:
+    return _UnreadableFacilitatorError(
+        "facilitator error", status_code=status, response_body=json.dumps(body), **kwargs
+    )
+
+
+@pytest.mark.parametrize("settle_attempted, kind", [(True, U), (False, R), (None, U)])
+def test_never_raises(monkeypatch, settle_attempted: Optional[bool], kind: str) -> None:
+    def broken(exc: Any, settle_attempted: bool) -> Any:
+        raise RuntimeError("cannot classify")
+
+    monkeypatch.setattr(client_module, "_failure_answer", broken)
+    verdict = payment_failure_verdict(_UnreadableError("x"), settle_attempted=settle_attempted)
     assert verdict == PaymentFailureVerdict(kind=kind)
+
+
+class TestTheVerdictKeepsTheEvidenceWhenItsAnswerCannotBeBuilt:
+    """``to_dict()`` raises, so no answer can be built: the kind still follows
+    the evidence, never ``rejected`` while there is any."""
+
+    @pytest.mark.parametrize("settle_attempted", [True, False, None])
+    def test_a_settle_failure(self, settle_attempted: Optional[bool]) -> None:
+        exc = _unreadable(500, {"error": "internal_error", "retryable": False}, operation="settle")
+        with pytest.raises(RuntimeError):
+            client_module._undelivered_response(exc)
+        verdict = payment_failure_verdict(exc, settle_attempted=settle_attempted)
+        assert verdict == PaymentFailureVerdict(kind=U)
+
+    @pytest.mark.parametrize("settle_attempted", [True, False, None])
+    def test_an_authorization_in_flight(self, settle_attempted: Optional[bool]) -> None:
+        exc = _unreadable(409, {"error": "authorization_in_flight"}, operation="verify")
+        with pytest.raises(RuntimeError):
+            client_module._undelivered_response(exc)
+        assert payment_failure_verdict(exc, settle_attempted=settle_attempted).kind == T
+
+    @pytest.mark.parametrize(
+        "make, kind",
+        [
+            (lambda: _unreadable(502, {"error": "x", "transaction": TX}), U),
+            (lambda: _unreadable(409, {"error": "authorization_already_settled"}), U),
+            (lambda: _unreadable(500, {"error": "nonce_already_used"}), U),
+            (lambda: _unreadable(503, {"error": "upstream_rpc_unavailable"}), T),
+            (lambda: _unreadable(
+                400, {"error": "x", "receipt": _receipt("pending", None, None)},
+                operation="verify"), T),
+            (lambda: _unreadable(400, {"error": "invalid_signature"}, operation="verify"), R),
+        ],
+        ids=["hash", "admitted", "spent", "transient", "pending receipt", "verify refusal"],
+    )
+    def test_each_kind_of_evidence(self, make: Callable[[], FacilitatorError], kind: str) -> None:
+        verdict = payment_failure_verdict(make(), settle_attempted=False)
+        assert verdict.kind == kind
+        assert verdict.transaction == (TX if TX in (make().response_body or "") else None)
+
+    def test_evidence_that_cannot_be_read_is_not_a_rejection(self, monkeypatch) -> None:
+        def unreadable(exc: Any) -> Any:
+            raise RuntimeError("cannot read")
+
+        monkeypatch.setattr(client_module, "spent_nonce_evidence", unreadable)
+        exc = _unreadable(400, {"error": "invalid_signature"}, operation="verify")
+        assert payment_failure_verdict(exc, settle_attempted=False).kind == U
 
 
 def test_the_verdict_is_frozen() -> None:
@@ -282,3 +396,162 @@ def test_exported() -> None:
     ):
         assert name in uvd_x402_sdk.__all__
         assert getattr(uvd_x402_sdk, name) is getattr(client_module, name)
+
+
+# -- the verdict against the HTTP answer of every entry point -------------------
+
+
+def _verdict_answer(reason: str, **extra: Any) -> Answer:
+    return 200, {"isValid": False, "invalidReason": reason, "payer": PAYER, **extra}, {}
+
+
+def _settle_failed(reason: str, **extra: Any) -> Answer:
+    return 200, {"success": False, "errorReason": reason, "network": "arc", "payer": PAYER,
+                 **extra}, {}
+
+
+class HttpCase(NamedTuple):
+    verify: Answer
+    settle: Answer
+    #: The status every entry point answers; None = its own rejection (402/400).
+    status: Optional[int]
+    kind: str
+
+
+#: The rows of CASES that a facilitator answer reaches through the client,
+#: plus the receipts without an outcome.
+HTTP_CASES: dict[str, HttpCase] = {
+    "502 settlement_unconfirmed with a hash": HttpCase(
+        VERIFIED, (502, {"error": "settlement_unconfirmed", "transaction": TX,
+                         "paymentId": PAYMENT_ID, "retryable": False}, {}), 500, U),
+    "500 with a hash": HttpCase(
+        VERIFIED, (500, {"error": "boom", "transaction": TX}, {}), 500, U),
+    "settle error with tx_hash": HttpCase(
+        VERIFIED, _settle_failed("invalid_scheme", transaction=TX), 500, U),
+    "409 authorization_already_settled": HttpCase(
+        VERIFIED, (409, {"error": "authorization_already_settled"}, {}), 409, U),
+    "409 receipt_request_conflict": HttpCase(
+        VERIFIED, (409, {"error": "receipt_request_conflict"}, {}), 409, U),
+    "409 authorization_in_flight": HttpCase(
+        VERIFIED, (409, {"error": "authorization_in_flight"}, {}), 503, T),
+    "verify authorization_in_flight": HttpCase(
+        _verdict_answer("authorization_in_flight"), SETTLED, 503, T),
+    "503 idempotency_cache_corrupt": HttpCase(
+        VERIFIED, (503, {"error": "idempotency_cache_corrupt"}, {}), 409, U),
+    "500 nonce_already_used": HttpCase(
+        VERIFIED, (500, {"error": "nonce_already_used"}, {}), 409, U),
+    "settle nonce_already_used": HttpCase(
+        VERIFIED, _settle_failed("nonce_already_used"), 409, U),
+    "503 with Retry-After": HttpCase(
+        VERIFIED, (503, {"error": "upstream_rpc_unavailable"}, {"Retry-After": "7"}), 503, T),
+    "429": HttpCase(VERIFIED, (429, {"error": "rate_limited"}, {}), 503, T),
+    "502 settlement_unconfirmed without a hash": HttpCase(
+        VERIFIED, (502, {"error": "settlement_unconfirmed", "retryable": False}, {}), 500, U),
+    "502 broadcast_uncertain without a hash": HttpCase(
+        VERIFIED, (502, {"error": "broadcast_uncertain", "retryable": False}, {}), 500, U),
+    "500 retryable false": HttpCase(
+        VERIFIED, (500, {"error": "internal_error", "retryable": False}, {}), 500, U),
+    "502 broadcast_uncertain, no retryable": HttpCase(
+        VERIFIED, (502, {"error": "broadcast_uncertain"}, {}), 503, T),
+    "400 contract_call_failed (ref) on settle": HttpCase(
+        VERIFIED, (400, {"error": "contract_call_failed (ref: x)"}, {}), 500, U),
+    "400 contract_call_failed (ref) on verify": HttpCase(
+        (400, {"error": "contract_call_failed (ref: x)"}, {}), SETTLED, None, R),
+    "403 on settle": HttpCase(
+        VERIFIED, (403, {"error": "Address blocked: listed"}, {}), None, R),
+    "verification error": HttpCase(_verdict_answer("invalid_signature"), SETTLED, None, R),
+    "settle re-validation rejected": HttpCase(
+        VERIFIED, _verdict_answer("insufficient_funds"), None, R),
+    "settlement error, no hash": HttpCase(
+        VERIFIED, _settle_failed("insufficient_funds"), None, R),
+    # The receipts without an outcome (a verdict with one, a verify 4xx).
+    "settle success:false with a pending receipt": HttpCase(
+        VERIFIED, _settle_failed("unexpected", receipt=_receipt("pending", None, None)),
+        503, T),
+    "settle success:false with an unknown receipt": HttpCase(
+        VERIFIED, _settle_failed("unexpected", receipt=_receipt("unknown", None, None)),
+        503, T),
+    "settle re-validation with a pending receipt": HttpCase(
+        VERIFIED, _verdict_answer("unexpected", receipt=_receipt("pending", None, None)),
+        503, T),
+    "verify isValid:false with an unknown receipt": HttpCase(
+        _verdict_answer("unexpected", receipt=_receipt("unknown", None, None)), SETTLED,
+        503, T),
+    "400 on verify with a pending receipt": HttpCase(
+        (400, {"error": "unexpected", "receipt": _receipt("pending", None, None)}, {}),
+        SETTLED, 503, T),
+}
+
+_KIND_OF_STATUS = {503: T, 409: U, 500: U}
+
+
+def _raised(rail: Any) -> BaseException:
+    client = X402Client(recipient_address=RECIPIENT, facilitator_url=rail.url)
+    try:
+        client.process_payment(x_payment(), PRICE)
+    except Exception as exc:  # noqa: BLE001 - whatever the client raises
+        return exc
+    raise AssertionError("the payment was delivered")
+
+
+class TestTheHttpAnswerOfEveryEntryPoint:
+    """rejected <-> 402/400, transient <-> 503, unconfirmed <-> 409/500, on the
+    status each entry point answers over a real socket, and that status pinned
+    per case."""
+
+    @pytest.mark.parametrize("mount", list(SITES), ids=lambda mount: mount.__name__)
+    @pytest.mark.parametrize("name", list(HTTP_CASES))
+    def test_the_verdict_is_the_answer(self, scripted, mount, name: str) -> None:  # noqa: F811
+        case = HTTP_CASES[name]
+        site = mount(scripted(verify=case.verify, settle=case.settle))
+
+        status, body, headers = site.get(x_payment())
+
+        rejection = SITES[mount]
+        assert status == (rejection if case.status is None else case.status), body
+        assert site.delivered == 0
+        kind = R if status == rejection else _KIND_OF_STATUS[status]
+
+        exc = _raised(scripted(verify=case.verify, settle=case.settle))
+        for settle_attempted in (True, None):
+            verdict = payment_failure_verdict(exc, settle_attempted=settle_attempted)
+            assert verdict.kind == kind == case.kind, (settle_attempted, type(exc).__name__)
+        if kind == T:
+            assert "retry-after" in headers
+
+    def test_every_case_of_the_table_that_the_client_can_raise_is_here(self) -> None:
+        reachable = set(CASES) - {
+            # Exceptions a facilitator answer does not produce through
+            # process_payment here: a raw transport failure, a timeout, a
+            # 202 with a binding, the seller's own store, raw exceptions.
+            "transport error", "timeout", "202 settlement_in_progress",
+            "binding: store unavailable", "binding: already used", "invalid payload",
+            "ValueError",
+        }
+        assert reachable <= set(HTTP_CASES), reachable - set(HTTP_CASES)
+        assert {case.status for case in HTTP_CASES.values()} == {None, 409, 500, 503}
+
+
+# -- an exception outside the SDK, raised after a /settle answered 200 ----------
+
+
+@pytest.mark.parametrize(
+    "settle",
+    [
+        (200, {"success": "not a bool", "network": "arc", "payer": PAYER}, {}),
+        (200, ["not", "an", "object"], {}),
+    ],
+    ids=["settle-response-invalid", "settle-response-not-an-object"],
+)
+def test_an_exception_after_a_settle_200_is_not_a_rejection_by_default(
+    scripted, settle  # noqa: F811
+) -> None:
+    rail = scripted(settle=settle)
+    exc = _raised(rail)
+
+    assert not isinstance(exc, X402Error), exc
+    assert rail.calls == ["/verify", "/settle"]
+    verdict = payment_failure_verdict(exc)
+    assert verdict.kind == U and not verdict.may_ask_new_payment
+    # Taken as given when the caller says so.
+    assert payment_failure_verdict(exc, settle_attempted=False).kind == R
