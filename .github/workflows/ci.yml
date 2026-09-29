@@ -13,7 +13,8 @@ on:
     #   .gitattributes    decides the bytes the checkout writes, and the vectors
     #                     are compared as bytes
     #   .github/workflows/ci.yml       this file
-    #   .github/workflows/publish.yml  read by tests/interop (TestPublishGate)
+    #   .github/workflows/publish.yml  read by tests/test_publish_workflow.py and
+    #                     tests/interop (TestPublishGate)
     #   README.md         the package readme (pyproject `readme`); two tests pin
     #                     its examples (test_readme_eurc_networks,
     #                     test_exact_amount)
@@ -47,6 +48,10 @@ on:
       - 'README.md'
       - 'examples/**'
       - 'interop/**'
+
+# Both jobs only read: this checkout, and the TypeScript SDK, which is public.
+permissions:
+  contents: read
 
 jobs:
   test:

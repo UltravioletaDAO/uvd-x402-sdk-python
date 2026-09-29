@@ -24,18 +24,25 @@ Publica el SDK a PyPI. Ejecuta el workflow completo de publicación:
 5. **Push a GitHub:**
    - `git push origin main`
 
-6. **Crear y pushear tag:**
+6. **Crear y pushear tag (NO dispara nada):**
    - Tag: `vX.X.X` (usa versión de pyproject.toml)
    - Si el tag ya existe localmente, bórralo primero: `git tag -d vX.X.X`
    - `git tag vX.X.X -m "vX.X.X"`
    - `git push origin vX.X.X`
+   - El tag es el registro de la release. `publish.yml` ya no escucha tags ni releases.
 
-7. **Crear GitHub Release (dispara el workflow de PyPI):**
-   - Usa `gh release create vX.X.X`
-   - Title: `vX.X.X`
-   - Notes: Lista los últimos 5 commits como bullet points + comando de instalación
+7. **Disparar la publicación (trusted publishing, OIDC, sin token):**
+   - `gh workflow run publish.yml --ref main -f version=X.X.X` (misma versión que pyproject.toml, desde `main`)
+   - Fuera de `main`, `check` se salta y con él todo lo demás. En `main`, falla si la versión no es la de pyproject.toml, y corre `tests/interop` y la suite offline; `build` arma `dist/`
+   - `gh run list --workflow publish.yml --limit 1` para seguirlo
 
-8. **Resumen final** con links a release y actions
+8. **El dueño aprueba:** el job `publish` espera en el environment `pypi` hasta que el dueño lo aprueba en **Review deployments**. Sin esa aprobación no se publica nada. Con ella, sube `dist/` por OIDC (`pypa/gh-action-pypi-publish`).
+
+9. **Verificar en PyPI:** `curl -s https://pypi.org/pypi/uvd-x402-sdk/X.X.X/json` devuelve la versión.
+
+10. **GitHub Release (opcional, no dispara nada):** `gh release create vX.X.X`, title `vX.X.X`, notas con los últimos 5 commits + comando de instalación.
+
+11. **Resumen final** con links al run de Actions y a PyPI
 
 ## Reglas
 

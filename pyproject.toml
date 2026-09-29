@@ -139,6 +139,10 @@ dev = [
     # tests/test_bindings*.py run DynamoDBBindingStore against moto's DynamoDB
     # (in process, fake keys, no network). boto3 comes with it.
     "moto[dynamodb]>=5.0.0",
+    # tests/test_publish_workflow.py reads .github/workflows/publish.yml as
+    # YAML. moto brings it today (through responses); named here so the test
+    # does not depend on that.
+    "pyyaml>=6.0",
     # tests/test_ows_wallet_adapter.py runs OWSWalletAdapter against the real
     # library (a temporary vault, no network) and pins tests/ows_double.py to
     # its signatures. Pinned: a new release is a new API to measure. It ships
