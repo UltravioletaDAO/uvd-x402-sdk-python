@@ -15,7 +15,8 @@
     "signer_private_key is a synthetic test key (0x42 * 32) that never",
     "held funds. signer_address differs from payer on purpose: the tests",
     "only pin the signed bytes; payer binding is enforced on-chain and by",
-    "the backend, not by the signer."
+    "the backend, not by the signer.",
+    "additional_networks.<name> repeats the recipe on another network (arc: chain 5042, x402r generation-D escrow, EM's operator)."
   ],
   "network": "base",
   "network_config": {
@@ -121,6 +122,99 @@
       "paymentRequirements": {
         "scheme": "escrow",
         "network": "eip155:8453"
+      }
+    }
+  },
+  "additional_networks": {
+    "arc": {
+      "_note": [
+        "Arc (chain 5042): the x402r generation-D escrow and EM's operator,",
+        "from NETWORK_CONFIG. Same recipe, same payer/worker/bounty, same",
+        "frozen now/salt/deadline/tier and the same synthetic signer as the",
+        "top-level (Base) vector; only the network differs. The USDC EIP-712",
+        "domain is the on-chain name(): 'USDC' / '2', not 'USD Coin'."
+      ],
+      "network": "arc",
+      "network_config": {
+        "chain_id": 5042,
+        "operator": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "usdc": "0x3600000000000000000000000000000000000000",
+        "usdc_domain_name": "USDC",
+        "usdc_domain_version": "2",
+        "payment_info_typehash": "ae68ac7ce30c86ece8196b61a7c486d8f0061f575037fbd34e7fe4e2820c6591",
+        "min_fee_bps": 0,
+        "max_fee_bps": 1800
+      },
+      "static_vector": {
+        "_note": "compute_escrow_nonce(5042, escrow D, typehash, payment_info) == expected_nonce.",
+        "payment_info": {
+          "operator": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+          "receiver": "0x1111111111111111111111111111111111111111",
+          "token": "0x3600000000000000000000000000000000000000",
+          "maxAmount": "100000",
+          "preApprovalExpiry": 1760003600,
+          "authorizationExpiry": 1760007200,
+          "refundExpiry": 1760086400,
+          "minFeeBps": 0,
+          "maxFeeBps": 1800,
+          "feeReceiver": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+          "salt": "abababababababababababababababababababababababababababababababab"
+        },
+        "expected_nonce": "47ff25a033ffd5f1c1dcebacd53e5d4a727ad9a24366493b3204e7190ff35c6b"
+      },
+      "frozen_build": {
+        "_note": "build_escrow_pre_auth(payment_config, 'arc', payer, worker, bounty_usd, deadline, wallet, tier) with the top-level frozen_build's now/salt/key must yield expected_wrapper.",
+        "expected_typed_data": {
+          "domain": {
+            "name": "USDC",
+            "version": "2",
+            "chainId": 5042,
+            "verifyingContract": "0x3600000000000000000000000000000000000000"
+          },
+          "primaryType": "ReceiveWithAuthorization",
+          "message": {
+            "from": "0x2222222222222222222222222222222222222222",
+            "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+            "value": "100000",
+            "validAfter": "0",
+            "validBefore": "1760003600",
+            "nonce": "edf1f8dc085ae946d54b795b8b2e3264a146700b93a1b42836a32c788e378839"
+          }
+        },
+        "expected_wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x2222222222222222222222222222222222222222",
+              "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+              "value": "100000",
+              "validAfter": "0",
+              "validBefore": "1760003600",
+              "nonce": "edf1f8dc085ae946d54b795b8b2e3264a146700b93a1b42836a32c788e378839"
+            },
+            "signature": "c1a18befee63db56a13ac0429a2d0465e375a22d7196c91eca070d4c821f0e3935cc60e42a4bba99c5ee0375319a3a9362fcaf1b3f1a381e1cdf47e0ec59635d1b",
+            "paymentInfo": {
+              "operator": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+              "receiver": "0x1111111111111111111111111111111111111111",
+              "token": "0x3600000000000000000000000000000000000000",
+              "maxAmount": "100000",
+              "preApprovalExpiry": 1760003600,
+              "authorizationExpiry": 1761036800,
+              "refundExpiry": 1761641600,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+              "salt": "abababababababababababababababababababababababababababababababab"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:5042"
+          }
+        }
       }
     }
   }

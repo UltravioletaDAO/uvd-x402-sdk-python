@@ -2197,7 +2197,7 @@ async with BazaarClient() as bazaar:
 
 ## WalletAdapter
 
-Abstract wallet interface for signing EIP-3009 authorizations. Use `EnvKeyAdapter` for raw private keys or `OWSWalletAdapter` for Open Wallet Standard (future).
+Abstract wallet interface for signing EIP-3009 authorizations. Use `EnvKeyAdapter` for raw private keys or `OWSWalletAdapter` for a key kept in an Open Wallet Standard vault.
 
 ```bash
 pip install uvd-x402-sdk[wallet]
@@ -2228,6 +2228,41 @@ result = wallet.sign_typed_data({
 # Sign a personal message (EIP-191)
 sig = wallet.sign_message("Hello, world!")
 ```
+
+### OWSWalletAdapter (Open Wallet Standard)
+
+The key stays in the OWS vault and is used there; this process never holds it.
+Written against `open-wallet-standard` 1.4.2 (`pip install open-wallet-standard`;
+`sign_transaction` also needs the `signer` extra).
+
+```python
+from uvd_x402_sdk import OWSWalletAdapter
+
+wallet = OWSWalletAdapter(
+    wallet_name="agent-treasury",  # name or id in the vault
+    network="base",                # the chain OWS is told (its policies decide on it)
+    # passphrase=...  (default: OWS_PASSPHRASE), vault_path=...  (default: ows's own)
+)
+auth = wallet.sign_eip3009({"to": "0xRecipient...", "amount_usdc": "0.10", "network": "base"})
+```
+
+Typed data and transactions that name their own chain id are signed on that
+chain. What the adapter returns is what `EnvKeyAdapter` signs with the same key
+(`tests/test_ows_wallet_adapter.py`), or it raises:
+
+- Typed data is sent normalised by its declared types. A value out of its
+  type's range (ows would sign `2**256` as a `uint256`), a `string` or
+  `address` that is not a str, or a `bool` that is not a bool raises
+  `ValueError` before anything is signed. With eth-account installed, each
+  typed-data signature is recovered against the digest eth-account computes
+  and raises `ValueError` instead of being returned when it is not the
+  wallet's, e.g. for an `EIP712Domain` declared in a non-canonical order,
+  which eth-account ignores.
+- A transaction's `from` (web3's `build_transaction` keeps it) must be the
+  wallet, compared without case; otherwise `TypeError`, and nothing is signed.
+  eth-account compares the checksummed form exactly.
+
+A `vault_path` that does not exist is created by ows, even by a read.
 
 ### Custom WalletAdapter
 

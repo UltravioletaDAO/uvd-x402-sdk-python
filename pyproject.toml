@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.92.0"
+version = "0.93.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 29 networks (including native Hedera mainnet/testnet, Circle Arc mainnet/testnet, Robinhood Chain, XRPL, Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT, USDG)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -139,6 +139,14 @@ dev = [
     # tests/test_bindings*.py run DynamoDBBindingStore against moto's DynamoDB
     # (in process, fake keys, no network). boto3 comes with it.
     "moto[dynamodb]>=5.0.0",
+    # tests/test_ows_wallet_adapter.py runs OWSWalletAdapter against the real
+    # library (a temporary vault, no network) and pins tests/ows_double.py to
+    # its signatures. Pinned: a new release is a new API to measure. It ships
+    # wheels only, CPython 3.9-3.13: manylinux (glibc) x86_64/aarch64 and macOS
+    # x86_64/arm64. The marker says exactly that, except glibc vs musl, which no
+    # marker can tell: on Alpine this extra fails to install. Elsewhere those
+    # tests skip and say why; CI checks the library is there.
+    "open-wallet-standard==1.4.2; python_version < '3.14' and ((sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'darwin' and (platform_machine == 'x86_64' or platform_machine == 'arm64')))",
 ]
 
 [project.scripts]
