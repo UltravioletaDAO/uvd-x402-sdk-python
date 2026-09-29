@@ -1689,16 +1689,18 @@ class X402Client:
         Uses the network's settle_timeout_seconds if available,
         otherwise falls back to config.settle_timeout.
         Ethereum L1 uses 900s; L2s use 90s (default).
+        config.max_settle_timeout, when set, caps either one.
         """
+        timeout = self.config.settle_timeout
         try:
-            normalized = normalize_network(network)
+            network_config = get_network(normalize_network(network))
         except ValueError:
-            return self.config.settle_timeout
-
-        network_config = get_network(normalized)
+            network_config = None
         if network_config and network_config.settle_timeout_seconds > 0:
-            return network_config.settle_timeout_seconds
-        return self.config.settle_timeout
+            timeout = network_config.settle_timeout_seconds
+
+        cap = self.config.max_settle_timeout
+        return timeout if cap is None else min(timeout, cap)
 
     # =========================================================================
     # Network Validation
