@@ -13,6 +13,7 @@ Supports:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Literal
 import json
+import math
 import os
 
 from uvd_x402_sdk.stack_key import STACK_KEY_ENV, usable_stack_key
@@ -80,7 +81,22 @@ class X402Config:
         recipient_xrpl: Recipient address for XRP Ledger (classic r... address)
         facilitator_solana: Solana/SVM facilitator address (fee payer)
         verify_timeout: Timeout for verify requests (seconds)
-        settle_timeout: Timeout for settle requests (seconds)
+        settle_timeout: Timeout for settle requests (seconds) on a network
+            that has no settle timeout of its own. A network the SDK knows
+            carries one (``settle_timeout_seconds`` in ``uvd_x402_sdk.networks``:
+            900 on Ethereum L1, 90 by default) and it wins, so this is a
+            FALLBACK: raising or lowering it does not move a known network.
+        max_settle_timeout: Optional CEILING on the settle timeout (seconds),
+            wherever that timeout comes from: the settle waits
+            ``min(network timeout or settle_timeout, max_settle_timeout)``.
+            ``None`` (the default) sets no ceiling and every network keeps its
+            own timeout. Set it when the seller has less time to answer than a
+            network's settle can take (a request budget fixed by the platform),
+            so the SDK stops waiting in time to answer. A settle cut short is
+            not a rejection: the SDK's timeout fallback asks the facilitator
+            again (with its own timeouts, which this does not cap), and what
+            is still unknown after that is a transient error (503, present the
+            same payment again), never a 402. Must be > 0 and finite.
         max_timeout_seconds: The ``maxTimeoutSeconds`` of the payment
             requirements ``verify_payment`` / ``settle_payment`` /
             ``process_payment`` send (default 60). Native Hedera keeps its own
@@ -128,7 +144,7 @@ class X402Config:
 
     # Timeouts
     verify_timeout: float = 30.0
-    settle_timeout: float = 55.0  # Must be < Lambda timeout (60s)
+    settle_timeout: float = 55.0  # Fallback: a network's own settle timeout wins
 
     # maxTimeoutSeconds of the requirements the client sends to the facilitator.
     max_timeout_seconds: int = 60
@@ -187,6 +203,10 @@ class X402Config:
     stack_key: Optional[str] = field(default=None, repr=False)
     stack_key_hosts: Optional[list[str]] = None
 
+    # Ceiling on the settle timeout, the network's or settle_timeout; None =
+    # no ceiling. After the two above for the same reason.
+    max_settle_timeout: Optional[float] = None
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         # First, so that no other check can fail with the raw value still here.
@@ -203,6 +223,20 @@ class X402Config:
             raise ValueError(
                 f"max_timeout_seconds must be a positive integer, got {self.max_timeout_seconds!r}"
             )
+
+        if self.max_settle_timeout is not None:
+            cap = self.max_settle_timeout
+            if (
+                isinstance(cap, bool)
+                or not isinstance(cap, (int, float))
+                or not math.isfinite(cap)
+                or cap <= 0
+            ):
+                raise ValueError(
+                    f"max_settle_timeout must be a positive, finite number of seconds "
+                    f"or None, got {cap!r}"
+                )
+            self.max_settle_timeout = float(cap)
 
         # At least one recipient is required
         if not any([
