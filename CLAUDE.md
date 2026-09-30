@@ -167,6 +167,7 @@ payment_requirements = {
 - Arc since v0.90.0: `arc` / `arc-testnet` carry the canonical mainnet / testnet registries (identity, reputation, validation). **Only `arc` is in `RELAYED_FEEDBACK_NETWORKS`** (v4 delegate `0x955Cc9fB…84f1`); `arc-testnet` has no delegate and `prepare` answers 400 there. `tests/test_erc8004_arc.py` pins that nothing else moved since 0.89.0
 - **Parity with the TypeScript SDK is PINNED**: `tests/test_erc8004_ts_parity.py` compares the four lists and the answers of `supports_*` / `_wire` against `tests/fixtures/erc8004-ts.json`, generated from the PUBLISHED npm package (never edit by hand): `node scripts/erc8004_ts_snapshot.mjs --version <ts-release>` rewrites it, `--check` exits 1 when it drifted. When TS changes a list, regenerate against its release and bump `TS_RELEASE` in the test
 - `AgentId = Union[int, str]` - EVM uses int, Solana uses base58 pubkey string
+- Writes answer an HTTP error as `success=False` + `error="Facilitator error: <status> - <body>"` (**byte-identical, consumers regex it**) + `status_code` / `retry_after` (seconds or HTTP-date, NOT clamped), read by the one helper `_http_error_fields`; no HTTP answer = both `None`. `tests/test_erc8004_retry_after.py` fails if a write catching `httpx.HTTPStatusError` lacks a row there
 - `seal_hash` parameter on `revoke_feedback()` and `append_response()` (SEAL v1)
 - Solana uses QuantuLabs 8004-solana Anchor program + ATOM Engine
 
