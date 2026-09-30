@@ -7,8 +7,10 @@ name: Publish to PyPI
 # token in this repository to steal, and none is read here.
 #
 # check -> build -> publish. `check` runs only on main, checks the version and runs the tests;
-# `build` makes dist/ without id-token; `publish` is the one job with id-token, and it waits in
-# the `pypi` environment until the owner approves it (Review deployments).
+# `build` makes dist/ without id-token; `publish` is the one job with id-token, and it runs in
+# the `pypi` environment, which deploys from main only and has no required reviewer: nobody
+# approves the upload. What guards it is main only, workflow_dispatch only, OIDC with no token,
+# and the road to main (review, green CI).
 on:
   workflow_dispatch:
     inputs:

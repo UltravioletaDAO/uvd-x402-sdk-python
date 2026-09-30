@@ -1,10 +1,12 @@
 """``publish.yml`` publishes to PyPI by trusted publishing (OIDC), by hand, from main.
 
 The owner's decision 127 (2026-09-29): the SDKs publish by trusted publishing,
-with no token, and every release waits for the owner's approval in the
-``pypi`` environment. Until then this workflow uploaded with twine and a
-long-lived API token kept as a repository secret, ran on every ``v*`` tag,
-and said in a comment that it already used OIDC.
+with no token, from the ``pypi`` environment. Until then this workflow uploaded
+with twine and a long-lived API token kept as a repository secret, ran on every
+``v*`` tag, and said in a comment that it already used OIDC. Decision 136
+(2026-09-30) removed the environment's required reviewer: no human approves the
+upload, and ``pypi`` keeps ``main`` as its only branch. Both are settings of the
+repository, not of this file, so no rule below can see them.
 
 Each rule below returns what it finds wrong in a workflow's text. The real
 file must break none (``TestTheWorkflow``), and ``TestMutations`` edits the
@@ -20,7 +22,7 @@ catch it: a rule that stops catching its mutation guards nothing.
   in any job that does not publish, through a shorthand (``write-all``), or
   missing where the upload needs it.
 * ``pypi_environment`` -- the job that publishes without ``environment:
-  pypi``, where the owner's approval lives.
+  pypi``, the environment PyPI trusts and that deploys from ``main`` only.
 * ``main_only`` -- no ``github.ref == 'refs/heads/main'`` gate among the jobs
   the upload needs, or a job of that chain that runs when the gate skipped.
 * ``one_publisher`` -- other than one job that uploads, an upload from a

@@ -36,7 +36,7 @@ Publica el SDK a PyPI. Ejecuta el workflow completo de publicación:
    - Fuera de `main`, `check` se salta y con él todo lo demás. En `main`, falla si la versión no es la de pyproject.toml, y corre `tests/interop` y la suite offline; `build` arma `dist/`
    - `gh run list --workflow publish.yml --limit 1` para seguirlo
 
-8. **El dueño aprueba:** el job `publish` espera en el environment `pypi` hasta que el dueño lo aprueba en **Review deployments**. Sin esa aprobación no se publica nada. Con ella, sube `dist/` por OIDC (`pypa/gh-action-pypi-publish`).
+8. **Publica sin aprobación humana:** el job `publish` corre en el environment `pypi`, que solo admite `main` y no tiene revisor requerido (se quitó el 2026-09-30), y sube `dist/` por OIDC (`pypa/gh-action-pypi-publish`) sin esperar a nadie. Los controles son: solo `main`, solo `workflow_dispatch`, OIDC sin token, y el camino a `main` (revisión, CI verde).
 
 9. **Verificar en PyPI:** `curl -s https://pypi.org/pypi/uvd-x402-sdk/X.X.X/json` devuelve la versión.
 
