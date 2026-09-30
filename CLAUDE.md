@@ -336,8 +336,12 @@ Trusted publishing (OIDC), no token (owner's decision 127, 2026-09-29). The flow
 2. c0der runs `publish.yml` on `main` with that version: `gh workflow run publish.yml --ref main -f version=X.Y.Z`.
    `check` (only on `refs/heads/main`) fails if the input is not the `pyproject.toml` version, then runs
    `tests/interop` and the whole suite offline; `build` makes `dist/` without id-token and uploads it as an artifact.
-3. The owner approves the `publish` job in **Review deployments** (environment `pypi`, required reviewer).
-4. `publish` (the only job with `id-token: write`) uploads `dist/` with `pypa/gh-action-pypi-publish` by OIDC.
+3. `publish` (the only job with `id-token: write`) uploads `dist/` with `pypa/gh-action-pypi-publish` by OIDC, with
+   no human approval: the `pypi` environment deploys from `main` only and has no required reviewer (removed
+   2026-09-30, owner's decision 136).
+
+What guards a release is `main` only, `workflow_dispatch` only, OIDC with no token, and the road to `main`
+(review, green CI).
 
 The tag `vX.Y.Z` is still created for the release, and it triggers nothing: `publish.yml` has no `push`, tag or
 `release` trigger. `tests/test_publish_workflow.py` fails on any `secrets` reference in the file, another trigger,
