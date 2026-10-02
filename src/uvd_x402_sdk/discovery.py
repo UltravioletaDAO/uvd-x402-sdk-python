@@ -15,6 +15,9 @@ Example:
     ...     # Free-text search runs server-side over the whole catalog
     ...     hits = await bazaar.list_resources(q="logs")
     ...
+    ...     # Newer filters are sent only when passed (see list_resources)
+    ...     cheap_posts = await bazaar.list_resources(max_price_usd="0.05", method="POST")
+    ...
     ...     # Register your own resource
     ...     await bazaar.register_resource(
     ...         url="https://api.example.com/data",
@@ -30,7 +33,8 @@ Example:
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
@@ -41,9 +45,12 @@ from uvd_x402_sdk.stack_key import (
     usable_stack_key,
 )
 
-#: Maximum length of the free-text `q` filter. Mirrors the facilitator's
-#: `MAX_SEARCH_LEN`; longer needles are rejected server-side with a 400.
-MAX_SEARCH_LEN = 128
+#: Default client-side cap on the free-text `q` filter, in characters (code
+#: points, the facilitator's `q.chars().count()`). The facilitator is moving
+#: `q` to natural-language relevance search of about 400 characters; x402-rs
+#: 2.46.1 and earlier still answer a 400 above 128 characters. The cap is per
+#: client: `BazaarClient(max_search_len=...)`, `None` leaves it to the server.
+MAX_SEARCH_LEN = 400
 
 #: Values accepted by the `health` filter of GET /discovery/resources.
 HEALTH_FILTERS = (
@@ -58,6 +65,30 @@ HEALTH_FILTERS = (
 
 #: Values accepted by the `tier` filter of GET /discovery/resources.
 TIER_FILTERS = ("first_party", "vip", "verified", "listed")
+
+#: Values accepted by the `method` filter: the HTTP methods of the x402
+#: `bazaar` extension (`info.input.method`). Matched case-insensitively and
+#: sent upper-case.
+METHOD_FILTERS = ("GET", "HEAD", "DELETE", "POST", "PUT", "PATCH")
+
+
+def _price_param(value: Union[Decimal, int, float, str]) -> str:
+    """`max_price_usd` as a plain non-negative decimal string.
+
+    `str(Decimal("1E+2"))` is `"1E+2"`, which is not a price a query string
+    should carry; `format(..., "f")` writes `"100"`.
+    """
+    if isinstance(value, bool) or not isinstance(value, (Decimal, int, float, str)):
+        raise ValueError("max_price_usd must be a number or a decimal string")
+    try:
+        price = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError(f"max_price_usd is not a decimal: {value!r}") from exc
+    if not price.is_finite() or price < 0:
+        raise ValueError(f"max_price_usd must be a finite amount >= 0, got {value!r}")
+    if price == 0:
+        return "0"
+    return format(price, "f")
 
 
 def _coerce_epoch(value: Any) -> Optional[int]:
@@ -267,13 +298,26 @@ class BazaarClient:
         *,
         stack_key: Optional[str] = None,
         stack_key_hosts: Optional[list[str]] = None,
+        max_search_len: Optional[int] = MAX_SEARCH_LEN,
     ):
         """``stack_key``: the ``X-UVD-Stack-Key`` of a service of Ultravioleta
         DAO, sent on every request when ``base_url`` is a facilitator of
         Ultravioleta DAO (``stack_key_hosts`` adds hosts); see
-        ``uvd_x402_sdk.stack_key``. Not for third parties."""
+        ``uvd_x402_sdk.stack_key``. Not for third parties.
+
+        ``max_search_len``: longest ``q`` that ``list_resources`` sends, in
+        characters (default ``MAX_SEARCH_LEN``, 400). A longer one raises
+        ``ValueError`` before any request. ``None`` sends any length and lets
+        the facilitator decide; ``128`` matches x402-rs 2.46.1 and earlier."""
+        if max_search_len is not None and (
+            isinstance(max_search_len, bool)
+            or not isinstance(max_search_len, int)
+            or max_search_len < 1
+        ):
+            raise ValueError("max_search_len must be a positive int or None")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.max_search_len = max_search_len
         self._stack_key = usable_stack_key(stack_key)
         self._stack_key_hosts = stack_key_hosts
         self._client = httpx.AsyncClient(
@@ -303,6 +347,11 @@ class BazaarClient:
         health: Optional[str] = None,
         tier: Optional[str] = None,
         q: Optional[str] = None,
+        max_price_usd: Optional[Union[Decimal, int, float, str]] = None,
+        method: Optional[str] = None,
+        has_input_schema: Optional[bool] = None,
+        kind: Optional[str] = None,
+        exclude_host: Optional[str] = None,
     ) -> DiscoveryResponse:
         """
         List registered resources from the Bazaar discovery registry.
@@ -324,17 +373,39 @@ class BazaarClient:
             health: Filter by liveness, one of `HEALTH_FILTERS`
             tier: Filter by curated tier, one of `TIER_FILTERS`
             q: Free-text search over url / description / provider / category /
-                tags, at most `MAX_SEARCH_LEN` characters
+                tags, at most `max_search_len` characters (see `__init__`)
+            max_price_usd: Only resources priced at or under this many USD
+                (`maxPriceUsd`); a number or a decimal string, sent as a plain
+                decimal
+            method: Only resources called with this HTTP method (`method`),
+                one of `METHOD_FILTERS`, case-insensitive
+            has_input_schema: Only resources that do (True) or do not (False)
+                declare an input schema (`hasInputSchema`)
+            kind: Only resources of this kind (`kind`), sent as given
+            exclude_host: Leave out the resources of this host
+                (`excludeHost`), sent as given
+
+        The last five filters need a facilitator that knows them: newer than
+        x402-rs 2.46.1, which answers a 400 (`httpx.HTTPStatusError` here) to
+        any query parameter it does not know rather than ignoring it. Each one
+        is sent only when passed, so a call that passes none of them is the
+        same request as before.
 
         Returns:
             Paginated list of discovery resources
         """
-        if q is not None and len(q) > MAX_SEARCH_LEN:
-            raise ValueError(f"q must be at most {MAX_SEARCH_LEN} characters")
+        if q is not None and self.max_search_len is not None and len(q) > self.max_search_len:
+            raise ValueError(f"q must be at most {self.max_search_len} characters")
         if health is not None and health not in HEALTH_FILTERS:
             raise ValueError(f"health must be one of {', '.join(HEALTH_FILTERS)}")
         if tier is not None and tier not in TIER_FILTERS:
             raise ValueError(f"tier must be one of {', '.join(TIER_FILTERS)}")
+        if method is not None:
+            if not isinstance(method, str) or method.upper() not in METHOD_FILTERS:
+                raise ValueError(f"method must be one of {', '.join(METHOD_FILTERS)}")
+            method = method.upper()
+        if has_input_schema is not None and not isinstance(has_input_schema, bool):
+            raise ValueError("has_input_schema must be True, False or None")
 
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         optional = {
@@ -347,6 +418,11 @@ class BazaarClient:
             "health": health,
             "tier": tier,
             "q": q,
+            "maxPriceUsd": None if max_price_usd is None else _price_param(max_price_usd),
+            "method": method,
+            "hasInputSchema": None if has_input_schema is None else str(has_input_schema).lower(),
+            "kind": kind,
+            "excludeHost": exclude_host,
         }
         params.update({k: v for k, v in optional.items() if v is not None})
 

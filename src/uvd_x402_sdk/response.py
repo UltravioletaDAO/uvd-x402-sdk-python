@@ -327,13 +327,126 @@ class Payment402Builder:
 # =============================================================================
 
 
+#: Where the x402 ``bazaar`` extension is specified: coinbase/x402
+#: ``specs/extensions/bazaar.md`` at ``dd927a2`` (2026-04-21). The ``info``
+#: shape below follows it, and its defaults follow the reference builder of the
+#: same commit (``python/x402/extensions/bazaar/resource_service.py``).
+BAZAAR_SPEC = "https://github.com/coinbase/x402/blob/dd927a26cfefc98c24b3ec38b3a8f204dad0c60d/specs/extensions/bazaar.md"
+
+_BAZAAR_QUERY_METHODS = ("GET", "HEAD", "DELETE")
+_BAZAAR_BODY_METHODS = ("POST", "PUT", "PATCH")
+_BAZAAR_BODY_TYPES = ("json", "form-data", "text")
+
+
+def _is_body_method(method: Any) -> bool:
+    return isinstance(method, str) and method.upper() in _BAZAAR_BODY_METHODS
+
+
+def _empty_body_fits(schema: Dict[str, Any]) -> bool:
+    """Whether ``{}``, the default example body, passes ``schema``.
+
+    The facilitator validates ``info`` against ``schema`` before cataloging,
+    so an example that fails its own schema gets the resource rejected. Only
+    the two ways that happen with a plain object schema are checked here.
+    """
+    return schema.get("type") in (None, "object") and not schema.get("required")
+
+
+def _bazaar_info_block(
+    method: Any,
+    input_schema: Any,
+    output_example: Any,
+    query_params: Any,
+    body: Any,
+    body_type: Any,
+) -> Dict[str, Any]:
+    """The ``info`` + ``schema`` pair of the spec (see ``BAZAAR_SPEC``)."""
+    verbo = method.upper() if isinstance(method, str) else None
+    if verbo not in _BAZAAR_QUERY_METHODS + _BAZAAR_BODY_METHODS:
+        raise ValueError(
+            "bazaar_extension: info.input.method must be one of "
+            f"{', '.join(_BAZAAR_QUERY_METHODS + _BAZAAR_BODY_METHODS)}, got {method!r}"
+        )
+    if input_schema is not None and not isinstance(input_schema, dict):
+        raise ValueError("bazaar_extension: input_schema must be a JSON Schema object")
+    if query_params is not None and not isinstance(query_params, dict):
+        raise ValueError("bazaar_extension: query_params must be an object")
+
+    entrada: Dict[str, Any] = {"type": "http", "method": verbo}
+    propiedades: Dict[str, Any] = {"type": {"type": "string", "const": "http"}}
+    if verbo in _BAZAAR_BODY_METHODS:
+        tipo = "json" if body_type is None else body_type
+        if tipo not in _BAZAAR_BODY_TYPES:
+            raise ValueError(
+                f"bazaar_extension: body_type must be one of {', '.join(_BAZAAR_BODY_TYPES)}, "
+                f"got {body_type!r}"
+            )
+        esquema_body = {"properties": {}} if input_schema is None else input_schema
+        if body is None:
+            if not _empty_body_fits(esquema_body):
+                raise ValueError(
+                    "bazaar_extension: pass body=, an example request body that "
+                    "validates against input_schema -- the default {} does not, "
+                    "and the facilitator rejects an info that fails its schema"
+                )
+            body = {}
+        entrada["bodyType"] = tipo
+        entrada["body"] = body
+        propiedades["method"] = {"type": "string", "enum": list(_BAZAAR_BODY_METHODS)}
+        propiedades["bodyType"] = {"type": "string", "enum": list(_BAZAAR_BODY_TYPES)}
+        propiedades["body"] = esquema_body
+        requeridos = ["type", "method", "bodyType", "body"]
+    else:
+        if input_schema is not None or body is not None or body_type is not None:
+            raise ValueError(
+                f"bazaar_extension: {verbo} carries no request body -- input_schema, "
+                f"body and body_type are for {', '.join(_BAZAAR_BODY_METHODS)}"
+            )
+        propiedades["method"] = {"type": "string", "enum": list(_BAZAAR_QUERY_METHODS)}
+        requeridos = ["type", "method"]
+    if query_params is not None:
+        entrada["queryParams"] = query_params
+        propiedades["queryParams"] = {"type": "object"}
+
+    info: Dict[str, Any] = {"input": entrada}
+    esquema: Dict[str, Any] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "object",
+                "properties": propiedades,
+                "required": requeridos,
+                "additionalProperties": False,
+            }
+        },
+        "required": ["input"],
+    }
+    if output_example is not None:
+        info["output"] = {"type": "json", "example": output_example}
+        esquema["properties"]["output"] = {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string"},
+                # The spec's "any"; the reference builder's {"type": "object"}
+                # when the example is one.
+                "example": {"type": "object"} if isinstance(output_example, dict) else {},
+            },
+            "required": ["type"],
+        }
+    return {"info": info, "schema": esquema}
+
+
 def bazaar_extension(
     input_schema: Optional[Dict[str, Any]] = None,
-    output_example: Optional[Dict[str, Any]] = None,
+    output_example: Any = None,
     *,
     method: Optional[str] = None,
     query_params: Optional[Dict[str, Any]] = None,
     discoverable: Optional[bool] = None,
+    body: Any = None,
+    body_type: Optional[str] = None,
+    info: bool = False,
 ) -> Dict[str, Any]:
     """
     Build the `bazaar` extension block for an x402 v2 challenge.
@@ -346,31 +459,59 @@ def bazaar_extension(
     402milly shipped this by hand and it is what made the resource classifiable
     by x402scan's crawler.
 
-    Two shapes, and the caller picks by what the endpoint IS:
+    Three shapes. The first two are the historical ones and every call that
+    built one before still builds it byte-for-byte:
 
-    * **Body shape** (historical, unchanged): pass ``input_schema`` -- the
-      JSON Schema of the request body. Calls that only use the two positional
-      arguments produce a dict byte-for-byte identical to every prior version.
-    * **HTTP/GET shape** (new): pass ``method`` (and optionally
-      ``query_params``) for endpoints whose input travels in the path/query,
-      not in a body. This is the form live crawlers already publish (Agent
-      Arena, trust-agent.io: ``{"type": "http", "method": "GET",
-      "queryParams": {...}}``) and the only one usable by a GET-priced API --
-      describe.net documented this exact gap in its paywall for two SDK
-      generations before it landed here.
+    * **Body shape**: pass ``input_schema`` -- the JSON Schema of the request
+      body. Calls that only use the two positional arguments produce a dict
+      byte-for-byte identical to every prior version.
+    * **HTTP/GET shape**: pass ``method`` (and optionally ``query_params``)
+      for endpoints whose input travels in the path/query, not in a body.
+      This is the form live crawlers already publish (Agent Arena,
+      trust-agent.io: ``{"type": "http", "method": "GET", "queryParams":
+      {...}}``) and the only one usable by a GET-priced API -- describe.net
+      documented this exact gap in its paywall for two SDK generations before
+      it landed here.
+    * **Spec shape** (``info`` + ``schema``, as in the x402 spec, see
+      ``BAZAAR_SPEC``): ``info.input`` says how to call the endpoint
+      (``type`` ``"http"``, ``method``, and for POST / PUT / PATCH
+      ``bodyType`` + ``body``; ``queryParams`` when given), ``info.output``
+      what it answers (``{"type": "json", "example": output_example}``), and
+      ``schema`` is the JSON Schema (draft 2020-12) that ``info`` validates
+      against -- the facilitator checks that before cataloging. Chosen by
+      ``method`` POST / PUT / PATCH together with ``input_schema`` (a
+      ``ValueError`` before), by ``body`` or ``body_type``, or by
+      ``info=True`` for a call the first two shapes could also express. It is
+      the only shape that tells the facilitator an endpoint is POST.
 
     Args:
-        input_schema: JSON Schema of the request body (body shape)
-        output_example: A representative successful response body
-        method: HTTP method for the HTTP shape ("GET", ...). Mutually
-            exclusive with input_schema.
-        query_params: JSON Schema (or plain description map) of the query
-            parameters, for the HTTP shape
+        input_schema: JSON Schema of the request body. In the spec shape it
+            becomes ``schema.properties.input.properties.body`` (the same
+            path the body shape uses), and only POST / PUT / PATCH take it
+        output_example: A representative successful response body. Required
+            by the first two shapes, optional in the spec shape
+        method: HTTP method. In the first two shapes it is emitted as given;
+            in the spec shape it is one of GET, HEAD, DELETE, POST, PUT,
+            PATCH, case-insensitive, emitted upper-case
+        query_params: Query parameters: in the HTTP/GET shape a JSON Schema
+            (or plain description map), in the spec shape example values
+            (``info.input.queryParams``)
         discoverable: When set, emitted as `"discoverable": <bool>` inside
             the bazaar block -- the flag crawlers use to index the resource
+        body: Example request body (``info.input.body``) of a POST / PUT /
+            PATCH. Defaults to ``{}`` as in the reference builder, which is
+            refused when ``input_schema`` lists ``required`` fields or a type
+            other than object (the example would fail its own schema)
+        body_type: ``"json"`` (the default), ``"form-data"`` or ``"text"``
+        info: Build the spec shape for a call the first two shapes could
+            also express (a GET with ``query_params``, a POST without
+            ``input_schema``). ``False`` never turns the spec shape off once
+            ``body``, ``body_type`` or POST + ``input_schema`` asked for it
 
     Raises:
-        ValueError: if neither shape is complete, or both are mixed
+        ValueError: if neither shape is complete, the shapes are mixed, the
+            method is outside the spec's six, or a GET / HEAD / DELETE is given
+            a body
 
     Returns:
         `{"bazaar": {...}}`, ready to pass as `extensions`
@@ -380,34 +521,53 @@ def bazaar_extension(
         ...     input_schema={"type": "object", "properties": {"x": {"type": "integer"}}},
         ...     output_example={"ok": True},
         ... )
+        >>> extensions = bazaar_extension(
+        ...     input_schema={"type": "object", "properties": {"q": {"type": "string"}},
+        ...                   "required": ["q"]},
+        ...     output_example={"results": []},
+        ...     method="POST",
+        ...     body={"q": "weather in Lima"},
+        ... )
+        >>> extensions["bazaar"]["info"]["input"]["method"]
+        'POST'
     """
-    if method is not None and input_schema is not None:
-        raise ValueError(
-            "bazaar_extension: pass input_schema (body shape) OR method "
-            "(HTTP shape), not both -- an endpoint has one input channel"
+    if (
+        info
+        or body is not None
+        or body_type is not None
+        or (input_schema is not None and _is_body_method(method))
+    ):
+        bloque = _bazaar_info_block(
+            method, input_schema, output_example, query_params, body, body_type
         )
-    if method is not None:
-        entrada: Dict[str, Any] = {"type": "http", "method": method}
-        if query_params is not None:
-            entrada["queryParams"] = query_params
-    elif input_schema is not None:
-        entrada = {"properties": {"body": input_schema}}
     else:
-        raise ValueError(
-            "bazaar_extension: neither shape is complete -- pass input_schema "
-            "or method"
-        )
-    if output_example is None:
-        raise ValueError("bazaar_extension: output_example is required")
+        if method is not None and input_schema is not None:
+            raise ValueError(
+                f"bazaar_extension: input_schema is a request body and {method!r} "
+                f"carries none -- a body goes with {', '.join(_BAZAAR_BODY_METHODS)}"
+            )
+        if method is not None:
+            entrada: Dict[str, Any] = {"type": "http", "method": method}
+            if query_params is not None:
+                entrada["queryParams"] = query_params
+        elif input_schema is not None:
+            entrada = {"properties": {"body": input_schema}}
+        else:
+            raise ValueError(
+                "bazaar_extension: neither shape is complete -- pass input_schema "
+                "or method"
+            )
+        if output_example is None:
+            raise ValueError("bazaar_extension: output_example is required")
 
-    bloque: Dict[str, Any] = {
-        "schema": {
-            "properties": {
-                "input": entrada,
-                "output": {"properties": {"example": output_example}},
+        bloque = {
+            "schema": {
+                "properties": {
+                    "input": entrada,
+                    "output": {"properties": {"example": output_example}},
+                }
             }
         }
-    }
     if discoverable is not None:
         bloque["discoverable"] = discoverable
     return {"bazaar": bloque}

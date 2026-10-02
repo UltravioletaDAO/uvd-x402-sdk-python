@@ -280,7 +280,8 @@ payment_requirements = {
 - `X402Client.health_check()` - GET /health
 
 ### Bazaar Discovery (discovery.py)
-- `BazaarClient.list_resources()` - GET /discovery/resources (with pagination, filtering)
+- `BazaarClient.list_resources()` - GET /discovery/resources (with pagination, filtering). `q` cap per client (`max_search_len`, default `MAX_SEARCH_LEN` = 400, code points, `None` = server decides; x402-rs 2.46.1 still 400s above 128). `max_price_usd` / `method` / `has_input_schema` / `kind` / `exclude_host` go on the wire ONLY when passed: the facilitator answers 400 to an unknown parameter (`DISCOVERY_QUERY_PARAMS`), so a call without them must stay the old request (`tests/test_discovery_filters.py`)
+- `bazaar_extension()` (response.py) - the two historical shapes are byte-pinned; the spec shape (`info` + `schema`, coinbase/x402 `specs/extensions/bazaar.md` @ `dd927a2`, `BAZAAR_SPEC`) is chosen by POST/PUT/PATCH + `input_schema`, `body`, `body_type` or `info=True`. Every emitted `info` must validate against its own `schema` (the facilitator checks before cataloging): `tests/test_bazaar_extension_spec.py`
 - `BazaarClient.register_resource()` - POST /discovery/register
 - `DiscoveryResource`, `DiscoveryResponse` Pydantic models
 

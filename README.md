@@ -2179,6 +2179,10 @@ async with BazaarClient() as bazaar:
     hits = await bazaar.list_resources(q="logs")
     print(hits.pagination.total)
 
+    # Newer filters, sent only when passed. They need a facilitator newer than
+    # x402-rs 2.46.1, which answers 400 to a parameter it does not know.
+    cheap = await bazaar.list_resources(max_price_usd="0.05", method="POST", has_input_schema=True)
+
     # Register your own resource
     await bazaar.register_resource(
         url="https://api.example.com/data",
@@ -2194,6 +2198,29 @@ async with BazaarClient() as bazaar:
         metadata={"category": "finance", "tags": ["market-data"]},
     )
 ```
+
+`q` is capped at `MAX_SEARCH_LEN` (400) characters by default; `BazaarClient(max_search_len=128)` matches x402-rs 2.46.1, `None` leaves the length to the server.
+
+### Declaring the endpoint in the 402 (`bazaar` extension)
+
+`bazaar_extension()` builds the `extensions.bazaar` block of an x402 v2 challenge. With a body method it emits the shape of the x402 spec (`info` + `schema`, [`specs/extensions/bazaar.md`](https://github.com/coinbase/x402/blob/dd927a26cfefc98c24b3ec38b3a8f204dad0c60d/specs/extensions/bazaar.md)), so the facilitator learns the endpoint is POST and how to call it:
+
+```python
+from uvd_x402_sdk import bazaar_extension, create_402_response_v2
+
+extensions = bazaar_extension(
+    {"type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]},
+    {"results": []},
+    method="POST",
+    body={"q": "weather in Lima"},   # example body: info.input.body
+)
+# extensions["bazaar"]["info"]["input"] ==
+#   {"type": "http", "method": "POST", "bodyType": "json", "body": {"q": "weather in Lima"}}
+body = create_402_response_v2("0.01", config, resource={"url": "https://api.example.com/search"},
+                              extensions=extensions)
+```
+
+The two historical shapes (`input_schema` alone, or `method` + `query_params`) come out unchanged; `info=True` gives them the spec shape too.
 
 ---
 
