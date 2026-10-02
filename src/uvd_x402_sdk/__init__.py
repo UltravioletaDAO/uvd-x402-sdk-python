@@ -317,6 +317,7 @@ from uvd_x402_sdk.discovery import (
     DiscoveryResponse,
     HEALTH_FILTERS,
     MAX_SEARCH_LEN,
+    METHOD_FILTERS,
     TIER_FILTERS,
 )
 
@@ -737,6 +738,7 @@ __all__ = [
     "DiscoveryResponse",
     "HEALTH_FILTERS",
     "MAX_SEARCH_LEN",
+    "METHOD_FILTERS",
     "TIER_FILTERS",
     # Live traffic stream (GET /events, SSE)
     "EVENT_KINDS",
