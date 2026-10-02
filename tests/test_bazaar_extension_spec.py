@@ -194,6 +194,19 @@ class TestSpecShape:
         assert out["bazaar"]["schema"]["properties"]["input"]["properties"]["body"] is self.BODY
         _assert_info_fits_its_schema(out["bazaar"])
 
+    @pytest.mark.parametrize("method", ["post", "Put", "PATCH"])
+    def test_the_body_method_alone_selects_the_spec_shape_in_any_case(self, method):
+        # No body / body_type / info: only "a body method with input_schema"
+        # can pick the spec shape here, and the legacy shape would raise.
+        out = bazaar_extension({"type": "object"}, {"ok": 1}, method=method)
+        assert out["bazaar"]["info"]["input"] == {
+            "type": "http",
+            "method": method.upper(),
+            "bodyType": "json",
+            "body": {},
+        }
+        _assert_info_fits_its_schema(out["bazaar"])
+
     @pytest.mark.parametrize(
         "body_type,body", [("json", {"a": 1}), ("form-data", {"f": "v"}), ("text", "hola")]
     )
