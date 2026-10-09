@@ -1,8 +1,8 @@
 """
 `BazaarClient.list_resources`: the `q` cap and the five newer filters.
 
-The facilitator is moving `q` to natural-language relevance search (~400
-characters) and adds `maxPriceUsd`, `method`, `hasInputSchema`, `kind` and
+x402-rs 2.47.0 takes `q` up to 400 characters (natural-language relevance
+search) and adds `maxPriceUsd`, `method`, `hasInputSchema`, `kind` and
 `excludeHost`. Two things are pinned here:
 
 * the cap is the client's, configurable, 400 by default, counted in code
@@ -196,17 +196,77 @@ class TestNewFiltersOnTheWire:
         assert dict(_query(sent[0]))["method"] == wire
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("bad", ["OPTIONS", " GET", "GET ", "", "CONNECT", 1])
-    async def test_a_method_outside_the_spec_is_refused(self, bad):
+    @pytest.mark.parametrize(
+        "bad",
+        ["OPTIONS", " GET", "GET ", "", "CONNECT", 1, "HEAD", "head", "DELETE", "Delete"],
+    )
+    async def test_a_method_the_facilitator_does_not_filter_on_is_refused(self, bad):
         sent: list[httpx.Request] = []
         async with _client(sent) as bazaar:
             with pytest.raises(ValueError, match="method must be one of"):
                 await bazaar.list_resources(method=bad)
         assert sent == []
 
-    def test_method_vocabulary_is_the_bazaar_extensions(self):
-        assert METHOD_FILTERS == ("GET", "HEAD", "DELETE", "POST", "PUT", "PATCH")
+    def test_method_vocabulary_is_the_facilitators(self):
+        # x402-rs `METHODS` (src/discovery_search.rs): a declared HEAD or DELETE
+        # is read as GET, so `method=HEAD` / `method=DELETE` are a 400 there.
+        assert METHOD_FILTERS == ("GET", "POST", "PUT", "PATCH")
         assert TOP_LEVEL_METHOD_FILTERS is METHOD_FILTERS
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("value", "wire"),
+        [
+            ("1" * 32, "1" * 32),
+            ("0." + "0" * 29 + "1", "0." + "0" * 29 + "1"),
+            (1e-30, "0." + "0" * 29 + "1"),
+        ],
+    )
+    async def test_a_price_of_32_characters_is_sent(self, value, wire):
+        sent: list[httpx.Request] = []
+        async with _client(sent) as bazaar:
+            await bazaar.list_resources(max_price_usd=value)
+        assert len(wire) == 32
+        assert dict(_query(sent[0]))["maxPriceUsd"] == wire
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad", ["1" * 33, "0." + "0" * 30 + "1", 1e-40, Decimal("1E+40"), 1e40]
+    )
+    async def test_a_price_longer_than_32_characters_written_out_is_refused(self, bad):
+        # x402-rs `MAX_PRICE_CHARS` (src/discovery_search.rs): longer is a 400.
+        sent: list[httpx.Request] = []
+        async with _client(sent) as bazaar:
+            with pytest.raises(ValueError, match="at most 32"):
+                await bazaar.list_resources(max_price_usd=bad)
+        assert sent == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("given", "wire"),
+        [
+            ("a.example", "a.example"),
+            ("a.example,b.example", "a.example,b.example"),
+            (["a.example", "b.example"], "a.example,b.example"),
+            (("a.example",), "a.example"),
+        ],
+    )
+    async def test_exclude_host_is_one_comma_separated_value(self, given, wire):
+        sent: list[httpx.Request] = []
+        async with _client(sent) as bazaar:
+            await bazaar.list_resources(exclude_host=given)
+        # One `excludeHost`, never `excludeHost=a&excludeHost=b`: x402-rs
+        # splits the one value on commas (`parse_exclude_hosts`).
+        assert [kv for kv in _query(sent[0]) if kv[0] == "excludeHost"] == [("excludeHost", wire)]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad", [[], (), ["a.example", 1], {"a.example"}, 1])
+    async def test_exclude_host_that_is_not_host_names_is_refused(self, bad):
+        sent: list[httpx.Request] = []
+        async with _client(sent) as bazaar:
+            with pytest.raises(ValueError, match="exclude_host"):
+                await bazaar.list_resources(exclude_host=bad)
+        assert sent == []
 
     @pytest.mark.asyncio
     async def test_has_input_schema_false_is_sent_not_dropped(self):

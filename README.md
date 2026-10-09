@@ -2179,9 +2179,10 @@ async with BazaarClient() as bazaar:
     hits = await bazaar.list_resources(q="logs")
     print(hits.pagination.total)
 
-    # Newer filters, sent only when passed. They need a facilitator newer than
-    # x402-rs 2.46.1, which answers 400 to a parameter it does not know.
+    # Newer filters, sent only when passed. They need x402-rs 2.47.0 or later;
+    # 2.46.1 and earlier answer 400 to a parameter they do not know.
     cheap = await bazaar.list_resources(max_price_usd="0.05", method="POST", has_input_schema=True)
+    others = await bazaar.list_resources(exclude_host=["spam.example", "ads.example"])  # one comma-separated value
 
     # Register your own resource
     await bazaar.register_resource(
@@ -2221,6 +2222,25 @@ body = create_402_response_v2("0.01", config, resource={"url": "https://api.exam
 ```
 
 The two historical shapes (`input_schema` alone, or `method` + `query_params`) come out unchanged; `info=True` gives them the spec shape too.
+
+The same block declares the endpoint when you register it. `register_resource(..., extensions=extensions)` sends it as `extensions` in the body of `POST /discovery/register`; x402-rs keeps it as given, its listing carries `hasInputSchema: true`, and its health prober calls the endpoint with the declared method and example body. Without `extensions` the body is the one sent before.
+
+```python
+async with BazaarClient() as bazaar:
+    await bazaar.register_resource(
+        url="https://api.example.com/search",
+        description="Search the web in natural language",
+        accepts=[{
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amount": "10000",
+            "payTo": "0xYourWallet...",
+            "maxTimeoutSeconds": 60,
+        }],
+        extensions=extensions,
+    )
+```
 
 ---
 

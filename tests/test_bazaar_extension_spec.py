@@ -4,12 +4,13 @@
 Spec: coinbase/x402 `specs/extensions/bazaar.md` at dd927a2 (2026-04-21),
 `response.BAZAAR_SPEC`. `info.input` says how to call the endpoint (`type`,
 `method`, and for POST / PUT / PATCH `bodyType` + `body`), `info.output` what
-it answers, and `schema` is the JSON Schema (draft 2020-12) the facilitator
-validates `info` against before cataloging.
+it answers, and `schema` is the JSON Schema (draft 2020-12) `info` validates
+against. The spec says facilitators must check that before cataloging; x402-rs
+stores the block as sent.
 
 Before this, the helper could not say POST with a body (POST + input_schema
 raised) and never emitted `info.input.method`, so no seller of the house could
-tell the facilitator its endpoint is POST.
+name its method there.
 
 Every call that built a dict before builds the same bytes now: the first class
 pins those, key order included (json.dumps without sort_keys).
@@ -29,7 +30,7 @@ def _wire(obj) -> str:
 
 
 def _assert_info_fits_its_schema(bloque):
-    """What the facilitator does before cataloging (spec, "Facilitator Behavior" 1)."""
+    """What the spec has a facilitator do before cataloging ("Facilitator Behavior" 1)."""
     Draft202012Validator.check_schema(bloque["schema"])
     errors = list(Draft202012Validator(bloque["schema"]).iter_errors(bloque["info"]))
     assert errors == [], [e.message for e in errors]

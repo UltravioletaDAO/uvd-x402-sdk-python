@@ -345,9 +345,11 @@ def _is_body_method(method: Any) -> bool:
 def _empty_body_fits(schema: Dict[str, Any]) -> bool:
     """Whether ``{}``, the default example body, passes ``schema``.
 
-    The facilitator validates ``info`` against ``schema`` before cataloging,
-    so an example that fails its own schema gets the resource rejected. Only
-    the two ways that happen with a plain object schema are checked here.
+    The spec says facilitators must validate ``info`` against ``schema``
+    before cataloging (x402-rs does not: it stores the block as sent), so on a
+    facilitator that follows it an example that fails its own schema gets the
+    resource rejected. Only the two ways that happen with a plain object
+    schema are checked here.
     """
     return schema.get("type") in (None, "object") and not schema.get("required")
 
@@ -387,7 +389,7 @@ def _bazaar_info_block(
                 raise ValueError(
                     "bazaar_extension: pass body=, an example request body that "
                     "validates against input_schema -- the default {} does not, "
-                    "and the facilitator rejects an info that fails its schema"
+                    "and the spec has facilitators reject an info that fails its schema"
                 )
             body = {}
         entrada["bodyType"] = tipo
@@ -478,11 +480,13 @@ def bazaar_extension(
       ``bodyType`` + ``body``; ``queryParams`` when given), ``info.output``
       what it answers (``{"type": "json", "example": output_example}``), and
       ``schema`` is the JSON Schema (draft 2020-12) that ``info`` validates
-      against -- the facilitator checks that before cataloging. Chosen by
+      against -- the spec says facilitators must check that before
+      cataloging; x402-rs stores the block as sent. Chosen by
       ``method`` POST / PUT / PATCH together with ``input_schema`` (a
       ``ValueError`` before), by ``body`` or ``body_type``, or by
       ``info=True`` for a call the first two shapes could also express. It is
-      the only shape that tells the facilitator an endpoint is POST.
+      the only shape that names a body method and carries an example body
+      (x402-rs reads the historical body shape as a POST with no example).
 
     Args:
         input_schema: JSON Schema of the request body. In the spec shape it
