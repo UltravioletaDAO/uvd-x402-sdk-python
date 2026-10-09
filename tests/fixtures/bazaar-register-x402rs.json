@@ -1,0 +1,65 @@
+{
+  "about": "The POST /discovery/register body that x402-rs answers 201 to, stores with extensions.bazaar verbatim, reports as hasInputSchema and probes with the declared method and example body. Transcribed key for key from the json! literals of the test named in `source`; never edit here, re-transcribe from there.",
+  "source": {
+    "repo": "UltravioletaDAO/x402-rs",
+    "commit": "6b0fefea",
+    "version": "2.49.0",
+    "file": "tests/bazaar_listing_data.rs",
+    "test": "the_seller_declares_its_schema_at_registration"
+  },
+  "body": {
+    "url": "https://api.quotes.example/v1/quote",
+    "type": "http",
+    "description": "Last trade price for a US stock symbol",
+    "accepts": [
+      {
+        "scheme": "exact",
+        "network": "eip155:8453",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "10000",
+        "payTo": "0x1234567890123456789012345678901234567890",
+        "maxTimeoutSeconds": 60
+      }
+    ],
+    "extensions": {
+      "bazaar": {
+        "info": {
+          "input": {
+            "type": "http",
+            "method": "POST",
+            "bodyType": "json",
+            "body": { "symbol": "AAPL" }
+          },
+          "output": { "type": "json", "example": { "symbol": "AAPL", "price": 189.5 } }
+        },
+        "schema": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "object",
+              "properties": {
+                "method": { "type": "string", "const": "POST" },
+                "body": {
+                  "type": "object",
+                  "properties": {
+                    "symbol": { "type": "string", "pattern": "^[A-Z]{1,5}$" }
+                  },
+                  "required": ["symbol"]
+                }
+              },
+              "required": ["method", "body"]
+            }
+          },
+          "required": ["input"]
+        }
+      }
+    }
+  },
+  "expect": {
+    "status": 201,
+    "hasInputSchema": true,
+    "probeMethod": "POST",
+    "probeExampleBody": { "symbol": "AAPL" }
+  }
+}

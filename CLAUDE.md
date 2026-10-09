@@ -280,8 +280,9 @@ payment_requirements = {
 - `X402Client.health_check()` - GET /health
 
 ### Bazaar Discovery (discovery.py)
-- `BazaarClient.list_resources()` - GET /discovery/resources (with pagination, filtering)
-- `BazaarClient.register_resource()` - POST /discovery/register
+- `BazaarClient.list_resources()` - GET /discovery/resources (with pagination, filtering). `q` cap per client (`max_search_len`, default `MAX_SEARCH_LEN` = 400, code points, `None` = server decides; x402-rs 2.47.0+ takes 400, 2.46.1 and earlier 400 above 128). `max_price_usd` / `method` / `has_input_schema` / `kind` / `exclude_host` go on the wire ONLY when passed: x402-rs before 2.47.0 answers 400 to an unknown parameter (`DISCOVERY_QUERY_PARAMS`), so a call without them must stay the old request (`tests/test_discovery_filters.py`). Each filter matches what x402-rs parses, measured in its `src/discovery_search.rs`, not guessed: `METHOD_FILTERS` = its `METHODS` (GET/POST/PUT/PATCH; HEAD and DELETE are a 400 there), `maxPriceUsd` plain digits within `MAX_PRICE_CHARS` (32), `excludeHost` ONE comma-separated value (a list is joined)
+- `bazaar_extension()` (response.py) - the two historical shapes are byte-pinned; the spec shape (`info` + `schema`, coinbase/x402 `specs/extensions/bazaar.md` @ `dd927a2`, `BAZAAR_SPEC`) is chosen by POST/PUT/PATCH + `input_schema`, `body`, `body_type` or `info=True`. Every emitted `info` must validate against its own `schema` (the spec says facilitators must check it before cataloging; x402-rs does NOT, it stores the block as sent): `tests/test_bazaar_extension_spec.py`
+- `BazaarClient.register_resource(..., extensions=)` - POST /discovery/register. `extensions` (keyword-only; usually `bazaar_extension(...)`) goes in the body verbatim, which is how a listing gets `hasInputSchema: true` and a probe with its declared method; without it the body is the old one byte for byte. Pinned against the body of x402-rs's own route test (`tests/fixtures/bazaar-register-x402rs.json`, transcribed from `tests/bazaar_listing_data.rs`, never edited here) and x402-rs's two readers ported in `tests/test_discovery_register_extensions.py`. When x402-rs changes how it reads `extensions.bazaar`, re-port them from its source and re-run
 - `DiscoveryResource`, `DiscoveryResponse` Pydantic models
 
 ### Escrow State Queries (escrow.py)

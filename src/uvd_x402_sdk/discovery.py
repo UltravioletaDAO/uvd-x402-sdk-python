@@ -15,6 +15,9 @@ Example:
     ...     # Free-text search runs server-side over the whole catalog
     ...     hits = await bazaar.list_resources(q="logs")
     ...
+    ...     # Newer filters are sent only when passed (see list_resources)
+    ...     cheap_posts = await bazaar.list_resources(max_price_usd="0.05", method="POST")
+    ...
     ...     # Register your own resource
     ...     await bazaar.register_resource(
     ...         url="https://api.example.com/data",
@@ -30,7 +33,8 @@ Example:
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
@@ -41,9 +45,13 @@ from uvd_x402_sdk.stack_key import (
     usable_stack_key,
 )
 
-#: Maximum length of the free-text `q` filter. Mirrors the facilitator's
-#: `MAX_SEARCH_LEN`; longer needles are rejected server-side with a 400.
-MAX_SEARCH_LEN = 128
+#: Default client-side cap on the free-text `q` filter, in characters (code
+#: points, the facilitator's `q.chars().count()`). x402-rs 2.47.0 and later
+#: take up to 400 (`MAX_QUERY_CHARS`) and rank a query of two or more words by
+#: relevance; 2.46.1 and earlier answer a 400 above 128 characters. The cap is
+#: per client: `BazaarClient(max_search_len=...)`, `None` leaves it to the
+#: server.
+MAX_SEARCH_LEN = 400
 
 #: Values accepted by the `health` filter of GET /discovery/resources.
 HEALTH_FILTERS = (
@@ -58,6 +66,62 @@ HEALTH_FILTERS = (
 
 #: Values accepted by the `tier` filter of GET /discovery/resources.
 TIER_FILTERS = ("first_party", "vip", "verified", "listed")
+
+#: Values accepted by the `method` filter: the methods x402-rs's `method=`
+#: understands (`METHODS`, `src/discovery_search.rs`), matched
+#: case-insensitively and sent upper-case. The facilitator reads a declared
+#: HEAD or DELETE as GET, so it answers 400 to them as a filter that could
+#: never match. `bazaar_extension` still declares all six methods of the
+#: extension; that is a different list.
+METHOD_FILTERS = ("GET", "POST", "PUT", "PATCH")
+
+#: Longest `maxPriceUsd` x402-rs reads (`MAX_PRICE_CHARS`,
+#: `src/discovery_search.rs`); a longer one is a 400.
+_MAX_PRICE_CHARS = 32
+
+
+def _price_param(value: Union[Decimal, int, float, str]) -> str:
+    """`max_price_usd` as a plain non-negative decimal string.
+
+    `str(Decimal("1E+2"))` is `"1E+2"`, which is not a price a query string
+    should carry; `format(..., "f")` writes `"100"`. Plain digits are also the
+    only form the facilitator parses, in at most `_MAX_PRICE_CHARS`
+    characters: `1e-40` written out is 42 and raises here instead.
+    """
+    if isinstance(value, bool) or not isinstance(value, (Decimal, int, float, str)):
+        raise ValueError("max_price_usd must be a number or a decimal string")
+    try:
+        price = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError(f"max_price_usd is not a decimal: {value!r}") from exc
+    if not price.is_finite() or price < 0:
+        raise ValueError(f"max_price_usd must be a finite amount >= 0, got {value!r}")
+    if price == 0:
+        return "0"
+    text = format(price, "f")
+    if len(text) > _MAX_PRICE_CHARS:
+        raise ValueError(
+            f"max_price_usd {value!r} written out is {len(text)} characters; "
+            f"the facilitator reads at most {_MAX_PRICE_CHARS}"
+        )
+    return text
+
+
+def _exclude_host_param(value: Union[str, list[str], tuple]) -> str:
+    """`exclude_host` as the facilitator reads it: ONE comma-separated value.
+
+    x402-rs splits `excludeHost` on commas (`parse_exclude_hosts`); a repeated
+    `excludeHost=a&excludeHost=b` is not that. A string goes out as given; a
+    list or tuple of host names is joined with `,`.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)) and value and all(isinstance(host, str) for host in value):
+        return ",".join(value)
+    raise ValueError(
+        "exclude_host must be a host name, a comma-separated string of them, "
+        "or a non-empty list or tuple of them"
+    )
 
 
 def _coerce_epoch(value: Any) -> Optional[int]:
@@ -267,13 +331,26 @@ class BazaarClient:
         *,
         stack_key: Optional[str] = None,
         stack_key_hosts: Optional[list[str]] = None,
+        max_search_len: Optional[int] = MAX_SEARCH_LEN,
     ):
         """``stack_key``: the ``X-UVD-Stack-Key`` of a service of Ultravioleta
         DAO, sent on every request when ``base_url`` is a facilitator of
         Ultravioleta DAO (``stack_key_hosts`` adds hosts); see
-        ``uvd_x402_sdk.stack_key``. Not for third parties."""
+        ``uvd_x402_sdk.stack_key``. Not for third parties.
+
+        ``max_search_len``: longest ``q`` that ``list_resources`` sends, in
+        characters (default ``MAX_SEARCH_LEN``, 400). A longer one raises
+        ``ValueError`` before any request. ``None`` sends any length and lets
+        the facilitator decide; ``128`` matches x402-rs 2.46.1 and earlier."""
+        if max_search_len is not None and (
+            isinstance(max_search_len, bool)
+            or not isinstance(max_search_len, int)
+            or max_search_len < 1
+        ):
+            raise ValueError("max_search_len must be a positive int or None")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.max_search_len = max_search_len
         self._stack_key = usable_stack_key(stack_key)
         self._stack_key_hosts = stack_key_hosts
         self._client = httpx.AsyncClient(
@@ -303,6 +380,11 @@ class BazaarClient:
         health: Optional[str] = None,
         tier: Optional[str] = None,
         q: Optional[str] = None,
+        max_price_usd: Optional[Union[Decimal, int, float, str]] = None,
+        method: Optional[str] = None,
+        has_input_schema: Optional[bool] = None,
+        kind: Optional[str] = None,
+        exclude_host: Optional[Union[str, list[str], tuple]] = None,
     ) -> DiscoveryResponse:
         """
         List registered resources from the Bazaar discovery registry.
@@ -324,17 +406,41 @@ class BazaarClient:
             health: Filter by liveness, one of `HEALTH_FILTERS`
             tier: Filter by curated tier, one of `TIER_FILTERS`
             q: Free-text search over url / description / provider / category /
-                tags, at most `MAX_SEARCH_LEN` characters
+                tags, at most `max_search_len` characters (see `__init__`)
+            max_price_usd: Only resources priced at or under this many USD
+                (`maxPriceUsd`); a number or a decimal string, sent as a plain
+                decimal of at most 32 characters (a longer one raises)
+            method: Only resources called with this HTTP method (`method`),
+                one of `METHOD_FILTERS` (GET, POST, PUT, PATCH),
+                case-insensitive
+            has_input_schema: Only resources that do (True) or do not (False)
+                declare an input schema (`hasInputSchema`)
+            kind: Only resources of this kind (`kind`), sent as given
+            exclude_host: Leave out the resources of these hosts and their
+                subdomains (`excludeHost`): a host name or a comma-separated
+                string of them, sent as given, or a list or tuple of host
+                names, joined with `,` into that one value
+
+        The last five filters need x402-rs 2.47.0 or later. 2.46.1 and earlier
+        answer a 400 (`httpx.HTTPStatusError` here) to any query parameter they
+        do not know rather than ignoring it. Each one is sent only when passed,
+        so a call that passes none of them is the same request as before.
 
         Returns:
             Paginated list of discovery resources
         """
-        if q is not None and len(q) > MAX_SEARCH_LEN:
-            raise ValueError(f"q must be at most {MAX_SEARCH_LEN} characters")
+        if q is not None and self.max_search_len is not None and len(q) > self.max_search_len:
+            raise ValueError(f"q must be at most {self.max_search_len} characters")
         if health is not None and health not in HEALTH_FILTERS:
             raise ValueError(f"health must be one of {', '.join(HEALTH_FILTERS)}")
         if tier is not None and tier not in TIER_FILTERS:
             raise ValueError(f"tier must be one of {', '.join(TIER_FILTERS)}")
+        if method is not None:
+            if not isinstance(method, str) or method.upper() not in METHOD_FILTERS:
+                raise ValueError(f"method must be one of {', '.join(METHOD_FILTERS)}")
+            method = method.upper()
+        if has_input_schema is not None and not isinstance(has_input_schema, bool):
+            raise ValueError("has_input_schema must be True, False or None")
 
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         optional = {
@@ -347,6 +453,11 @@ class BazaarClient:
             "health": health,
             "tier": tier,
             "q": q,
+            "maxPriceUsd": None if max_price_usd is None else _price_param(max_price_usd),
+            "method": method,
+            "hasInputSchema": None if has_input_schema is None else str(has_input_schema).lower(),
+            "kind": kind,
+            "excludeHost": None if exclude_host is None else _exclude_host_param(exclude_host),
         }
         params.update({k: v for k, v in optional.items() if v is not None})
 
@@ -362,6 +473,8 @@ class BazaarClient:
         description: str = "",
         accepts: Optional[List[Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        extensions: Optional[dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Register a paid resource in the Bazaar discovery registry.
@@ -372,6 +485,19 @@ class BazaarClient:
             description: Human-readable description
             accepts: Payment requirements the resource accepts
             metadata: Additional metadata (category, provider, tags)
+            extensions: Resource-level x402 extensions, sent verbatim as
+                `extensions` -- typically what `bazaar_extension(...)` returns,
+                `{"bazaar": {...}}`. x402-rs keeps it as given
+                (`RegisterResourceRequest.extensions`) and reads
+                `extensions.bazaar`: `info.input` (or `schema.properties.input`)
+                makes the listing `hasInputSchema: true`, and the method and
+                example body it declares are how the health prober calls the
+                endpoint. Without it the body is exactly the one sent before.
+                x402-rs drops an `extensions` past its bounds
+                (`MAX_EXTENSIONS_BYTES` / `MAX_EXTENSIONS_DEPTH`,
+                `src/discovery_price.rs`: 16 KiB serialized and 64 levels at
+                2.49.0) and still answers 201, so check `hasInputSchema` on
+                the listing.
 
         Returns:
             Registration result with success status
@@ -390,8 +516,20 @@ class BazaarClient:
             ...         "maxTimeoutSeconds": 60,
             ...     }],
             ...     metadata={"category": "finance", "tags": ["market-data"]},
+            ...     extensions=bazaar_extension(
+            ...         {"type": "object", "properties": {"symbol": {"type": "string"}},
+            ...          "required": ["symbol"]},
+            ...         {"symbol": "AAPL", "price": 189.5},
+            ...         method="POST",
+            ...         body={"symbol": "AAPL"},
+            ...     ),
             ... )
         """
+        if extensions is not None and not isinstance(extensions, dict):
+            raise ValueError(
+                "extensions must be an object keyed by extension name, such as "
+                "what bazaar_extension(...) returns"
+            )
         payload: Dict[str, Any] = {
             "url": url,
             "type": resource_type,
@@ -401,6 +539,8 @@ class BazaarClient:
             payload["accepts"] = accepts
         if metadata:
             payload["metadata"] = metadata
+        if extensions:
+            payload["extensions"] = extensions
 
         endpoint = f"{self.base_url}/discovery/register"
         response = await self._client.post(endpoint, json=payload, **self._stack_key_kwargs())
