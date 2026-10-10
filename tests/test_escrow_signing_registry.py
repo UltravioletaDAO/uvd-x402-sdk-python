@@ -184,6 +184,28 @@ def test_the_arc_operator_is_the_recorded_compute_address():
         assert int(result, 16) == int(recorded["default_operator"], 16)
 
 
+# Execution Market's PaymentOperators on the other escrow mainnets, written out
+# a second time on purpose: the table is their only other copy in this repo, so
+# without this an edit of a row to another valid address would turn nothing red.
+# Source: EM's mcp_server/integrations/x402/network_registry.py at f75d4171.
+EM_OPERATORS_F75D4171 = {
+    1: "0x69B67962ffb7c5C7078ff348a87DF604dfA8001b",
+    10: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+    137: "0xB87F1ECC85f074e50df3DD16A1F40e4e1EC4102e",
+    143: "0x9620Dbe2BB549E1d080Dc8e7982623A9e1Df8cC3",
+    42161: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+    42220: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+    43114: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+}
+
+
+def test_the_other_operator_rows_are_execution_markets_at_f75d4171():
+    rows = {c: a for c, a in ESCROW_OPERATORS.items() if c not in CLIENT_DEFAULT_CHAINS}
+    assert rows == EM_OPERATORS_F75D4171
+    for address in rows.values():
+        assert to_checksum_address(address) == address
+
+
 def test_the_base_operator_is_execution_markets():
     em = json.loads((FIXTURES / "escrow-preauth.json").read_text(encoding="utf-8"))
     assert em["network_config"]["operator"] == ESCROW_OPERATORS[8453]
