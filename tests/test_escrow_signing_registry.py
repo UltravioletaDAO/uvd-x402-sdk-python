@@ -39,6 +39,7 @@ import uvd_x402_sdk.advanced_escrow as ae
 import uvd_x402_sdk.escrow_contracts as ec
 import uvd_x402_sdk.escrow_signing as es
 from tests.test_escrow_vectors import mutant
+from uvd_x402_sdk.erc7702 import SMA_WRAP_TARGETS
 from uvd_x402_sdk.escrow_contracts import (
     ESCROW_CONTRACTS,
     ESCROW_MAX_FEE_BPS,
@@ -423,6 +424,52 @@ def test_execution_markets_base_config_signs_as_before():
     block = {k: em["network_config"][k] for k in es.REQUIRED_NETWORK_KEYS}
     wrapper, _ = build(em["network"], block)
     assert wrapper["payload"]["paymentInfo"]["operator"] == ESCROW_OPERATORS[8453]
+
+
+# ── a delegated payer: the same refusals, before the dialect is chosen ──────
+
+# The resolver's verdicts: SMA wrap (legacy bool and the Alchemy target), a
+# 1271 delegate that takes the plain signature, and a plain EOA.
+DELEGATIONS = {
+    "sma-bool": lambda address, network: True,
+    "sma-target": lambda address, network: sorted(SMA_WRAP_TARGETS)[0],
+    "plain-1271": lambda address, network: "0x" + "d1" * 20,
+    "not-delegated": lambda address, network: False,
+}
+
+
+def _refused_delegated(resolver: Any, block: dict[str, Any], match: str, **escrow: Any) -> None:
+    wallet = _Wallet()
+    with pytest.raises(ValueError, match=match):
+        es.build_escrow_pre_auth(
+            config("base", block, **escrow), "base", PAYER, WORKER, "0.25", None, wallet,
+            delegation_resolver=resolver,
+        )
+    assert wallet.signed == [], "nothing may be signed before the refusal"
+
+
+@pytest.mark.parametrize("delegation", sorted(DELEGATIONS))
+def test_a_delegated_payer_still_signs_the_table(delegation):
+    wallet = _Wallet()
+    es.build_escrow_pre_auth(
+        config("base", table_block(8453)), "base", PAYER, WORKER, "0.25", None, wallet,
+        delegation_resolver=DELEGATIONS[delegation],
+    )
+    assert len(wallet.signed) == 1
+
+
+@pytest.mark.parametrize("delegation", sorted(DELEGATIONS))
+def test_a_delegated_payer_gets_the_fee_ceiling_refusal(delegation):
+    _refused_delegated(
+        DELEGATIONS[delegation], table_block(8453), "above this SDK's ceiling", max_fee_bps=5000
+    )
+
+
+@pytest.mark.parametrize("delegation", sorted(DELEGATIONS))
+def test_a_delegated_payer_gets_the_address_refusal(delegation):
+    block = table_block(8453)
+    block["token_collector"] = changed(block["token_collector"])
+    _refused_delegated(DELEGATIONS[delegation], block, "Escrow address mismatch")
 
 
 # ── each guard removed: its refusal becomes a signature ─────────────────────

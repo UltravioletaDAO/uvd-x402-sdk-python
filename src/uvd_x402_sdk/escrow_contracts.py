@@ -197,8 +197,9 @@ ESCROW_OPERATORS: dict[int, str] = {
 # The fee ceiling of each chain
 # ============================================================
 # The signed ``maxFeeBps`` caps what the operator may take at release. The
-# payment config chooses it; on a chain with a row here, a value above the row
-# is refused before signing (owner decision 215: the ceiling of each network
+# payment config chooses it; on a chain with a row here, the escrow pre-auth
+# (escrow_signing.build_escrow_pre_auth, the only reader) refuses a value above
+# the row before signing (owner decision 215: the ceiling of each network
 # is Execution Market's current value, 1800 bps on every network it serves).
 # A chain without a row: signed with a warning, as the other tables.
 ESCROW_MAX_FEE_BPS: dict[int, int] = {

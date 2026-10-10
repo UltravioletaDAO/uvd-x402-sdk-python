@@ -105,7 +105,9 @@ DEPOSIT_LIMIT_USDC = 100_000_000  # $100 in atomic units (6 decimals)
 # ============================================================
 # ESCROW_CONTRACTS lives in uvd_x402_sdk.escrow_contracts (imported above, the
 # same object), which imports nothing: escrow_signing checks a payment config
-# against it without web3. Its operator column is escrow_contracts.ESCROW_OPERATORS.
+# against it without web3. escrow_contracts.ESCROW_OPERATORS (the operator
+# Execution Market serves per chain) is read by escrow_signing only; the
+# client's own default operator is chosen in AdvancedEscrowClient.__init__.
 
 # Human-readable chain names for diagnostics and error messages.
 ESCROW_CHAIN_NAMES: dict[int, str] = {
