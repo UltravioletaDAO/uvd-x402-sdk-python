@@ -119,13 +119,16 @@ def test_el_resolvedor_por_RPC_sin_endpoints_es_None():
 def _config():
     # El typehash real: desde que el builder rechaza uno que no es el de
     # AuthCaptureEscrow, un relleno aca cortaria antes de llegar a la delegacion.
+    # Y las direcciones de Base las de la tabla del SDK, por lo mismo: el builder
+    # rehusa una config que contradice escrow_contracts.
+    from uvd_x402_sdk.escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS
     from uvd_x402_sdk.escrow_signing import ESCROW_PAYMENT_INFO_TYPEHASH
     return {"escrow": {"payment_info_typehash": ESCROW_PAYMENT_INFO_TYPEHASH, "networks": {"base": {
         "chain_id": 8453,
-        "operator": "0x1111111111111111111111111111111111111111",
-        "escrow": "0x2222222222222222222222222222222222222222",
-        "token_collector": "0x3333333333333333333333333333333333333333",
-        "usdc": "0x4444444444444444444444444444444444444444",
+        "operator": ESCROW_OPERATORS[8453],
+        "escrow": ESCROW_CONTRACTS[8453]["escrow"],
+        "token_collector": ESCROW_CONTRACTS[8453]["token_collector"],
+        "usdc": ESCROW_CONTRACTS[8453]["usdc"],
         "usdc_domain_name": "USD Coin", "usdc_domain_version": "2",
     }}}}
 
@@ -208,12 +211,16 @@ def test_una_cadena_DESCONOCIDA_avisa_pero_no_bloquea(caplog):
     import logging
     from uvd_x402_sdk.escrow_signing import build_escrow_pre_auth
     cfg = _config()
-    cfg["escrow"]["networks"]["base"]["chain_id"] = 999999          # no está en la tabla
-    cfg["escrow"]["networks"]["base"]["usdc_domain_name"] = "Lo que sea"
+    # Una red que el SDK no conoce: "base" con otra cadena ya no es una cadena
+    # desconocida, es una que contradice el registro de redes, y se rehusa.
+    red = cfg["escrow"]["networks"].pop("base")
+    cfg["escrow"]["networks"]["red-nueva"] = red
+    red["chain_id"] = 999999                                          # no está en la tabla
+    red["usdc_domain_name"] = "Lo que sea"
     caplog.set_level(logging.WARNING)
     w = _Wallet()
     build_escrow_pre_auth(
-        payment_config=cfg, network="base",
+        payment_config=cfg, network="red-nueva",
         payer="0x5555555555555555555555555555555555555555",
         receiver="0x6666666666666666666666666666666666666666",
         amount_usd=0.05, deadline=None, wallet=w)

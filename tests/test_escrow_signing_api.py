@@ -34,6 +34,7 @@ import uvd_x402_sdk.escrow_signing as es
 from tests.test_escrow_vectors import mutant
 from uvd_x402_sdk.advanced_escrow import ESCROW_CONTRACTS
 from uvd_x402_sdk.advanced_escrow import PAYMENT_INFO_TYPEHASH as ADVANCED_TYPEHASH
+from uvd_x402_sdk.escrow_contracts import ESCROW_OPERATORS
 from uvd_x402_sdk.escrow_signing import (
     ESCROW_PAYMENT_INFO_TYPEHASH,
     PAYMENT_INFO_ABI,
@@ -230,7 +231,11 @@ def test_the_signed_type_is_receive_with_authorization_in_eip3009_order():
 
 
 def _config(chain_id: int, domain: tuple[str, str] | None = None, typehash: Any = None) -> dict:
-    """A payment config for one chain, from the SDK's own tables and public names."""
+    """A payment config for one chain, from the SDK's own tables and public names.
+
+    The operator is the chain's row of ``ESCROW_OPERATORS``; a chain without
+    one gets a synthetic operator (its chain id written as an address).
+    """
     network = get_network_by_chain_id(chain_id)
     contracts = ESCROW_CONTRACTS[chain_id]
     name, version = domain or VERIFIED_USDC_DOMAINS[chain_id]
@@ -240,7 +245,7 @@ def _config(chain_id: int, domain: tuple[str, str] | None = None, typehash: Any 
             "networks": {
                 network.name: {
                     "chain_id": chain_id,
-                    "operator": "0x" + format(chain_id, "040x"),
+                    "operator": ESCROW_OPERATORS.get(chain_id, "0x" + format(chain_id, "040x")),
                     "escrow": contracts["escrow"],
                     "token_collector": contracts["token_collector"],
                     "usdc": contracts["usdc"],
