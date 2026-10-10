@@ -2403,8 +2403,14 @@ payment_auth = build_escrow_pre_auth(
 
 Fail-loud: an unknown network or incomplete network config raises
 `ValueError` — a silent domain fallback would sign a mismatched,
-wallet-draining authorization. On-chain limits enforced client-side: bounty
-<= $100 (AuthCaptureEscrow deposit condition) and the signed `maxFeeBps` must
+wallet-draining authorization. Before signing, the config's `chain_id` must
+be the chain the SDK registers for `network`, and its USDC domain, escrow,
+token collector, USDC and operator are checked against the SDK's own tables
+(`VERIFIED_USDC_DOMAINS`, `uvd_x402_sdk.escrow_contracts`): a value that
+differs from the chain's row raises `ValueError`; where the tables have no
+row for the chain, that value is signed with a logged warning. On-chain
+limits enforced client-side: bounty <= $100 (AuthCaptureEscrow deposit
+condition) and the signed `maxFeeBps` must
 cover the operator's 1300 bps static fee. `compute_escrow_nonce()` is the
 standalone, dict-based equivalent of `AdvancedEscrowClient._compute_nonce`
 (no web3 needed — only `eth-abi`/`eth-utils`, pulled in by `eth-account`).

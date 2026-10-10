@@ -16,6 +16,9 @@ collector and USDC; ``VERIFIED_USDC_DOMAINS`` for the domain). The operator is
 synthetic and different on every chain (the chain id written as an address,
 the recipe of Karmakadabra's vectors): the live operator comes from the
 marketplace's payment config, and the nonce hashes whatever operator it gets.
+The builder refuses an operator other than the chain's row of
+``escrow_contracts.ESCROW_OPERATORS``, so each case registers its synthetic
+operator there for the build (as ``tests/test_escrow_vectors.py`` does).
 
 The signing key is a throwaway made with ``Account.create()`` the first time
 the file was written; it never held funds and is stored in the fixture (without
@@ -52,8 +55,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
 
 from uvd_x402_sdk import escrow_signing as es  # noqa: E402
-from uvd_x402_sdk.advanced_escrow import ESCROW_CONTRACTS  # noqa: E402
 from uvd_x402_sdk.erc7702 import SMA_WRAP_TARGETS  # noqa: E402
+from uvd_x402_sdk.escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS  # noqa: E402
 from uvd_x402_sdk.networks import get_network_by_chain_id  # noqa: E402
 from uvd_x402_sdk.wallet import EnvKeyAdapter  # noqa: E402
 
@@ -233,11 +236,13 @@ def build(case: dict[str, Any], key: str, module: Any = es) -> tuple[str, list[d
     if case.get("delegate"):
         target = case["delegate"]
         resolver = lambda address, network: target  # noqa: E731
+    block = case["network_config"]
     with (
         mock.patch.object(module, "time", SimpleNamespace(time=lambda: NOW)),
         mock.patch.object(
             module, "secrets", SimpleNamespace(token_hex=lambda n=32: SALT_HEX[: 2 * n])
         ),
+        mock.patch.dict(ESCROW_OPERATORS, {block["chain_id"]: block["operator"]}),
     ):
         header = module.build_escrow_pre_auth(
             payment_config(case),

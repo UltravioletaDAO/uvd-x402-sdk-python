@@ -25,16 +25,27 @@ deleted in favour of an import only if the SDK signs what it signed:
 domain, the order of the signed fields, the chain id) and checks that exactly
 the vectors of the chains each mutation touches stop reproducing.
 
+The escrow, token collector and USDC of every vector are the rows of
+``escrow_contracts.ESCROW_CONTRACTS``, which the builder now checks. The
+operators of the SDK's and Karmakadabra's vectors are synthetic (the chain id
+written as an address), so ``build_sdk_vector`` / ``build_kk_vector`` register
+the vector's operator in ``ESCROW_OPERATORS`` for the replay: what a vector
+pins is the bytes. Unregistered, the builder refuses exactly the vectors on the
+chains that have an operator row (``TestOperatorRows``). Execution Market's
+vectors carry the real operators and run against the table as it is.
+
 Hex values of 32 bytes or more are stored without ``0x`` in the fixtures;
 ``_hydrate`` re-prefixes them.
 """
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -48,6 +59,7 @@ from eth_utils import keccak
 import uvd_x402_sdk.escrow_signing as es
 from uvd_x402_sdk.advanced_escrow import ESCROW_CONTRACTS
 from uvd_x402_sdk.advanced_escrow import PAYMENT_INFO_TYPEHASH as ADVANCED_TYPEHASH
+from uvd_x402_sdk.escrow_contracts import ESCROW_OPERATORS
 from uvd_x402_sdk.wallet import EnvKeyAdapter
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -93,6 +105,16 @@ class _Recording:
     def sign_typed_data(self, typed: dict[str, Any]) -> Any:
         self.typed.append(typed)
         return self.inner.sign_typed_data(typed)
+
+
+@contextlib.contextmanager
+def operator_registered(chain_id: int, operator: str, register: bool = True) -> Iterator[None]:
+    """``operator`` is the registered operator of ``chain_id`` for the block."""
+    if not register:
+        yield
+        return
+    with mock.patch.dict(ESCROW_OPERATORS, {int(chain_id): operator}):
+        yield
 
 
 def _frozen_build(module: ModuleType, now: int, salt: str, *args: Any, **kwargs: Any) -> str:
@@ -165,27 +187,32 @@ def _sdk_config(vector: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_sdk_vector(
-    vector: dict[str, Any], module: ModuleType = es, config: dict[str, Any] | None = None
+    vector: dict[str, Any],
+    module: ModuleType = es,
+    config: dict[str, Any] | None = None,
+    register_operator: bool = True,
 ) -> tuple[str, _Recording]:
     wallet = _Recording(SDK["signer_private_key"])
     payer, receiver = wallet.get_address(), SDK["frozen"]["receiver"]
     if vector.get("lowercase_inputs"):
         payer, receiver = payer.lower(), receiver.lower()
     target = vector.get("delegate")
-    header = _frozen_build(
-        module,
-        SDK["frozen"]["now"],
-        SDK["frozen"]["salt"],
-        config or _sdk_config(vector),
-        vector["network"],
-        payer,
-        receiver,
-        vector["amount_usd"],
-        vector["deadline"],
-        wallet,
-        tier=vector["tier"],
-        delegation_resolver=(lambda address, network: target) if target else None,
-    )
+    block = vector["network_config"]
+    with operator_registered(block["chain_id"], block["operator"], register_operator):
+        header = _frozen_build(
+            module,
+            SDK["frozen"]["now"],
+            SDK["frozen"]["salt"],
+            config or _sdk_config(vector),
+            vector["network"],
+            payer,
+            receiver,
+            vector["amount_usd"],
+            vector["deadline"],
+            wallet,
+            tier=vector["tier"],
+            delegation_resolver=(lambda address, network: target) if target else None,
+        )
     return header, wallet
 
 
@@ -288,7 +315,9 @@ class TestSdkVectors:
 # ── Karmakadabra's vectors ───────────────────────────────────────────────────
 
 
-def build_kk_vector(name: str, module: ModuleType = es) -> dict[str, Any]:
+def build_kk_vector(
+    name: str, module: ModuleType = es, register_operator: bool = True
+) -> dict[str, Any]:
     vector = KK["vectors"][name]
     params = KK["generation_params"]
     config = {
@@ -307,19 +336,21 @@ def build_kk_vector(name: str, module: ModuleType = es) -> dict[str, Any]:
             },
         }
     }
-    header = _frozen_build(
-        module,
-        params["frozen_epoch"],
-        params["frozen_salt"],
-        config,
-        name,
-        params["signer"],
-        params["receiver"],
-        params["amount_usd"],
-        params["deadline"],
-        EnvKeyAdapter(private_key=KK_KEY),
-        tier=params["tier"],
-    )
+    operator = vector["paymentInfo"]["operator"]
+    with operator_registered(vector["chain_id"], operator, register_operator):
+        header = _frozen_build(
+            module,
+            params["frozen_epoch"],
+            params["frozen_salt"],
+            config,
+            name,
+            params["signer"],
+            params["receiver"],
+            params["amount_usd"],
+            params["deadline"],
+            EnvKeyAdapter(private_key=KK_KEY),
+            tier=params["tier"],
+        )
     return json.loads(header)
 
 
@@ -399,6 +430,60 @@ def test_the_sdk_signs_what_execution_market_pinned_on(network):
     [typed] = wallet.typed
     assert typed["domain"] == expected["expected_typed_data"]["domain"]
     assert typed["primaryType"] == expected["expected_typed_data"]["primaryType"]
+
+
+# ── the vectors against the registry, unregistered ──────────────────────────
+
+
+class TestOperatorRows:
+    """The vectors as they are, against ``escrow_contracts`` as it is."""
+
+    def test_execution_markets_operators_are_the_registered_ones(self):
+        assert EM["network_config"]["operator"] == ESCROW_OPERATORS[8453]
+        for extra in EM["additional_networks"].values():
+            block = extra["network_config"]
+            assert block["operator"] == ESCROW_OPERATORS[block["chain_id"]]
+
+    @pytest.mark.parametrize("network", sorted(KK["vectors"]))
+    def test_karmakadabras_contracts_are_the_registry_rows(self, network):
+        vector = KK["vectors"][network]
+        contracts = ESCROW_CONTRACTS[vector["chain_id"]]
+        assert (vector["escrow"], vector["token_collector"], vector["usdc"]) == (
+            contracts["escrow"],
+            contracts["token_collector"],
+            contracts["usdc"],
+        )
+
+    def test_the_sdk_vectors_refused_unregistered_are_those_on_a_chain_with_an_operator(self):
+        refused = set()
+        for vector_id, vector in SDK_VECTORS.items():
+            try:
+                header, _ = build_sdk_vector(vector, register_operator=False)
+            except ValueError as exc:
+                assert "operator mismatch" in str(exc), exc
+                refused.add(vector_id)
+            else:
+                assert _sha256(header) == vector["expected"]["header_sha256"]
+        expected = {
+            i for i, v in SDK_VECTORS.items() if v["network_config"]["chain_id"] in ESCROW_OPERATORS
+        }
+        assert refused == expected
+        assert {SDK_VECTORS[i]["network_config"]["chain_id"] for i in refused} == set(
+            ESCROW_OPERATORS
+        )
+
+    def test_the_kk_vectors_refused_unregistered_are_those_on_a_chain_with_an_operator(self):
+        refused = set()
+        for name in KK["vectors"]:
+            try:
+                build_kk_vector(name, register_operator=False)
+            except ValueError as exc:
+                assert "operator mismatch" in str(exc), exc
+                refused.add(name)
+        assert refused == {
+            n for n, v in KK["vectors"].items() if v["chain_id"] in ESCROW_OPERATORS
+        }
+        assert refused  # Base, SKALE and Arc have rows
 
 
 # ── the struct the nonce hashes ─────────────────────────────────────────────
