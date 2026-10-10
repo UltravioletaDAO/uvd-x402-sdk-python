@@ -35,6 +35,14 @@ Fail-loud policy: an unknown network / incomplete network config raises
 EIP-3009 authorization with the WRONG EIP-712 domain (chainId +
 verifyingContract): a mismatched, wallet-draining auth.
 
+What the payment config asserts is checked against this SDK's own tables
+before anything is signed: the chain id against the network the caller
+named, the USDC domain against ``VERIFIED_USDC_DOMAINS``, and the escrow,
+token collector, USDC and operator against
+:mod:`uvd_x402_sdk.escrow_contracts` (``ESCROW_CONTRACTS``,
+``ESCROW_OPERATORS``). A contradiction raises ``ValueError``; a chain the
+tables have no row for is signed with a logged warning.
+
 On-chain limits enforced client-side:
   - bounty <= $100 (AuthCaptureEscrow deposit condition)
   - signed ``maxFeeBps`` must cover the operator's 1300 bps static fee
@@ -108,7 +116,8 @@ if TYPE_CHECKING:
 import logging
 
 from . import erc7702 as _erc7702
-from .networks.base import to_base_units
+from .escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS
+from .networks.base import get_network, to_base_units
 
 _log = logging.getLogger("uvd_x402_sdk.escrow_signing")
 
@@ -258,6 +267,86 @@ _REQUIRED_NETWORK_KEYS = (
 # The keys one network of ``payment_config["escrow"]["networks"]`` must carry.
 REQUIRED_NETWORK_KEYS = _REQUIRED_NETWORK_KEYS
 
+# ── Las direcciones que la firma compromete, contra la tabla del SDK ─────────
+# El dominio no es lo unico que el servidor afirma y la firma se lleva puesto:
+#   chain_id        -> domain.chainId, el nonce y paymentRequirements.network
+#   escrow          -> el nonce (AuthCaptureEscrow.getHash)
+#   token_collector -> message.to y authorization.to
+#   usdc            -> domain.verifyingContract y paymentInfo.token
+#   operator        -> paymentInfo.operator y paymentInfo.feeReceiver
+# Misma politica que VERIFIED_USDC_DOMAINS, con las tablas de escrow_contracts:
+#   - red que el SDK conoce y el servidor dice otra cadena     -> se REHUSA
+#   - cadena con fila y una direccion distinta de la de la fila -> se REHUSA
+#   - cadena sin fila                                           -> se firma, con AVISO
+# Las direcciones se comparan en la forma en que se firman (checksum).
+_REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector", "usdc")
+
+
+def _registered_chain_id(network: str) -> int | None:
+    """The chain id this SDK registers for ``network``, or ``None`` if none.
+
+    ``eip155:<id>`` names its own chain id (ASCII digits; anything else
+    raises); any other name goes through the network registry (aliases
+    included: ``skale`` is ``skale-base``). A non-EVM network is registered
+    with chain id 0, which no config can match (0 is a missing ``chain_id``),
+    so it is refused like any other mismatch.
+    """
+    name = str(network).strip().lower()
+    if name.startswith("eip155:"):
+        reference = name[len("eip155:"):]
+        if not (reference.isascii() and reference.isdigit()):
+            raise ValueError(
+                f"'{network}' names no EVM chain id (eip155:<decimal id>) — "
+                "refusing to sign."
+            )
+        return int(reference)
+    config = get_network(name)
+    return None if config is None else int(config.chain_id)
+
+
+def _check_chain_id(network: str, chain_id: int) -> None:
+    registered = _registered_chain_id(network)
+    if registered is not None and registered != chain_id:
+        raise ValueError(
+            f"Chain id mismatch for '{network}': the payment config asserts chain "
+            f"{chain_id} but this SDK registers '{network}' as chain {registered} — "
+            "refusing to sign."
+        )
+
+
+def _check_registered_addresses(
+    network: str, chain_id: int, net: dict[str, Any], to_checksum_address: Any
+) -> None:
+    contracts = ESCROW_CONTRACTS.get(chain_id)
+    if contracts is None:
+        _log.warning(
+            "signing escrow on chain %s (network %r), which has no row in "
+            "ESCROW_CONTRACTS: escrow, token collector and USDC are the payment "
+            "config's, unchecked", chain_id, network)
+    else:
+        for key in _REGISTERED_ADDRESS_KEYS:
+            asserted = to_checksum_address(net[key])
+            expected = to_checksum_address(contracts[key])
+            if asserted != expected:
+                raise ValueError(
+                    f"Escrow address mismatch for '{network}' (chain {chain_id}): "
+                    f"the payment config asserts {key} {asserted} but this SDK's "
+                    f"escrow registry has {expected} — refusing to sign."
+                )
+    operator = ESCROW_OPERATORS.get(chain_id)
+    if operator is None:
+        _log.warning(
+            "signing escrow on chain %s (network %r) with the payment config's "
+            "operator %r: this SDK has no operator for that chain in "
+            "ESCROW_OPERATORS", chain_id, network, net["operator"])
+    elif to_checksum_address(net["operator"]) != to_checksum_address(operator):
+        raise ValueError(
+            f"Escrow operator mismatch for '{network}' (chain {chain_id}): the "
+            f"payment config asserts operator {to_checksum_address(net['operator'])} "
+            f"but this SDK's escrow registry has {to_checksum_address(operator)} — "
+            "refusing to sign."
+        )
+
 
 def _require_eth_libs() -> tuple[Any, Any, Any]:
     try:
@@ -376,7 +465,13 @@ def build_escrow_pre_auth(
         ValueError: Unknown/incomplete network config, unknown tier, bounty
             outside (0, $100] or with a real digit below one base unit (float
             noise is rounded, as the settle rounds it), or a ``maxFeeBps``
-            that cannot cover the operator's 1300 bps static fee.
+            that cannot cover the operator's 1300 bps static fee. Also a
+            config the SDK's tables contradict: a ``chain_id`` that is not the
+            one this SDK registers for ``network``, a USDC domain other than
+            ``VERIFIED_USDC_DOMAINS``' for that chain, or an ``escrow``,
+            ``token_collector``, ``usdc`` or ``operator`` other than the
+            chain's row in ``escrow_contracts`` (a chain without a row is
+            signed with a logged warning).
     """
     _, _, to_checksum_address = _require_eth_libs()
 
@@ -406,8 +501,16 @@ def build_escrow_pre_auth(
             "refusing to sign an EIP-3009 authorization with a mismatched domain."
         )
 
-    # El dominio con el que se va a firmar, contra la verdad leida de la cadena.
+    # La cadena, contra la red que el llamador nombro: todo lo que sigue (el
+    # dominio, las filas de las tablas) se busca por este chain id.
+    if isinstance(net["chain_id"], bool):
+        raise ValueError(
+            f"Invalid chain_id {net['chain_id']!r} for '{network}' — refusing to sign."
+        )
     _cid = int(net["chain_id"])
+    _check_chain_id(network, _cid)
+
+    # El dominio con el que se va a firmar, contra la verdad leida de la cadena.
     _verificado = VERIFIED_USDC_DOMAINS.get(_cid)
     _afirmado = (str(net["usdc_domain_name"]), str(net["usdc_domain_version"]))
     if _verificado is not None and _afirmado != _verificado:
@@ -422,6 +525,9 @@ def build_escrow_pre_auth(
             "signing escrow on UNVERIFIED chain %s (network %r) with the "
             "server-asserted domain %s — read name()/version() from the token and add "
             "it to VERIFIED_USDC_DOMAINS", _cid, network, _afirmado)
+
+    # Escrow, token collector, USDC y operador, contra escrow_contracts.
+    _check_registered_addresses(network, _cid, net, to_checksum_address)
 
     typehash = escrow_cfg.get("payment_info_typehash")
     if not typehash:
