@@ -20,6 +20,8 @@ For each address, on every chain of ``VERIFIED_USDC_DOMAINS``: the table's
 value is signed, and a changed one is refused with nothing signed; the fee
 ceiling is signed and one bps above it is refused. A chain without a row is
 signed with a warning (same policy as the domain).
+``EXECUTION_MARKET_NETWORKS`` is Execution Market's config of each of its
+escrow networks: every one of them signs with no warning.
 ``TestGuardMutations`` removes each guard from a copy of the module's source
 and checks that the refusal it owns turns into a signature.
 """
@@ -27,10 +29,12 @@ and checks that the refusal it owns turns into a signature.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import logging
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
 from eth_utils import to_checksum_address
@@ -48,6 +52,7 @@ from uvd_x402_sdk.escrow_contracts import (
 from uvd_x402_sdk.escrow_signing import (
     DEFAULT_MAX_FEE_BPS,
     ESCROW_PAYMENT_INFO_TYPEHASH,
+    OPERATOR_FEE_BPS,
     VERIFIED_USDC_DOMAINS,
     compute_escrow_nonce,
 )
@@ -177,6 +182,36 @@ def test_the_client_default_operator_is_the_row_where_the_client_has_one(chain_i
             ae.AdvancedEscrowClient(**kwargs)
 
 
+@pytest.mark.parametrize("chain_id", sorted(CLIENT_DEFAULT_CHAINS))
+def test_the_client_reads_its_default_operator_from_the_table(chain_id):
+    """Its default chains are these, and their operator is whatever the row says."""
+    assert ae._DEFAULT_OPERATOR_CHAINS == CLIENT_DEFAULT_CHAINS
+    assert ae._DEFAULT_OPERATOR_CHAINS <= set(ESCROW_OPERATORS)
+    other = to_checksum_address("0x" + "0d" * 20)
+    with mock.patch.dict(ESCROW_OPERATORS, {chain_id: other}):
+        client = ae.AdvancedEscrowClient(
+            private_key="0x" + "4b" * 32, chain_id=chain_id, rpc_url="http://127.0.0.1:9"
+        )
+    assert client.contracts["operator"] == other
+
+
+def test_the_client_fee_default_is_why_the_other_rows_are_not_client_defaults():
+    """build_payment_info's max_fee_bps default does not cover the operator's fee.
+
+    With Execution Market's operator as a silent default on another chain, the
+    client would lock funds that its release can never move (maxFeeBps below
+    the 1300 bps fee). If this default ever covers it, the other rows of
+    ESCROW_OPERATORS can become client defaults too.
+    """
+    pi = ae.PaymentInfo(
+        operator=ESCROW_OPERATORS[1], receiver=WORKER, token=ESCROW_CONTRACTS[1]["usdc"],
+        max_amount=1, pre_approval_expiry=1, authorization_expiry=2, refund_expiry=3,
+    )
+    assert pi.max_fee_bps < OPERATOR_FEE_BPS
+    build_payment_info = inspect.signature(ae.AdvancedEscrowClient.build_payment_info)
+    assert build_payment_info.parameters["max_fee_bps"].default < OPERATOR_FEE_BPS
+
+
 def test_the_arc_operator_is_the_recorded_compute_address():
     recorded = json.loads((FIXTURES / "arc-escrow-d.json").read_text(encoding="utf-8"))
     assert ESCROW_OPERATORS[5042] == ESCROW_OPERATORS[5042002] == recorded["default_operator"]
@@ -211,6 +246,159 @@ def test_the_base_operator_is_execution_markets():
     em = json.loads((FIXTURES / "escrow-preauth.json").read_text(encoding="utf-8"))
     assert em["network_config"]["operator"] == ESCROW_OPERATORS[8453]
     assert ae.BASE_MAINNET_CONTRACTS["operator"] == ESCROW_OPERATORS[8453]
+
+
+# Execution Market's config of each network of its registry with an escrow and
+# an operator (execution-market, mcp_server/integrations/x402/network_registry.py
+# at f75d4171), with the keys build_escrow_pre_auth reads, taken from the
+# registry the way mcp_server/api/h2a.py takes them: the network's ``operator``
+# and ``escrow``, ``x402r_infra.tokenCollector``, and the address, name and
+# version of its USDC (h2a.py also serves ``tokens`` and ``tier_timings``,
+# which the pre-auth does not check). Nine of them are what GET
+# /api/v1/h2a/payment-config serves in ``escrow.networks`` (each while
+# EM_ENABLED_NETWORKS enables it). ``skale`` is not: it is retired in EM
+# (ADR-009, 2026-08-24) and h2a.py skips it, but its registry entry is still
+# the operator and contracts of the escrows in flight there, which is what the
+# SDK's SKALE rows hold. The escrow block serves ``min_fee_bps`` 0 and ``max_fee_bps``
+# 1800 (``EXECUTION_MARKET_ESCROW``).
+def _em_network(
+    chain_id: int, *, operator: str, escrow: str, collector: str, usdc: str, domain_name: str
+) -> dict[str, Any]:
+    """One block of ``escrow.networks``, with the keys build_escrow_pre_auth reads."""
+    return {
+        "chain_id": chain_id,
+        "operator": operator,
+        "escrow": escrow,
+        "token_collector": collector,
+        "usdc": usdc,
+        "usdc_domain_name": domain_name,
+        "usdc_domain_version": "2",
+    }
+
+
+EXECUTION_MARKET_NETWORKS: dict[str, dict[str, Any]] = {
+    "base": _em_network(
+        8453,
+        operator="0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+        escrow="0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+        collector="0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+        usdc="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        domain_name="USD Coin",
+    ),
+    "ethereum": _em_network(
+        1,
+        operator="0x69B67962ffb7c5C7078ff348a87DF604dfA8001b",
+        escrow="0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
+        collector="0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
+        usdc="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        domain_name="USD Coin",
+    ),
+    "polygon": _em_network(
+        137,
+        operator="0xB87F1ECC85f074e50df3DD16A1F40e4e1EC4102e",
+        escrow="0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
+        collector="0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
+        usdc="0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+        domain_name="USD Coin",
+    ),
+    "arbitrum": _em_network(
+        42161,
+        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
+        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
+        usdc="0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        domain_name="USD Coin",
+    ),
+    "celo": _em_network(
+        42220,
+        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
+        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
+        usdc="0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
+        domain_name="USDC",
+    ),
+    "monad": _em_network(
+        143,
+        operator="0x9620Dbe2BB549E1d080Dc8e7982623A9e1Df8cC3",
+        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
+        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
+        usdc="0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+        domain_name="USDC",
+    ),
+    "avalanche": _em_network(
+        43114,
+        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
+        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
+        usdc="0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+        domain_name="USD Coin",
+    ),
+    "optimism": _em_network(
+        10,
+        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
+        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
+        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
+        usdc="0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+        domain_name="USD Coin",
+    ),
+    "skale": _em_network(
+        1187947933,
+        operator="0x43E46d4587fCCc382285C52012227555ed78D183",
+        escrow="0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
+        collector="0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
+        usdc="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
+        domain_name="Bridged USDC (SKALE Bridge)",
+    ),
+    "arc": _em_network(
+        5042,
+        operator="0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+        escrow="0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        collector="0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        usdc="0x3600000000000000000000000000000000000000",
+        domain_name="USDC",
+    ),
+}
+EXECUTION_MARKET_ESCROW = {"min_fee_bps": 0, "max_fee_bps": 1800, "deposit_limit_usd": 100}
+
+
+@pytest.mark.parametrize("network", sorted(EXECUTION_MARKET_NETWORKS))
+def test_the_rows_are_execution_markets_config(network):
+    block = EXECUTION_MARKET_NETWORKS[network]
+    assert ESCROW_OPERATORS[block["chain_id"]] == block["operator"]
+    contracts = ESCROW_CONTRACTS[block["chain_id"]]
+    assert {k: contracts[k] for k in ADDRESS_KEYS} == {k: block[k] for k in ADDRESS_KEYS}
+    assert VERIFIED_USDC_DOMAINS[block["chain_id"]] == (
+        block["usdc_domain_name"],
+        block["usdc_domain_version"],
+    )
+
+
+@pytest.mark.parametrize("network", sorted(EXECUTION_MARKET_NETWORKS))
+def test_execution_markets_config_signs_with_no_warning(network, caplog):
+    """Every value of its config has a row here, and every row agrees with it."""
+    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
+    block = EXECUTION_MARKET_NETWORKS[network]
+    wrapper, wallet = build(network, dict(block), **EXECUTION_MARKET_ESCROW)
+    assert len(wallet.signed) == 1
+    payment_info = wrapper["payload"]["paymentInfo"]
+    assert payment_info["operator"] == payment_info["feeReceiver"] == block["operator"]
+    assert payment_info["maxFeeBps"] == EXECUTION_MARKET_ESCROW["max_fee_bps"]
+    assert wrapper["paymentRequirements"]["network"] == f"eip155:{block['chain_id']}"
+    assert [r.getMessage() for r in caplog.records] == []
+
+
+@pytest.mark.parametrize("network", sorted(EXECUTION_MARKET_NETWORKS))
+def test_execution_markets_config_with_another_operator_is_refused(network):
+    block = dict(EXECUTION_MARKET_NETWORKS[network])
+    block["operator"] = changed(block["operator"])
+    refused(network, block, "Escrow operator mismatch", **EXECUTION_MARKET_ESCROW)
+
+
+@pytest.mark.parametrize("network", sorted(EXECUTION_MARKET_NETWORKS))
+def test_execution_markets_config_one_bps_above_the_ceiling_is_refused(network):
+    escrow = dict(EXECUTION_MARKET_ESCROW, max_fee_bps=EXECUTION_MARKET_ESCROW["max_fee_bps"] + 1)
+    block = dict(EXECUTION_MARKET_NETWORKS[network])
+    refused(network, block, "above this SDK's ceiling", **escrow)
 
 
 # ── one test per address: signs with the table, refuses it changed ──────────
@@ -303,6 +491,32 @@ def test_one_bps_above_the_fee_ceiling_is_refused(chain_id):
 
 def test_a_fee_above_the_ceiling_written_as_a_string_is_refused():
     refused("base", table_block(8453), "above this SDK's ceiling", max_fee_bps="1801")
+
+
+@pytest.mark.parametrize(
+    "max_fee_bps",
+    [1801.0, 10_000, 65_535, 65_536],
+    ids=["float", "100-percent", "uint16-max", "above-uint16"],
+)
+def test_any_other_spelling_above_the_ceiling_is_refused(max_fee_bps):
+    refused("base", table_block(8453), "above this SDK's ceiling", max_fee_bps=max_fee_bps)
+
+
+def test_a_fee_written_as_a_string_is_signed_as_the_number():
+    """Not the default (1800): a string read as the number, not ignored."""
+    wrapper, _ = build("base", table_block(8453), max_fee_bps="1500")
+    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == 1500
+
+
+def test_a_missing_max_fee_bps_signs_the_default_within_the_ceiling():
+    wrapper, _ = build("base", table_block(8453))
+    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == DEFAULT_MAX_FEE_BPS
+
+
+def test_the_operator_fee_floor_still_applies_under_the_ceiling():
+    wrapper, _ = build("base", table_block(8453), max_fee_bps=OPERATOR_FEE_BPS)
+    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == OPERATOR_FEE_BPS
+    refused("base", table_block(8453), "cannot cover", max_fee_bps=OPERATOR_FEE_BPS - 1)
 
 
 @pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)

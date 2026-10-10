@@ -47,8 +47,10 @@ tables have no row for is signed with a logged warning.
 On-chain limits enforced client-side:
   - bounty <= $100 (AuthCaptureEscrow deposit condition)
   - signed ``maxFeeBps`` must cover the operator's 1300 bps static fee
-    (canonical 13% flat), and stay within the chain's ceiling
-    (``escrow_contracts.ESCROW_MAX_FEE_BPS``, 1800 bps)
+    (canonical 13% flat)
+
+SDK policy, not an on-chain limit: the signed ``maxFeeBps`` stays within the
+chain's ceiling (``escrow_contracts.ESCROW_MAX_FEE_BPS``, 1800 bps).
 
 Usage::
 
