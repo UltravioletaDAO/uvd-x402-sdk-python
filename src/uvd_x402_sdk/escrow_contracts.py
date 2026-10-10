@@ -163,13 +163,19 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
 # own table, as the generation has (advanced_escrow.ESCROW_GENERATIONS), and
 # the snapshot of ESCROW_CONTRACTS stays as it was recorded.
 #
-# A row is the operator Execution Market serves in its payment config for that
-# chain (the operator escrow_signing accepts there). On Base, SKALE Base, Arc
-# and Arc Testnet it is also AdvancedEscrowClient's default operator
-# (tests/test_escrow_signing_registry.py pins that the two agree); on the other
-# chains the client keeps asking for an explicit ``operator_address``. A chain
-# without a row: escrow_signing signs the payment config's operator with a
-# warning.
+# A row is the operator of that chain in Execution Market's network registry,
+# which its payment config serves (the operator escrow_signing accepts there).
+# Two exceptions: SKALE Base is retired in EM (ADR-009) and its payment config
+# no longer serves it; the row stays because it is still the operator of the
+# escrows in flight there (and AdvancedEscrowClient's default operator on
+# SKALE Base); and EM's registry has no Arc
+# Testnet entry: that row is the factory's computeAddress for the same
+# operator, the same address as Arc's. On Base,
+# SKALE Base, Arc and Arc Testnet (advanced_escrow._DEFAULT_OPERATOR_CHAINS)
+# AdvancedEscrowClient reads its default operator from here
+# (tests/test_escrow_signing_registry.py pins that); on the other chains the
+# client keeps asking for an explicit ``operator_address``. A chain without a
+# row: escrow_signing signs the payment config's operator with a warning.
 ESCROW_OPERATORS: dict[int, str] = {
     # Base: Fase 5 PaymentOperator (advanced_escrow.BASE_MAINNET_CONTRACTS),
     # the operator of Execution Market's Base config (tests/fixtures/escrow-preauth.json).
@@ -201,6 +207,10 @@ ESCROW_OPERATORS: dict[int, str] = {
 # (escrow_signing.build_escrow_pre_auth, the only reader) refuses a value above
 # the row before signing (owner decision 215: the ceiling of each network
 # is Execution Market's current value, 1800 bps on every network it serves).
+# This is the SDK's policy, not a contract limit. 1800 is what EM serves at
+# f75d4171: the "max_fee_bps" of its payment config (mcp_server/api/h2a.py)
+# and FASE5_MAX_FEE_BPS (mcp_server/integrations/x402/fees.py), the operator's
+# 1300 bps plus room for a protocol fee of up to 500.
 # A chain without a row: signed with a warning, as the other tables.
 ESCROW_MAX_FEE_BPS: dict[int, int] = {
     8453: 1800,  # Base

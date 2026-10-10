@@ -74,7 +74,7 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 from web3 import Web3
 
-from uvd_x402_sdk.escrow_contracts import ESCROW_CONTRACTS
+from uvd_x402_sdk.escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS
 from uvd_x402_sdk.networks import get_network_by_chain_id
 from uvd_x402_sdk.stack_key import (
     refuse_redirect,
@@ -106,8 +106,17 @@ DEPOSIT_LIMIT_USDC = 100_000_000  # $100 in atomic units (6 decimals)
 # ESCROW_CONTRACTS lives in uvd_x402_sdk.escrow_contracts (imported above, the
 # same object), which imports nothing: escrow_signing checks a payment config
 # against it without web3. escrow_contracts.ESCROW_OPERATORS (the operator
-# Execution Market serves per chain) is read by escrow_signing only; the
-# client's own default operator is chosen in AdvancedEscrowClient.__init__.
+# Execution Market serves per chain) is read by escrow_signing, and by
+# AdvancedEscrowClient for its default operator on _DEFAULT_OPERATOR_CHAINS.
+
+# The chains where AdvancedEscrowClient picks the operator itself when no
+# ``operator_address`` is given: that chain's row of ESCROW_OPERATORS (the same
+# chains and addresses as in 0.95.0). Not every row: build_payment_info
+# defaults ``max_fee_bps`` to 800, below the 1300 bps that Execution Market's
+# operators charge, so a silent default on another chain would turn a
+# ValueError into a lock whose release reverts. Elsewhere the client keeps
+# asking for the operator.
+_DEFAULT_OPERATOR_CHAINS = frozenset({8453, 1187947933, 5042, 5042002})
 
 # Human-readable chain names for diagnostics and error messages.
 ESCROW_CHAIN_NAMES: dict[int, str] = {
@@ -602,8 +611,10 @@ class AdvancedEscrowClient:
             chain_id: EVM chain ID (e.g. 8453 for Base, 1 for Ethereum)
             contracts: Explicit contract address dict (overrides registry lookup).
                        Must contain at least "operator", "escrow", "token_collector", "usdc".
-            operator_address: PaymentOperator instance address. Required when using
-                              the multi-chain registry (which only provides the factory).
+            operator_address: PaymentOperator instance address. On Base, SKALE
+                              Base, Arc and Arc Testnet it defaults to the chain's
+                              row of ``escrow_contracts.ESCROW_OPERATORS``; required
+                              on every other chain of the registry.
                               Ignored when explicit ``contracts`` dict is passed.
             gas_limit: Gas limit for on-chain transactions
             stack_key: The ``X-UVD-Stack-Key`` of a service of Ultravioleta DAO
@@ -656,17 +667,11 @@ class AdvancedEscrowClient:
         elif chain_id in ESCROW_CONTRACTS:
             # Resolve from the multi-chain registry.
             registry = ESCROW_CONTRACTS[chain_id]
-            if operator_address is None and chain_id == 8453:
-                # Backward-compatible default: use the legacy Base Mainnet
-                # PaymentOperator instance when no operator is specified.
-                operator_address = BASE_MAINNET_CONTRACTS["operator"]
-            if operator_address is None and chain_id == 1187947933:
-                # SKALE Base: EM PaymentOperator Fase 5 (1300bps fee, facilitator-as-arbiter)
-                operator_address = "0x43E46d4587fCCc382285C52012227555ed78D183"
-            if operator_address is None and chain_id in (5042, 5042002):
-                # Arc / Arc Testnet: EM PaymentOperator, same address on both
-                # (computeAddress on the v1.0.2 factory, tests/fixtures/arc-escrow-d.json)
-                operator_address = "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D"
+            if operator_address is None and chain_id in _DEFAULT_OPERATOR_CHAINS:
+                # The chain's operator in the table escrow_signing also checks a
+                # payment config against (Base's row is
+                # BASE_MAINNET_CONTRACTS["operator"]).
+                operator_address = ESCROW_OPERATORS[chain_id]
             if operator_address is None:
                 chain_name = ESCROW_CHAIN_NAMES.get(chain_id, str(chain_id))
                 raise ValueError(
