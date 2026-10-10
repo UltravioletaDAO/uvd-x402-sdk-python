@@ -9,13 +9,16 @@ nothing to import). ``advanced_escrow`` imports ``ESCROW_CONTRACTS`` from here
 * ``ESCROW_CONTRACTS``: chain id -> the escrow deployment on it. Addresses
   only; ``tests/fixtures/escrow-calldata-snapshot.json`` pins every row of the
   chains it recorded.
-* ``ESCROW_OPERATORS``: chain id -> the PaymentOperator that
-  ``AdvancedEscrowClient`` uses on that chain when none is given. A chain
-  without a row has no default operator in this SDK.
+* ``ESCROW_OPERATORS``: chain id -> the PaymentOperator of Execution
+  Market's payment config on that chain. On Base, SKALE Base, Arc and Arc
+  Testnet it is also the operator ``AdvancedEscrowClient`` uses when none is
+  given; on the other chains the client still asks for one.
+* ``ESCROW_MAX_FEE_BPS``: chain id -> the highest ``maxFeeBps`` the pre-auth
+  signs on that chain.
 
-``escrow_signing.build_escrow_pre_auth`` reads both: on a chain with a row,
-an address of the payment config that is not the registered one is refused
-before anything is signed.
+``escrow_signing.build_escrow_pre_auth`` reads all three: on a chain with a
+row, a payment config that contradicts it is refused before anything is
+signed; a chain without a row is signed with a logged warning.
 """
 
 from __future__ import annotations
@@ -160,11 +163,13 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
 # own table, as the generation has (advanced_escrow.ESCROW_GENERATIONS), and
 # the snapshot of ESCROW_CONTRACTS stays as it was recorded.
 #
-# A row is an operator this SDK already used as a default:
-# AdvancedEscrowClient resolves it when no ``operator_address`` is given
-# (tests/test_escrow_signing_registry.py pins that the two agree). A chain without a
-# row has no default operator here: AdvancedEscrowClient asks for one, and
-# escrow_signing signs the payment config's operator with a warning.
+# A row is the operator Execution Market serves in its payment config for that
+# chain (the operator escrow_signing accepts there). On Base, SKALE Base, Arc
+# and Arc Testnet it is also AdvancedEscrowClient's default operator
+# (tests/test_escrow_signing_registry.py pins that the two agree); on the other
+# chains the client keeps asking for an explicit ``operator_address``. A chain
+# without a row: escrow_signing signs the payment config's operator with a
+# warning.
 ESCROW_OPERATORS: dict[int, str] = {
     # Base: Fase 5 PaymentOperator (advanced_escrow.BASE_MAINNET_CONTRACTS),
     # the operator of Execution Market's Base config (tests/fixtures/escrow-preauth.json).
@@ -175,4 +180,37 @@ ESCROW_OPERATORS: dict[int, str] = {
     # (computeAddress on the v1.0.2 factory, tests/fixtures/arc-escrow-d.json).
     5042: "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
     5042002: "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+    # EM PaymentOperators of the other escrow mainnets, as EM's network registry
+    # serves them (mcp_server/integrations/x402/network_registry.py at EM commit
+    # f75d4171, relayed in the review of this table). Not AdvancedEscrowClient
+    # defaults.
+    1: "0x69B67962ffb7c5C7078ff348a87DF604dfA8001b",  # Ethereum
+    10: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",  # Optimism
+    137: "0xB87F1ECC85f074e50df3DD16A1F40e4e1EC4102e",  # Polygon
+    143: "0x9620Dbe2BB549E1d080Dc8e7982623A9e1Df8cC3",  # Monad
+    42161: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",  # Arbitrum
+    42220: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",  # Celo
+    43114: "0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",  # Avalanche
+}
+
+# ============================================================
+# The fee ceiling of each chain
+# ============================================================
+# The signed ``maxFeeBps`` caps what the operator may take at release. The
+# payment config chooses it; on a chain with a row here, a value above the row
+# is refused before signing (owner decision 215: the ceiling of each network
+# is Execution Market's current value, 1800 bps on every network it serves).
+# A chain without a row: signed with a warning, as the other tables.
+ESCROW_MAX_FEE_BPS: dict[int, int] = {
+    8453: 1800,  # Base
+    1187947933: 1800,  # SKALE Base
+    5042: 1800,  # Arc
+    5042002: 1800,  # Arc Testnet
+    1: 1800,  # Ethereum
+    10: 1800,  # Optimism
+    137: 1800,  # Polygon
+    143: 1800,  # Monad
+    42161: 1800,  # Arbitrum
+    42220: 1800,  # Celo
+    43114: 1800,  # Avalanche
 }

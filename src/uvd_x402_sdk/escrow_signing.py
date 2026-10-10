@@ -37,16 +37,18 @@ verifyingContract): a mismatched, wallet-draining auth.
 
 What the payment config asserts is checked against this SDK's own tables
 before anything is signed: the chain id against the network the caller
-named, the USDC domain against ``VERIFIED_USDC_DOMAINS``, and the escrow,
+named, the USDC domain against ``VERIFIED_USDC_DOMAINS``, the escrow,
 token collector, USDC and operator against
 :mod:`uvd_x402_sdk.escrow_contracts` (``ESCROW_CONTRACTS``,
-``ESCROW_OPERATORS``). A contradiction raises ``ValueError``; a chain the
+``ESCROW_OPERATORS``), and ``maxFeeBps`` against that chain's ceiling
+(``ESCROW_MAX_FEE_BPS``). A contradiction raises ``ValueError``; a chain the
 tables have no row for is signed with a logged warning.
 
 On-chain limits enforced client-side:
   - bounty <= $100 (AuthCaptureEscrow deposit condition)
   - signed ``maxFeeBps`` must cover the operator's 1300 bps static fee
-    (canonical 13% flat)
+    (canonical 13% flat), and stay within the chain's ceiling
+    (``escrow_contracts.ESCROW_MAX_FEE_BPS``, 1800 bps)
 
 Usage::
 
@@ -116,7 +118,7 @@ if TYPE_CHECKING:
 import logging
 
 from . import erc7702 as _erc7702
-from .escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS
+from .escrow_contracts import ESCROW_CONTRACTS, ESCROW_MAX_FEE_BPS, ESCROW_OPERATORS
 from .networks.base import get_network, to_base_units
 
 _log = logging.getLogger("uvd_x402_sdk.escrow_signing")
@@ -348,6 +350,21 @@ def _check_registered_addresses(
         )
 
 
+def _check_fee_ceiling(network: str, chain_id: int, max_fee_bps: int) -> None:
+    ceiling = ESCROW_MAX_FEE_BPS.get(chain_id)
+    if ceiling is None:
+        _log.warning(
+            "signing escrow on chain %s (network %r) with maxFeeBps=%s: this SDK "
+            "has no fee ceiling for that chain in ESCROW_MAX_FEE_BPS",
+            chain_id, network, max_fee_bps)
+    elif max_fee_bps > ceiling:
+        raise ValueError(
+            f"maxFeeBps={max_fee_bps} for '{network}' (chain {chain_id}) is above "
+            f"this SDK's ceiling for that chain ({ceiling} bps, ESCROW_MAX_FEE_BPS) — "
+            "refusing to sign."
+        )
+
+
 def _require_eth_libs() -> tuple[Any, Any, Any]:
     try:
         from eth_abi import encode
@@ -468,9 +485,10 @@ def build_escrow_pre_auth(
             that cannot cover the operator's 1300 bps static fee. Also a
             config the SDK's tables contradict: a ``chain_id`` that is not the
             one this SDK registers for ``network``, a USDC domain other than
-            ``VERIFIED_USDC_DOMAINS``' for that chain, or an ``escrow``,
+            ``VERIFIED_USDC_DOMAINS``' for that chain, an ``escrow``,
             ``token_collector``, ``usdc`` or ``operator`` other than the
-            chain's row in ``escrow_contracts`` (a chain without a row is
+            chain's row in ``escrow_contracts``, or a ``max_fee_bps`` above
+            the chain's ``ESCROW_MAX_FEE_BPS`` (a chain without a row is
             signed with a logged warning).
     """
     _, _, to_checksum_address = _require_eth_libs()
@@ -573,6 +591,7 @@ def build_escrow_pre_auth(
             f"{OPERATOR_FEE_BPS} bps static fee — the on-chain release would "
             "revert."
         )
+    _check_fee_ceiling(network, _cid, max_fee_bps)
 
     timings = (escrow_cfg.get("tier_timings") or {}).get(
         tier

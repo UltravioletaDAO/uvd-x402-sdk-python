@@ -2406,8 +2406,9 @@ Fail-loud: an unknown network or incomplete network config raises
 wallet-draining authorization. Before signing, the config's `chain_id` must
 be the chain the SDK registers for `network`, and its USDC domain, escrow,
 token collector, USDC and operator are checked against the SDK's own tables
-(`VERIFIED_USDC_DOMAINS`, `uvd_x402_sdk.escrow_contracts`): a value that
-differs from the chain's row raises `ValueError`; where the tables have no
+(`VERIFIED_USDC_DOMAINS`, `uvd_x402_sdk.escrow_contracts`), and `maxFeeBps`
+against the chain's ceiling (`ESCROW_MAX_FEE_BPS`, 1800 bps): a value that
+differs from (or exceeds) the chain's row raises `ValueError`; where the tables have no
 row for the chain, that value is signed with a logged warning. On-chain
 limits enforced client-side: bounty <= $100 (AuthCaptureEscrow deposit
 condition) and the signed `maxFeeBps` must

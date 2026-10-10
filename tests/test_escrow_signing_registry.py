@@ -13,11 +13,13 @@ config key         where the signature carries it              checked against
 ``token_collector``  ``message.to`` / ``authorization.to``       ``ESCROW_CONTRACTS``
 ``usdc``           ``domain.verifyingContract``, ``token``     ``ESCROW_CONTRACTS``
 ``operator``       ``paymentInfo.operator`` / ``feeReceiver``  ``ESCROW_OPERATORS``
+``max_fee_bps``    ``paymentInfo.maxFeeBps`` (ceiling)         ``ESCROW_MAX_FEE_BPS``
 =================  ==========================================  ======================
 
 For each address, on every chain of ``VERIFIED_USDC_DOMAINS``: the table's
-value is signed, and a changed one is refused with nothing signed. A chain
-without a row is signed with a warning (same policy as the domain).
+value is signed, and a changed one is refused with nothing signed; the fee
+ceiling is signed and one bps above it is refused. A chain without a row is
+signed with a warning (same policy as the domain).
 ``TestGuardMutations`` removes each guard from a copy of the module's source
 and checks that the refusal it owns turns into a signature.
 """
@@ -37,8 +39,13 @@ import uvd_x402_sdk.advanced_escrow as ae
 import uvd_x402_sdk.escrow_contracts as ec
 import uvd_x402_sdk.escrow_signing as es
 from tests.test_escrow_vectors import mutant
-from uvd_x402_sdk.escrow_contracts import ESCROW_CONTRACTS, ESCROW_OPERATORS
+from uvd_x402_sdk.escrow_contracts import (
+    ESCROW_CONTRACTS,
+    ESCROW_MAX_FEE_BPS,
+    ESCROW_OPERATORS,
+)
 from uvd_x402_sdk.escrow_signing import (
+    DEFAULT_MAX_FEE_BPS,
     ESCROW_PAYMENT_INFO_TYPEHASH,
     VERIFIED_USDC_DOMAINS,
     compute_escrow_nonce,
@@ -50,8 +57,13 @@ WORKER = "0x" + "5e" * 20
 CHAINS = sorted(VERIFIED_USDC_DOMAINS)
 CHAIN_IDS = [get_network_by_chain_id(c).name for c in CHAINS]
 WITH_OPERATOR = sorted(c for c in CHAINS if c in ESCROW_OPERATORS)
-WITHOUT_OPERATOR = sorted(c for c in CHAINS if c not in ESCROW_OPERATORS)
 ADDRESS_KEYS = ("escrow", "token_collector", "usdc")
+# Rows in ESCROW_CONTRACTS, but no operator, no fee ceiling, no verified domain.
+TESTNETS = [("base-sepolia", 84532), ("ethereum-sepolia", 11155111)]
+TESTNET_IDS = [n for n, _ in TESTNETS]
+# The chains where AdvancedEscrowClient picks an operator when none is given
+# (as in 0.95.0). The operator rows of the other chains did not change the client.
+CLIENT_DEFAULT_CHAINS = {8453, 1187947933, 5042, 5042002}
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
@@ -88,19 +100,22 @@ def table_block(chain_id: int) -> dict[str, Any]:
     }
 
 
-def config(network: str, block: dict[str, Any]) -> dict[str, Any]:
+def config(network: str, block: dict[str, Any], **escrow: Any) -> dict[str, Any]:
     return {
         "escrow": {
             "payment_info_typehash": ESCROW_PAYMENT_INFO_TYPEHASH,
             "networks": {network: block},
+            **escrow,
         }
     }
 
 
-def build(network: str, block: dict[str, Any], module: Any = es) -> tuple[dict, _Wallet]:
+def build(
+    network: str, block: dict[str, Any], module: Any = es, **escrow: Any
+) -> tuple[dict, _Wallet]:
     wallet = _Wallet()
     header = module.build_escrow_pre_auth(
-        config(network, block), network, PAYER, WORKER, "0.25", None, wallet
+        config(network, block, **escrow), network, PAYER, WORKER, "0.25", None, wallet
     )
     return json.loads(header), wallet
 
@@ -111,11 +126,13 @@ def changed(address: str) -> str:
     return address[:-1] + last
 
 
-def refused(network: str, block: dict[str, Any], match: str, module: Any = es) -> None:
+def refused(
+    network: str, block: dict[str, Any], match: str, module: Any = es, **escrow: Any
+) -> None:
     wallet = _Wallet()
     with pytest.raises(ValueError, match=match):
         module.build_escrow_pre_auth(
-            config(network, block), network, PAYER, WORKER, "0.25", None, wallet
+            config(network, block, **escrow), network, PAYER, WORKER, "0.25", None, wallet
         )
     assert wallet.signed == [], "nothing may be signed before the refusal"
 
@@ -142,11 +159,16 @@ def test_every_operator_row_is_a_chain_of_the_registry():
     assert set(ESCROW_OPERATORS) <= set(ESCROW_CONTRACTS)
 
 
+def test_every_chain_with_a_verified_domain_has_an_operator_row():
+    """The testnet rows of ESCROW_CONTRACTS have none."""
+    assert set(ESCROW_OPERATORS) == set(VERIFIED_USDC_DOMAINS)
+
+
 @pytest.mark.parametrize("chain_id", sorted(ESCROW_CONTRACTS))
-def test_the_operator_column_is_advanced_escrows_default_operator(chain_id):
-    """A row is the operator AdvancedEscrowClient picks with none given; no row, no default."""
+def test_the_client_default_operator_is_the_row_where_the_client_has_one(chain_id):
+    """Where AdvancedEscrowClient has a default operator it is the row; elsewhere it still asks."""
     kwargs = {"private_key": "0x" + "4b" * 32, "chain_id": chain_id, "rpc_url": "http://127.0.0.1:9"}
-    if chain_id in ESCROW_OPERATORS:
+    if chain_id in CLIENT_DEFAULT_CHAINS:
         client = ae.AdvancedEscrowClient(**kwargs)
         assert client.contracts["operator"] == ESCROW_OPERATORS[chain_id]
     else:
@@ -214,20 +236,59 @@ def test_another_chains_whole_config_under_this_name_is_refused(chain_id):
             refused(network_of(chain_id), table_block(other), "Chain id mismatch")
 
 
-@pytest.mark.parametrize(
-    "chain_id", WITHOUT_OPERATOR, ids=[network_of(c) for c in WITHOUT_OPERATOR]
-)
-def test_a_chain_without_an_operator_row_signs_the_configs_with_a_warning(chain_id, caplog):
+@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
+def test_a_chain_without_an_operator_row_signs_the_configs_with_a_warning(
+    network, chain_id, caplog
+):
     caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
     block = table_block(chain_id)
     block["operator"] = to_checksum_address("0x" + "0e" * 20)
-    wrapper, wallet = build(network_of(chain_id), block)
+    wrapper, wallet = build(network, block)
     assert len(wallet.signed) == 1
     assert wrapper["payload"]["paymentInfo"]["operator"] == block["operator"]
     assert any("ESCROW_OPERATORS" in r.getMessage() for r in caplog.records)
 
 
-# ── edges ────────────────────────────────────────────────────────────────────
+# ── the fee ceiling ──────────────────────────────────────────────────────────
+
+
+def test_the_fee_ceiling_is_1800_bps_on_every_chain_with_an_operator_row():
+    assert set(ESCROW_MAX_FEE_BPS) == set(ESCROW_OPERATORS)
+    assert set(ESCROW_MAX_FEE_BPS.values()) == {1800}
+    # A config without max_fee_bps signs DEFAULT_MAX_FEE_BPS: within every ceiling.
+    assert DEFAULT_MAX_FEE_BPS <= min(ESCROW_MAX_FEE_BPS.values())
+
+
+@pytest.mark.parametrize("chain_id", CHAINS, ids=CHAIN_IDS)
+def test_the_fee_ceiling_is_signed(chain_id):
+    ceiling = ESCROW_MAX_FEE_BPS[chain_id]
+    wrapper, wallet = build(network_of(chain_id), table_block(chain_id), max_fee_bps=ceiling)
+    assert len(wallet.signed) == 1
+    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == ceiling
+
+
+@pytest.mark.parametrize("chain_id", CHAINS, ids=CHAIN_IDS)
+def test_one_bps_above_the_fee_ceiling_is_refused(chain_id):
+    above = ESCROW_MAX_FEE_BPS[chain_id] + 1
+    refused(
+        network_of(chain_id),
+        table_block(chain_id),
+        f"maxFeeBps={above} .* above this SDK's ceiling",
+        max_fee_bps=above,
+    )
+
+
+def test_a_fee_above_the_ceiling_written_as_a_string_is_refused():
+    refused("base", table_block(8453), "above this SDK's ceiling", max_fee_bps="1801")
+
+
+@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
+def test_a_chain_without_a_fee_ceiling_signs_with_a_warning(network, chain_id, caplog):
+    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
+    wrapper, wallet = build(network, table_block(chain_id), max_fee_bps=2500)
+    assert len(wallet.signed) == 1
+    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == 2500
+    assert any("ESCROW_MAX_FEE_BPS" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.parametrize("spelling", ["lower", "upper"])
@@ -240,10 +301,7 @@ def test_the_table_address_in_another_case_is_the_same_address(spelling):
     assert wrapper["payload"]["authorization"]["to"] == ESCROW_CONTRACTS[8453]["token_collector"]
 
 
-TESTNETS = [("base-sepolia", 84532), ("ethereum-sepolia", 11155111)]
-
-
-@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=[n for n, _ in TESTNETS])
+@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
 def test_a_registry_testnet_is_signed_with_its_rows(network, chain_id, caplog):
     """No network name and no verified domain here, but a row in ESCROW_CONTRACTS."""
     caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
@@ -255,7 +313,7 @@ def test_a_registry_testnet_is_signed_with_its_rows(network, chain_id, caplog):
 
 
 @pytest.mark.parametrize("key", ADDRESS_KEYS)
-@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=[n for n, _ in TESTNETS])
+@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
 def test_a_changed_registry_address_is_refused_on_a_testnet(network, chain_id, key):
     block = table_block(chain_id)
     block[key] = changed(block[key])
@@ -348,8 +406,16 @@ def test_execution_markets_base_config_signs_as_before():
 # ── each guard removed: its refusal becomes a signature ─────────────────────
 
 
-def _neutral_case(guard: str) -> tuple[str, dict[str, Any]]:
-    """The network and config each guard exists to refuse."""
+def _neutral_case(guard: str) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    """The network, network block and escrow keys each guard exists to refuse."""
+    network, block = _neutral_block(guard)
+    escrow = {"max_fee_bps": ESCROW_MAX_FEE_BPS[8453] + 1} if guard == "max_fee_bps" else {}
+    return network, block, escrow
+
+
+def _neutral_block(guard: str) -> tuple[str, dict[str, Any]]:
+    if guard == "max_fee_bps":
+        return "base", table_block(8453)
     if guard == "chain_id":
         return "base", table_block(10)
     if guard == "caip2":
@@ -402,22 +468,26 @@ GUARD_MUTATIONS = {
         '_REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector", "usdc")\n',
         '_REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector")\n',
     ),
+    "max_fee_bps": (
+        "    elif max_fee_bps > ceiling:\n",
+        "    elif False:\n",
+    ),
 }
 
 
 class TestGuardMutations:
     @pytest.mark.parametrize("guard", sorted(GUARD_MUTATIONS))
     def test_the_unmutated_source_refuses_the_case(self, guard):
-        network, block = _neutral_case(guard)
+        network, block, escrow = _neutral_case(guard)
         with pytest.raises(ValueError):
-            build(network, block)
+            build(network, block, **escrow)
 
     @pytest.mark.parametrize("guard", sorted(GUARD_MUTATIONS))
     def test_without_the_guard_the_case_is_signed(self, guard):
         old, new = GUARD_MUTATIONS[guard]
         module = mutant(old, new)
-        network, block = _neutral_case(guard)
-        _, wallet = build(network, block, module=module)
+        network, block, escrow = _neutral_case(guard)
+        _, wallet = build(network, block, module=module, **escrow)
         assert len(wallet.signed) == 1
 
     @pytest.mark.parametrize("guard", ["escrow", "token_collector", "usdc"])
@@ -426,5 +496,5 @@ class TestGuardMutations:
         module = mutant(old, new)
         for other in ADDRESS_KEYS:
             if other != guard:
-                network, block = _neutral_case(other)
-                refused(network, block, "Escrow address mismatch", module=module)
+                network, block, escrow = _neutral_case(other)
+                refused(network, block, "Escrow address mismatch", module=module, **escrow)
