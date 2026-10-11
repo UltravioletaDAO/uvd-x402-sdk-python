@@ -25,6 +25,14 @@ from uvd_x402_sdk.stack_key import STACK_KEY_ENV, usable_stack_key
 FACILITATOR_FALLBACK_KEY = "*"
 
 
+def _check_discoverable(value: Any) -> None:
+    """``discoverable`` must be a real ``bool``: the facilitator reads only a
+    JSON boolean, so ``"true"`` or ``1`` would announce nothing while looking
+    like an opt-in."""
+    if not isinstance(value, bool):
+        raise ValueError(f"discoverable must be a bool, got {value!r}")
+
+
 @dataclass
 class NetworkRecipientConfig:
     """
@@ -128,6 +136,17 @@ class X402Config:
             facilitators the key may travel to, over ``https``; plain ``http``
             only to ``127.0.0.1`` or ``localhost`` named here (a local stand-in
             for tests). Bare host names, compared whole and case-insensitively.
+        discoverable: Opt in to the facilitator's settlement auto-registration
+            (default False: nothing is announced). When True, ``"discoverable":
+            true`` (a JSON boolean) is added to the ``extra`` of every v2 402
+            option (``create_402_response_v2``) and of the payment requirements
+            sent to ``/verify`` and ``/settle``, beside the EIP-712 ``name`` /
+            ``version`` and any other entry; the facilitator registers the
+            resource after a successful settle when it reads it there. Not the
+            same as ``bazaar_extension(discoverable=...)``, which goes in
+            ``extensions.bazaar``. Native Hedera offers are left as they are
+            (their ``extra`` is only ``feePayer``). Anything but a ``bool`` is a
+            ``ValueError``.
     """
 
     facilitator_url: str = "https://facilitator.ultravioletadao.xyz"
@@ -211,6 +230,9 @@ class X402Config:
     # no ceiling. After the two above for the same reason.
     max_settle_timeout: Optional[float] = None
 
+    # Opt-in settlement auto-registration (extra.discoverable). Last, as above.
+    discoverable: bool = False
+
     def __post_init__(self) -> None:
         """Validate configuration after initialization."""
         # First, so that no other check can fail with the raw value still here.
@@ -245,6 +267,8 @@ class X402Config:
                     f"or None, got {cap!r}"
                 )
             self.max_settle_timeout = float(cap)
+
+        _check_discoverable(self.discoverable)
 
         # At least one recipient is required
         if not any([
@@ -521,6 +545,18 @@ class X402Config:
             return self.recipient_xrpl
         else:
             return self.recipient_evm
+
+    def with_discoverable(self, extra: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """``extra`` with ``"discoverable": True`` added when this config opts in.
+
+        Off, ``extra`` is returned as given (``None`` stays ``None``). On, a new
+        dict with the other entries kept. Checked on every call: a value set
+        after construction that is not a ``bool`` raises before anything is sent.
+        """
+        _check_discoverable(self.discoverable)
+        if not self.discoverable:
+            return extra
+        return {**(extra or {}), "discoverable": True}
 
     def is_network_enabled(self, network: str) -> bool:
         """

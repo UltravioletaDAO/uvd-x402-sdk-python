@@ -681,6 +681,12 @@ def create_402_response_v2(
                 "version": network.usdc_domain_version,
             }
 
+        # Native Hedera's extra is exactly {"feePayer"}: its buyers refuse more.
+        if network.network_type != NetworkType.HEDERA:
+            extra = config.with_discoverable(option.get("extra"))
+            if extra is not None:
+                option["extra"] = extra
+
         accepts.append(option)
 
     body: Dict[str, Any] = {
