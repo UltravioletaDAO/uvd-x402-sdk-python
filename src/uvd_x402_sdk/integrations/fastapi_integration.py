@@ -531,7 +531,7 @@ async def _buffered(
                 pending.cancel()
             walker.cancel()
 
-    waiting: Optional["asyncio.Future[Any]"] = None
+    waiting: Optional[asyncio.Future[Any]] = None
     try:
         while True:
             pending = waiting = asyncio.ensure_future(queue.get())
