@@ -44,6 +44,9 @@ OFFER = {
     "payTo": "0x1111111111111111111111111111111111111111",
     "maxTimeoutSeconds": 300,
 }
+# The published default, as a literal: the tests below build documents from
+# it, and a mutated constant must make them fail, not build a million levels.
+DEPTH = 64
 ENCODINGS = [
     "utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be",
     "utf-32", "utf-32-le", "utf-32-be",
@@ -106,7 +109,7 @@ def test_the_public_surface_is_small_and_exported():
     ):
         assert name in uvd_x402_sdk.__all__
     assert MAX_CHALLENGE_BYTES == 512 * 1024
-    assert MAX_JSON_DEPTH == 64
+    assert MAX_JSON_DEPTH == DEPTH
     assert issubclass(JSONBoundsError, ValueError)
 
 
@@ -175,9 +178,9 @@ def test_no_size_ceiling_still_has_a_depth_ceiling():
     # 1_000_000 levels run in a subprocess below; here, few enough that a
     # missing check is a clean failure, not a crash of the test runner.
     with pytest.raises(JSONBoundsError) as err:
-        loads_bounded("[" * (MAX_JSON_DEPTH + 1), max_bytes=None)
+        loads_bounded("[" * (DEPTH + 1), max_bytes=None)
     assert err.value.reason == "too-deep"
-    assert loads_bounded(json.dumps(nested(MAX_JSON_DEPTH)), max_bytes=None)
+    assert loads_bounded(json.dumps(nested(DEPTH)), max_bytes=None)
 
 
 @pytest.mark.parametrize("kind", [bytes, bytearray, memoryview])
@@ -329,9 +332,9 @@ def test_default_ceilings_apply_to_both_transports():
     assert payment_challenge_from({}, big) is None
     assert payment_challenge_from({}, big.encode()) is None
     assert payment_challenge_from({"payment-required": big}) is None
-    deep = json.dumps(challenge(extra=nested(MAX_JSON_DEPTH)))
+    deep = json.dumps(challenge(extra=nested(DEPTH)))
     assert payment_challenge_from({}, deep) is None
-    fits = json.dumps(challenge(extra=nested(MAX_JSON_DEPTH - 3)))
+    fits = json.dumps(challenge(extra=nested(DEPTH - 3)))
     assert payment_challenge_from({}, fits) == json.loads(fits)
 
 
@@ -447,7 +450,7 @@ def _fetch(client, body: bytes, headers=None):
 
 
 def test_fetch_refuses_a_deep_402_before_parsing(parsed_texts):
-    body = json.dumps({"x402Version": 1, "accepts": [], "extra": nested(MAX_JSON_DEPTH + 1)})
+    body = json.dumps({"x402Version": 1, "accepts": [], "extra": nested(DEPTH + 1)})
     with pytest.raises(InvalidPayloadError, match="refused before parsing"):
         _fetch(_client(), body.encode())
     assert parsed_texts == []
