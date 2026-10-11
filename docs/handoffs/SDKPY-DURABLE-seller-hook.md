@@ -9,7 +9,15 @@
   on receipt pending/unknown with success:true, and `no_payer_key`; added tests for anchor after
   the one settle, per-request isolation, and a failed stream that keeps the bytes read
   (`_buffered` + `_RecordsRouteFailure`). Announced `Content-Length` over the limit is not read.
-- Falta: CI of the round-2 push.
+- Ronda 3 (REF-SDKPY-71, comment 6110745949): a body the hook cannot read (decorator +
+  `FileResponse`) and `text/event-stream` pass through with `not_capturable`; memoryview /
+  bytearray chunks are copied as bytes; `wants_evidence` skips replays, `HEAD` and a route's
+  own `X-Durable-Evidence`; status 2xx only; no fixed `pointer` (inline sealed blob per sale);
+  one `timeout` (5 s) over capture + anchor (`timeout` notice); `payer_key` / `max_body_bytes` /
+  `timeout` checked when built; default limit 64 KiB (`ANCHOR_MAX_REQUEST_BYTES`); the
+  post-hook never raises; decorator dict returns go through `jsonable_encoder`. Tests for
+  headers + `PAYMENT-RESPONSE` + `BackgroundTask` on whole / stream / too_large, F5, F15.
+- Falta: CI of the round-3 push.
 - Proximo paso: review of the PR; wiring Flask / Django / Lambda is a separate task.
 
 ## Medido contra origin/main 3c8105051
@@ -26,4 +34,6 @@
   there would be simulated, so they do not take it.
 - The payer public key is a resolver in the config (`payer_key(result, x_payment)`);
   the SDK does not derive or read any key here. Without it: `no_payer_key`.
-- Body limit 32 MiB (`DEFAULT_MAX_BODY_BYTES`), as the Rust middleware.
+- Body limit 64 KiB (`DEFAULT_MAX_BODY_BYTES = ANCHOR_MAX_REQUEST_BYTES`, as the TS SDK) since
+  ronda 3: the sealed body goes inline, so a larger one could never be anchored (was 32 MiB,
+  the Rust middleware's, which uploads through its own sink).

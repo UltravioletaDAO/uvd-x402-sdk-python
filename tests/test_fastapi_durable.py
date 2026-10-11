@@ -1007,18 +1007,32 @@ def test_a_slow_anchor_is_cut_at_the_deadline(scripted, mount_name):
 
 @MOUNT_NAMES
 def test_a_slow_stream_is_delivered_whole_with_timeout(scripted, mount_name):
+    """The second chunk only comes once the first one left: a capture that
+    waits past the deadline for it never gets it."""
+    first_out = threading.Event()
+
     async def chunks() -> Any:
         yield BODY[:5]
-        await asyncio.sleep(0.4)
+        for _ in range(500):
+            if first_out.is_set():
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("the capture held the stream past its deadline")
         yield BODY[5:]
 
     async def answer(request: Request) -> Any:
         return StreamingResponse(chunks(), status_code=201)
 
+    def on_body(message: dict) -> None:
+        if message.get("body"):
+            first_out.set()
+
     sink = Sink()
-    response = _get(_mount(mount_name, scripted().url, _durable(sink, timeout=0.1), answer))
-    assert (response.status_code, response.content) == (201, BODY)
-    assert _decode(response.headers["x-durable-evidence"]) == _skip("timeout")
+    got = _call_raw(_mount(mount_name, scripted().url, _durable(sink, timeout=0.1), answer),
+                    on_body)
+    assert (got["status"], got["body"]) == (201, BODY)
+    assert _decode(got["headers"]["x-durable-evidence"]) == _skip("timeout")
     assert sink.requests == []
 
 
