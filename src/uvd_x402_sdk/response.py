@@ -25,6 +25,7 @@ from uvd_x402_sdk.networks import (
     list_networks,
     NetworkType,
     get_supported_network_names,
+    parse_caip2_network,
     to_caip2_network,
 )
 from uvd_x402_sdk.networks.base import to_base_units
@@ -575,6 +576,53 @@ def bazaar_extension(
     if discoverable is not None:
         bloque["discoverable"] = discoverable
     return {"bazaar": bloque}
+
+
+def _is_native_hedera(network: str) -> bool:
+    """``network`` names native Hedera, in any case: ``hedera``,
+    ``HEDERA:MAINNET``, ``Hedera:Testnet``, ``hedera-testnet``..."""
+    config = get_network(network)
+    if config is None:
+        name = parse_caip2_network(network) or parse_caip2_network(network.lower())
+        config = get_network(name) if name else None
+    return config is not None and config.network_type == NetworkType.HEDERA
+
+
+def with_discoverable(accept: dict[str, Any], discoverable: bool = True) -> dict[str, Any]:
+    """``accept`` (one entry of a v2 ``accepts``) with ``extra.discoverable``
+    set to ``discoverable``, as the TypeScript SDK's ``withDiscoverable``.
+
+    The facilitator lists the resource after a settle whose requirements carry
+    ``extra.discoverable == true`` (only a JSON ``true``); ``False`` writes an
+    explicit "do not list". The other ``extra`` entries (EIP-712 ``name`` /
+    ``version``, ...) are kept and override an ``extra.discoverable`` already
+    there; ``accept`` is not modified. For every offer of a 402 and its
+    ``/verify`` / ``/settle`` requirements, set ``X402Config.discoverable``.
+
+    Raises:
+        ValueError: ``discoverable`` is not a ``bool``, or ``accept`` is a native
+            Hedera offer (the facilitator refuses any Hedera ``extra`` but
+            ``feePayer``), network matched case-insensitively.
+        TypeError: ``accept`` is not a dict, its ``network`` is not a string, or
+            its ``extra`` is neither absent nor a dict.
+    """
+    if not isinstance(discoverable, bool):
+        raise ValueError(f"discoverable must be a bool, got {discoverable!r}")
+    if not isinstance(accept, dict):
+        raise TypeError(f"discoverable: an accept must be a dict, got {type(accept).__name__}")
+    network = accept.get("network")
+    if not isinstance(network, str):
+        raise TypeError(f"discoverable: the accept has no network, got {network!r}")
+    if _is_native_hedera(network):
+        raise ValueError(
+            f"discoverable: a native Hedera accept ({network}) carries only feePayer in extra"
+        )
+    extra = accept.get("extra")
+    if extra is not None and not isinstance(extra, dict):
+        raise TypeError(
+            f"discoverable: extra must be a dict to carry discoverable, got {type(extra).__name__}"
+        )
+    return {**accept, "extra": {**(extra or {}), "discoverable": discoverable}}
 
 
 def create_402_response_v2(

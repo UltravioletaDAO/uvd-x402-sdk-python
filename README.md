@@ -2242,6 +2242,21 @@ async with BazaarClient() as bazaar:
     )
 ```
 
+### Listing after settle (`extra.discoverable`)
+
+The Ultravioleta facilitator lists a resource in its Bazaar after a successful settle whose requirements carry `extra.discoverable: true`. That is a different field from `extensions.bazaar` above. `X402Config(discoverable=True)` writes it in every option of `create_402_response_v2` and in the requirements sent to `/verify` and `/settle`, and `discoverable=False` writes an explicit `false`. Leaving it unset (`None`, the default) writes nothing. For a single accept, use `with_discoverable(accept)` (or `with_discoverable(accept, False)`):
+
+```python
+from uvd_x402_sdk import X402Config, with_discoverable
+
+config = X402Config(recipient_evm="0xYourWallet...", discoverable=True)
+accept = with_discoverable({"scheme": "exact", "network": "eip155:8453", "asset": USDC, "amount": "10000",
+                            "payTo": "0xYourWallet...", "extra": {"name": "USD Coin", "version": "2"}})
+# accept["extra"] == {"name": "USD Coin", "version": "2", "discoverable": True}
+```
+
+A Hedera settle is never listed, because the facilitator refuses any Hedera `extra` except `feePayer`. With the config option, native Hedera offers go out as they come. `with_discoverable` raises on a Hedera accept, whatever the case of its network.
+
 ---
 
 ## WalletAdapter
