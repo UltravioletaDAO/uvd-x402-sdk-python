@@ -30,6 +30,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from uvd_x402_sdk.bounded_json import MAX_CHALLENGE_BYTES, MAX_JSON_DEPTH, loads_bounded
 from uvd_x402_sdk.exceptions import StackKeyRedirectError
 from uvd_x402_sdk.stack_key import refuse_redirect, stack_key_request_kwargs
 
@@ -1274,7 +1275,13 @@ def evidence_header(evidence: dict) -> str:
 # ============================================================================
 
 
-def payment_challenge_from(headers, body=None) -> "dict | None":
+def payment_challenge_from(
+    headers,
+    body=None,
+    *,
+    max_bytes: "int | None" = MAX_CHALLENGE_BYTES,
+    max_depth: int = MAX_JSON_DEPTH,
+) -> "dict | None":
     """Read a 402 payment challenge from wherever the seller put it.
 
     x402 allows BOTH transports and sellers pick freely:
@@ -1298,9 +1305,19 @@ def payment_challenge_from(headers, body=None) -> "dict | None":
 
     ``headers`` accepts anything dict-like or with a ``.get()`` (httpx, requests
     and ``http.client`` all work).
+
+    **Bounded.** Both transports are written by the seller. The header (before
+    base64 decoding) and a ``str`` / ``bytes`` body over ``max_bytes``, or
+    whose JSON nests deeper than ``max_depth``, are not read: they are "no
+    terms here" from that transport, the other one is still tried. Each is
+    measured on the text that is then parsed (the base64-decoded header, BOM
+    and UTF-16/32 decoded as ``json.loads`` decodes them), see
+    :func:`uvd_x402_sdk.bounded_json.loads_bounded`. Without this,
+    ``"[" * 100_000`` killed the process (segfault) instead of returning
+    ``None``. ``max_bytes=None`` lifts the size ceiling; a ``dict`` body was
+    parsed by the caller and is taken as given.
     """
     import base64 as _b64
-    import json as _json
 
     def _read(name: str):
         try:
@@ -1310,29 +1327,35 @@ def payment_challenge_from(headers, body=None) -> "dict | None":
         except AttributeError:
             pass
         if isinstance(headers, dict):
-            for k in (name, name.lower(), name.upper(), name.title()):
-                if headers.get(k):
-                    return headers[k]
+            for k, v in headers.items():
+                if isinstance(k, str) and k.strip().lower() == name and v:
+                    return v
         return None
 
+    def _load(data):
+        return loads_bounded(data, max_bytes=max_bytes, max_depth=max_depth)
+
     raw = _read("payment-required") or _read("x-payment-required")
-    if raw:
+    if isinstance(raw, (str, bytes)) and raw:
         raw = raw.strip()
+        pad = (b"=" if isinstance(raw, bytes) else "=") * (-len(raw) % 4)
+        # Over the ceiling the header is not even base64-decoded.
+        fits = max_bytes is None or len(raw) <= max_bytes
         for decode in (
-            lambda: _json.loads(_b64.b64decode(raw + "=" * (-len(raw) % 4))),
-            lambda: _json.loads(raw),
-        ):
+            lambda: _load(_b64.b64decode(raw + pad)),
+            lambda: _load(raw),
+        ) if fits else ():
             try:
                 parsed = decode()
-            except Exception:  # noqa: BLE001 - not this encoding, try the next
+            except Exception:  # noqa: BLE001 - not this encoding, or over a bound
                 continue
             if _is_challenge(parsed):
                 return parsed
 
-    if isinstance(body, (str, bytes)):
+    if isinstance(body, (str, bytes, bytearray)):
         try:
-            body = _json.loads(body)
-        except Exception:  # noqa: BLE001 - not JSON at all
+            body = _load(body)
+        except Exception:  # noqa: BLE001 - not JSON at all, or over a bound
             body = None
     return body if _is_challenge(body) else None
 

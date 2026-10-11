@@ -24,6 +24,7 @@ src/uvd_x402_sdk/
 ├── solana_signing.py        # Solana rater-authored feedback: sign the prepared tx (ed25519)
 ├── erc8128.py               # ERC-8128 Signed HTTP Requests (RFC 9421) — sign_request() + fetch_nonce()
 ├── policy.py                # PurchasePolicy - what this buyer may sign, decided BEFORE signing
+├── bounded_json.py          # loads_bounded() - size and nesting ceiling BEFORE json.loads of a third party's JSON
 ├── bindings.py              # BindingStore - a seller's per-payment key, persisted BEFORE the facilitator is called
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()
 ├── advanced_escrow.py       # PaymentOperator on-chain escrow
@@ -214,6 +215,12 @@ payment_requirements = {
 - `validUntil` comes from `extensions["offer-receipt/1"].info.validUntil`, Unix seconds, JSON number only. Unreadable = absent, NEVER zero. `validUntil == now` still stands
 - **Defaults**: `X402Client` holds `PurchasePolicy.permissive()` when no policy was supplied (nothing changes for existing callers); `PurchasePolicy()` denies an asset with no ceiling. `PolicyRefusedError` subclasses `NoAcceptablePaymentError` for compatibility — `exc.code` is `POLICY_REFUSED`, the contract code is `exc.refusal_code`
 - **What it does NOT bring** (same as Rust): offer-receipt signature verification, input binding, `upto` accounting, settlement reconciliation. Nothing is persisted
+
+### A third party's JSON is bounded before it is parsed (bounded_json.py, v0.98.0)
+- **Why it is not a ValueError**: importing the SDK imports `py_ecc`, which sets the recursion limit to 100000; `json.loads("[" * 100_000)` then runs out of C stack and the process segfaults (measured on 0.97.0: `payment_challenge_from`, header and body, exit 139). Any `json.loads` of bytes a seller wrote goes through `loads_bounded` (`payment_challenge_from`, `X402Client.fetch`)
+- **Measure what is parsed**: size on the input as given (header before base64 decoding), depth on the text `json.loads` will parse (base64-decoded header; bytes decoded with `json.detect_encoding`, so BOM / UTF-16 / UTF-32 count; never the HTTP `charset`). Measuring another decoding can read an escaped quote as a delimiter
+- **No recursion**: `_depth_exceeds` is one regex-driven pass that tracks strings and backslash escapes; stray closers never push the count below zero. `tests/test_bounded_json.py` runs the 100000-bracket cases in a subprocess (a segfault is a return code) and fuzzes the count against `json.loads`
+- **Public API, stable**: `MAX_CHALLENGE_BYTES` (512 KiB), `MAX_JSON_DEPTH` (64), `JSONBoundsError` (`ValueError`, `reason`), `json_depth_within`, `loads_bounded`. New parameters go keyword-only
 
 ### ERC-8128 Signed HTTP Requests (erc8128.py)
 - `sign_request(wallet, method, url, body=None, nonce=None, ...)` - RFC 9421 request signing over any `WalletAdapter` (EIP-191 personal_sign); returns `Signature` / `Signature-Input` / `Content-Digest` headers

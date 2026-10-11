@@ -145,6 +145,13 @@ from uvd_x402_sdk.exceptions import (
     ConfigurationError,
     TimeoutError as X402TimeoutError,
 )
+from uvd_x402_sdk.bounded_json import (
+    MAX_CHALLENGE_BYTES,
+    MAX_JSON_DEPTH,
+    JSONBoundsError,
+    json_depth_within,
+    loads_bounded,
+)
 from uvd_x402_sdk.policy import (
     OFFER_VALIDITY_EXTENSION,
     REFUSAL_CODES,
@@ -603,6 +610,11 @@ __all__ = [
     "UnreadableOffer",
     "ParsedAccepts",
     "parse_accepts",
+    "MAX_CHALLENGE_BYTES",
+    "MAX_JSON_DEPTH",
+    "JSONBoundsError",
+    "json_depth_within",
+    "loads_bounded",
     "offer_valid_until",
     "no_readable_offer",
     "canonical_address",
