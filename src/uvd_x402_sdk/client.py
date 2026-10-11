@@ -24,6 +24,7 @@ from typing import Optional, Tuple, List, Dict, Any, Union, Callable
 
 import httpx
 
+from uvd_x402_sdk.bounded_json import JSONBoundsError, loads_bounded
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.envelope import (
     build_settle_request_for_version,
@@ -3940,8 +3941,14 @@ class X402Client:
         if resp.status_code != 402:
             return resp
 
+        # The seller wrote this body: bounded before parsing, measured on the
+        # bytes json.loads parses (resp.json() parses resp.content too).
         try:
-            body = resp.json()
+            body = loads_bounded(resp.content)
+        except JSONBoundsError as exc:
+            raise InvalidPayloadError(
+                f"402 response body refused before parsing: {exc}"
+            ) from exc
         except Exception as exc:  # noqa: BLE001 - a 402 must carry JSON accepts
             raise InvalidPayloadError(
                 f"402 response body is not JSON: {exc}"
