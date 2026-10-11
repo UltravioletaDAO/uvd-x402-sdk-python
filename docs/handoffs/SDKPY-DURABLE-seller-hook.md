@@ -5,7 +5,11 @@
 - Hecho: `src/uvd_x402_sdk/durable.py` (`DurableConfig`, `durable_evidence`), wired into
   `fastapi_require_payment` and `X402Middleware` (`durable=`, off by default);
   `tests/test_fastapi_durable.py` (offline); CHANGELOG and CLAUDE.md notes.
-- Falta: CI of the PR.
+- Ronda 2 (parity note from the TS twin, uvd-x402-sdk-typescript #52/#53): kept no anchor
+  on receipt pending/unknown with success:true, and `no_payer_key`; added tests for anchor after
+  the one settle, per-request isolation, and a failed stream that keeps the bytes read
+  (`_buffered` + `_RecordsRouteFailure`). Announced `Content-Length` over the limit is not read.
+- Falta: CI of the round-2 push.
 - Proximo paso: review of the PR; wiring Flask / Django / Lambda is a separate task.
 
 ## Medido contra origin/main 3c8105051
