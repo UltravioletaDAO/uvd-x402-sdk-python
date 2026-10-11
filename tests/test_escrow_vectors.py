@@ -603,7 +603,7 @@ MUTATIONS = {
         ALL_KK,
     ),
     "chainId of the domain hard-coded to Base": (
-        '"chainId": int(net["chain_id"]),',
+        '"chainId": _cid,',
         '"chainId": 8453,',
         ALL_SDK - SDK_ON_BASE,
         ALL_KK - {"base"},
@@ -615,7 +615,7 @@ MUTATIONS = {
         ALL_KK - {"base"},
     ),
     "network of the requirements hard-coded to Base": (
-        '"network": f"eip155:{int(net[\'chain_id\'])}",',
+        '"network": f"eip155:{_cid}",',
         '"network": "eip155:8453",',
         ALL_SDK - SDK_ON_BASE,
         ALL_KK - {"base"},

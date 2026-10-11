@@ -28,6 +28,7 @@ import json
 import math
 import time
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -59,12 +60,17 @@ from uvd_x402_sdk.escrow_signing import (
 from uvd_x402_sdk.networks import get_network
 
 NOW = 1_790_000_000
+# Inputs and the verdict both SDKs give them; run here and through the published
+# TypeScript twin (the PR that added it lists the run).
+CASES = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "escrow-preauth-input-cases.json").read_text(
+        encoding="utf-8"
+    )
+)
 HOUR = 3600
 DAY = 24 * HOUR
 # The longest task deadline Execution Market accepts: deadline_hours le=720.
 EM_MAX_DEADLINE_SEC = 720 * HOUR
-# The marketplace's clock may run this far ahead of the signer's.
-CLOCK_SLACK_SEC = HOUR
 
 # Networks of the SDK's registry that have no escrow deployment it knows.
 WITHOUT_ROWS = {"hyperevm": 999, "unichain": 130, "scroll": 534352, "robinhood": 4663}
@@ -259,8 +265,9 @@ def test_the_window_ceilings_are_the_longest_tier_of_the_sdk():
 
 
 def test_the_authorization_ceiling_is_the_longest_deadline_plus_the_review_window():
-    assert ESCROW_MAX_AUTHORIZATION_SEC == EM_MAX_DEADLINE_SEC + REVIEW_WINDOW_SEC + CLOCK_SLACK_SEC
-    assert ESCROW_MAX_AUTHORIZATION_SEC == 3_200_400
+    assert ESCROW_MAX_AUTHORIZATION_SEC == EM_MAX_DEADLINE_SEC + REVIEW_WINDOW_SEC
+    # The TypeScript twin's ESCROW_MAX_AUTHORIZATION_SEC (uvd-x402-sdk 2.104.0).
+    assert ESCROW_MAX_AUTHORIZATION_SEC == 3_196_800
 
 
 def test_the_sdk_and_execution_market_windows_are_within_the_ceilings():
@@ -298,12 +305,25 @@ def test_a_window_above_its_ceiling_is_refused(key):
 
 @pytest.mark.parametrize(
     "value",
-    [-1, True, "3600", None, 3600.5, math.inf, math.nan, [3600], 2**256],
-    ids=["negative", "bool", "string", "none", "fraction", "inf", "nan", "list", "huge"],
+    [-1, True, "-1", " 3600", "3600.0", "+3600", None, 3600.5, math.inf, math.nan, [3600], 2**256],
+    ids=[
+        "negative", "bool", "signed-string", "padded-string", "fraction-string", "plus-string",
+        "none", "fraction", "inf", "nan", "list", "huge",
+    ],
 )
 @pytest.mark.parametrize("key", sorted(ESCROW_MAX_TIER_WINDOWS))
 def test_a_window_that_is_not_a_whole_number_of_seconds_in_range_is_refused(key, value):
     refused("base", table_block(8453), f"tier 'micro' .*'{key}'", **_tier(**{key: value}))
+
+
+@pytest.mark.parametrize("key", sorted(ESCROW_MAX_TIER_WINDOWS))
+def test_a_window_written_in_ascii_digits_is_the_integer(key):
+    """As the twin reads it (``configInteger``): "86400" is 86400."""
+    ceiling = ESCROW_MAX_TIER_WINDOWS[key]
+    wrapper, wallet = build("base", table_block(8453), **_tier(**{key: str(ceiling)}))
+    assert len(wallet.signed) == 1
+    refused("base", table_block(8453), f"'{key}' window of {ceiling + 1} s",
+            **_tier(**{key: str(ceiling + 1)}))
 
 
 @pytest.mark.parametrize("key", sorted(ESCROW_MAX_TIER_WINDOWS))
@@ -340,25 +360,22 @@ def test_the_longest_deadline_execution_market_accepts_is_signed():
     assert len(wallet.signed) == 1
     payment_info = wrapper["payload"]["paymentInfo"]
     assert payment_info["authorizationExpiry"] == NOW + EM_MAX_DEADLINE_SEC + REVIEW_WINDOW_SEC
+    assert payment_info["authorizationExpiry"] == NOW + ESCROW_MAX_AUTHORIZATION_SEC
     assert payment_info["refundExpiry"] == (
         NOW + EM_MAX_DEADLINE_SEC + REVIEW_WINDOW_SEC + REFUND_WINDOW_SEC
     )
 
 
-def test_the_longest_deadline_on_a_marketplace_clock_an_hour_ahead_is_signed():
-    deadline = NOW + EM_MAX_DEADLINE_SEC + CLOCK_SLACK_SEC
-    wrapper, wallet = build("base", table_block(8453), deadline=deadline)
-    assert len(wallet.signed) == 1
-    assert wrapper["payload"]["paymentInfo"]["authorizationExpiry"] == (
-        NOW + ESCROW_MAX_AUTHORIZATION_SEC
-    )
-
-
-@pytest.mark.parametrize("beyond", [1, DAY, 365 * DAY, 2**47])
+@pytest.mark.parametrize(
+    "beyond",
+    [1, 60, HOUR - 1, HOUR, DAY, 365 * DAY, 2**47],
+    ids=["1s", "1min", "59m59s", "1h", "1d", "1y", "2**47"],
+)
 def test_a_deadline_that_puts_authorization_expiry_past_the_ceiling_is_refused(beyond):
+    """From 720 h + 1 s on: the twin refuses the same seconds (no clock slack in either)."""
     refused(
         "base", table_block(8453), "authorizationExpiry .* above this SDK's ceiling",
-        deadline=NOW + EM_MAX_DEADLINE_SEC + CLOCK_SLACK_SEC + beyond,
+        deadline=NOW + EM_MAX_DEADLINE_SEC + beyond,
     )
 
 
@@ -371,8 +388,14 @@ def test_a_deadline_written_as_a_whole_float_is_the_integer():
 
 @pytest.mark.parametrize(
     "deadline",
-    [NOW + DAY + 0.5, Decimal(NOW + DAY), str(NOW + DAY), True, math.inf, math.nan],
-    ids=["fraction", "decimal", "string", "bool", "inf", "nan"],
+    [
+        NOW + DAY + 0.5, Decimal(NOW + DAY), str(NOW + DAY), True, math.inf, math.nan,
+        2**53, -(2**53), float(2**53),
+    ],
+    ids=[
+        "fraction", "decimal", "string", "bool", "inf", "nan",
+        "past-safe-integer", "below-safe-integer", "float-past-safe-integer",
+    ],
 )
 def test_a_deadline_that_is_not_whole_epoch_seconds_is_refused(deadline):
     """A fractional expiry would go on the wire while the nonce hashes it truncated."""
@@ -389,13 +412,113 @@ def test_a_fee_floor_up_to_the_operators_fee_is_signed(min_fee_bps):
     assert wrapper["payload"]["paymentInfo"]["minFeeBps"] == int(min_fee_bps)
 
 
-@pytest.mark.parametrize("min_fee_bps", [OPERATOR_FEE_BPS + 1, 1800, 65_535, -1])
-def test_a_fee_floor_above_the_operators_fee_or_below_zero_is_refused(min_fee_bps):
+@pytest.mark.parametrize("min_fee_bps", [OPERATOR_FEE_BPS + 1, 1800, 65_535])
+def test_a_fee_floor_above_the_operators_fee_is_refused(min_fee_bps):
     """The capture takes 1300 bps; a floor above it makes every capture revert."""
     refused(
         "base", table_block(8453), f"minFeeBps={min_fee_bps} must be between 0 and",
         min_fee_bps=min_fee_bps,
     )
+
+
+@pytest.mark.parametrize("key", ["min_fee_bps", "max_fee_bps"])
+@pytest.mark.parametrize(
+    "value",
+    [-1, 65_536, 0.5, 1800.5, "1800.5", " 1800", "+1800", "1_800", "0x708", True, [1800], {}],
+    ids=[
+        "negative", "above-uint16", "half", "fraction", "fraction-string", "padded", "plus",
+        "underscore", "hex", "bool", "list", "dict",
+    ],
+)
+def test_a_fee_bound_that_is_not_a_uint16_integer_is_refused(key, value):
+    """ValueError, never a TypeError or a truncated fraction (the twin's feeBps)."""
+    refused("base", table_block(8453), f"Invalid {key} ", **{key: value})
+
+
+@pytest.mark.parametrize("key,default", [("min_fee_bps", 0), ("max_fee_bps", 1800)])
+def test_a_null_fee_bound_is_its_default(key, default):
+    wrapper, _ = build("base", table_block(8453), **{key: None})
+    camel = {"min_fee_bps": "minFeeBps", "max_fee_bps": "maxFeeBps"}[key]
+    assert wrapper["payload"]["paymentInfo"][camel] == default
+
+
+# ── chain_id: an integer, as the twin reads it ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "chain_id",
+    [" 8453", "8453 ", "+8453", "8_453", "\uff18\uff14\uff15\uff13", 8453.5, 8453.999, "8453.0",
+     "0x2105", -8453, 0.5, 2**53, math.inf, math.nan, [8453], {"id": 8453}],
+    ids=[
+        "lead-space", "trail-space", "plus", "underscore", "fullwidth", "fraction", "fraction-999",
+        "fraction-string", "hex", "negative", "half", "past-safe-integer", "inf", "nan", "list",
+        "dict",
+    ],
+)
+def test_a_chain_id_that_is_not_an_integer_is_refused(chain_id):
+    """``int()`` took the first nine (8453); the twin refuses them, and so does this."""
+    block = table_block(8453)
+    block["chain_id"] = chain_id
+    refused("base", block, "Invalid chain_id")
+
+
+@pytest.mark.parametrize("chain_id", [8453, "8453", "08453", 8453.0])
+def test_a_chain_id_written_as_digits_or_a_whole_float_is_the_integer(chain_id):
+    block = table_block(8453)
+    block["chain_id"] = chain_id
+    wrapper, wallet = build("base", block)
+    assert wallet.signed[0]["domain"]["chainId"] == 8453
+    assert wrapper["paymentRequirements"]["network"] == "eip155:8453"
+
+
+# ── the case table shared with the TypeScript twin ───────────────────────────
+
+
+def _case_config(case: dict[str, Any]) -> tuple[dict[str, Any], int | None]:
+    """The case's input, in the Python shape (fees and tier_timings in the escrow block)."""
+    base = CASES["base_config"]
+    block = {k: v for k, v in base.items() if k != "collector"}
+    block["token_collector"] = base["collector"]
+    tier_timings = json.loads(json.dumps(CASES["tier_timings"]))
+    escrow: dict[str, Any] = {"tier_timings": tier_timings, "min_fee_bps": 0, "max_fee_bps": 1800}
+    field, value, deadline = case["field"], case["value"], None
+    if field == "chain_id":
+        block["chain_id"] = value
+    elif field in ("min_fee_bps", "max_fee_bps"):
+        escrow[field] = value
+    elif field.startswith("window."):
+        tier_timings["micro"][field[len("window."):]] = value
+    elif field == "tier":
+        tier_timings["micro"] = value
+    elif field == "deadline":
+        deadline = value
+    return {"block": block, "escrow": escrow}, deadline
+
+
+@pytest.mark.parametrize("case", CASES["cases"], ids=[c["id"] for c in CASES["cases"]])
+def test_the_case_table_shared_with_the_typescript_twin(case):
+    built, deadline = _case_config(case)
+    wallet = _Wallet()
+    payment_config = config(CASES["base_network"], built["block"], **built["escrow"])
+    with mock.patch.object(time, "time", return_value=CASES["now"]):
+        try:
+            header = es.build_escrow_pre_auth(
+                payment_config, CASES["base_network"], PAYER, WORKER, "0.25", deadline, wallet
+            )
+        except ValueError:
+            assert case["expect"] == "refuse", case
+            assert wallet.signed == []
+            return
+    assert case["expect"] == "sign", case
+    if "signed" in case:
+        payment_info = json.loads(header)["payload"]["paymentInfo"]
+        signed = {
+            "chain_id": wallet.signed[0]["domain"]["chainId"],
+            "min_fee_bps": payment_info["minFeeBps"],
+            "max_fee_bps": payment_info["maxFeeBps"],
+            "window.pre": payment_info["preApprovalExpiry"] - CASES["now"],
+        }[case["field"]]
+        assert signed == case["signed"]
 
 
 # ── the domain signed is the domain checked ──────────────────────────────────
@@ -411,6 +534,20 @@ def test_a_domain_version_written_as_a_number_is_signed_as_the_checked_string():
     assert typed["domain"]["version"] == "2"
 
 
+def test_the_domain_name_signed_is_the_string_the_check_compared():
+    """Any value whose str() is the verified name is signed as that str, not as itself."""
+
+    class Named:
+        def __str__(self) -> str:
+            return "USD Coin"
+
+    block = table_block(8453)
+    block["usdc_domain_name"] = Named()
+    _, wallet = build("base", block)
+    name = wallet.signed[0]["domain"]["name"]
+    assert type(name) is str and name == "USD Coin"
+
+
 def test_a_domain_version_written_as_a_float_is_another_version():
     block = table_block(8453)
     block["usdc_domain_version"] = 2.0
@@ -423,6 +560,12 @@ def test_a_deadline_in_the_past_signs_from_now():
 
 
 # ── each new guard removed: its refusal becomes a signature ─────────────────
+
+
+def _with_chain_id(chain_id: Any) -> dict[str, Any]:
+    block = table_block(8453)
+    block["chain_id"] = chain_id
+    return block
 
 
 def _rows_case(name: str) -> Any:
@@ -456,7 +599,7 @@ GUARD_MUTATIONS: dict[str, tuple[str, str, Any]] = {
         lambda module: build("base", table_block(8453), module, **_tier(pre=10**6)),
     ),
     "window-type": (
-        "        if isinstance(value, bool) or not isinstance(value, int) or value < 0:\n",
+        "        if value is None or value < 0:\n",
         "        if False:\n",
         lambda module: build("base", table_block(8453), module, **_tier(pre=-1)),
     ),
@@ -465,13 +608,28 @@ GUARD_MUTATIONS: dict[str, tuple[str, str, Any]] = {
         "    if False:\n",
         lambda module: build(
             "base", table_block(8453), module,
-            deadline=NOW + EM_MAX_DEADLINE_SEC + CLOCK_SLACK_SEC + 1,
+            deadline=NOW + EM_MAX_DEADLINE_SEC + 1,
         ),
     ),
     "min-fee-floor": (
         "    if not 0 <= min_fee_bps <= OPERATOR_FEE_BPS:\n",
         "    if False:\n",
         lambda module: build("base", table_block(8453), module, min_fee_bps=OPERATOR_FEE_BPS + 1),
+    ),
+    "ascii-digits-only": (
+        "    if isinstance(value, str) and _ASCII_DIGITS.fullmatch(value):\n",
+        "    if isinstance(value, str):\n",
+        lambda module: build("base", _with_chain_id(" 8453"), module),
+    ),
+    "no-truncated-fraction": (
+        "        return int(value) if value.is_integer() else None\n",
+        "        return int(value)\n",
+        lambda module: build("base", _with_chain_id(8453.5), module),
+    ),
+    "config-tier-not-replaced": (
+        "    if timings is None:\n        timings = ESCROW_TIER_WINDOWS.get(tier)\n",
+        "    if not timings:\n        timings = ESCROW_TIER_WINDOWS.get(tier)\n",
+        lambda module: build("base", table_block(8453), module, tier_timings={"micro": {}}),
     ),
     "deadline-type": (
         "    if deadline is not None and not whole:\n",

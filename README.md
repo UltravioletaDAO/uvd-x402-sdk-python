@@ -2417,9 +2417,11 @@ chains with every row are Base, Ethereum, Polygon, Arbitrum, Celo, Monad,
 Avalanche, Optimism, SKALE Base, Arc and Arc Testnet. The tier windows are
 bounded as well: each of `pre` / `auth` / `refund` is a whole number of seconds
 within `ESCROW_MAX_TIER_WINDOWS` (1 day / 7 days / 30 days), and the signed
-`authorizationExpiry` is at most `ESCROW_MAX_AUTHORIZATION_SEC` (37 days and
-an hour: a 30-day deadline, the 7-day review window and an hour of clock skew)
-after signing; `deadline` is whole epoch seconds. On-chain
+`authorizationExpiry` is at most `ESCROW_MAX_AUTHORIZATION_SEC` (37 days: a
+30-day deadline plus the 7-day review window) after signing; `deadline` is
+whole epoch seconds. `chain_id`, the fee bounds and the windows are read as the
+TypeScript SDK reads them: a number without a fraction or a string of ASCII
+digits, anything else is `ValueError`. On-chain
 limits enforced client-side: bounty <= $100 (AuthCaptureEscrow deposit
 condition), the signed `maxFeeBps` must
 cover the operator's 1300 bps static fee, and `minFeeBps` must not exceed it. `compute_escrow_nonce()` is the

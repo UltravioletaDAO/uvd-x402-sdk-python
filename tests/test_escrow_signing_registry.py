@@ -408,8 +408,8 @@ def test_a_fee_above_the_ceiling_written_as_a_string_is_refused():
 
 @pytest.mark.parametrize(
     "max_fee_bps",
-    [1801.0, 10_000, 65_535, 65_536],
-    ids=["float", "100-percent", "uint16-max", "above-uint16"],
+    [1801.0, 10_000, 65_535],
+    ids=["float", "100-percent", "uint16-max"],
 )
 def test_any_other_spelling_above_the_ceiling_is_refused(max_fee_bps):
     refused("base", table_block(8453), "above this SDK's ceiling", max_fee_bps=max_fee_bps)
@@ -640,7 +640,7 @@ GUARD_MUTATIONS = {
         "        if False:\n",
     ),
     "bool": (
-        '    if isinstance(net["chain_id"], bool):\n',
+        "    if isinstance(value, bool):\n",
         "    if False:\n",
     ),
     "operator": (

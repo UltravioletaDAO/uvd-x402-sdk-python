@@ -117,6 +117,7 @@ Market's and Karmakadabra's).
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import time
 from decimal import Decimal
@@ -284,10 +285,15 @@ ESCROW_MAX_TIER_WINDOWS: dict[str, int] = {
 # payer cannot take the escrow back (a refund by the payer needs it to have
 # passed), and its only other input is the caller's ``deadline``. 30 days, the
 # longest task deadline Execution Market accepts (deadline_hours <= 720), plus
-# REVIEW_WINDOW_SEC, plus one hour for a marketplace clock ahead of the
-# signer's (the deadline is set on the marketplace's clock, ``now`` is read on
-# this one): 37 days and 1 hour. A later authorizationExpiry is refused.
-ESCROW_MAX_AUTHORIZATION_SEC = 720 * 3600 + REVIEW_WINDOW_SEC + 3600
+# REVIEW_WINDOW_SEC: 37 days, the TypeScript twin's value (uvd-x402-sdk 2.104.0).
+# ``now`` is the signer's clock: a deadline exactly 720 h ahead, read by a clock
+# that runs behind, is refused. A later authorizationExpiry is refused.
+ESCROW_MAX_AUTHORIZATION_SEC = 720 * 3600 + REVIEW_WINDOW_SEC
+
+# Number.MAX_SAFE_INTEGER: the TypeScript twin reads every number of the config
+# as a JavaScript number, so an integer beyond it cannot be the same integer there.
+_MAX_SAFE_INTEGER = 2**53 - 1
+_ASCII_DIGITS = re.compile(r"[0-9]+")
 
 _REQUIRED_NETWORK_KEYS = (
     "chain_id",
@@ -420,11 +426,52 @@ def _check_fee_ceiling(network: str, chain_id: int, max_fee_bps: int) -> None:
         )
 
 
+def _config_integer(value: Any) -> int | None:
+    """An integer of the payment config, or ``None`` when ``value`` is not one.
+
+    The TypeScript twin's ``configInteger``: a number with no fraction (an int,
+    or a float such as JSON ``3600.0``, which JavaScript reads as 3600), or a
+    string of ASCII decimal digits only. Never a bool (``True`` is not chain 1),
+    and never what ``int()`` would also take: surrounding spaces, a sign, ``_``
+    separators, non-ASCII digits or a truncated fraction. Each caller checks
+    the range.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return int(value)  # a plain int: what is checked is what is signed
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str) and _ASCII_DIGITS.fullmatch(value):
+        try:
+            return int(value)
+        except ValueError:  # more digits than int() converts
+            return None
+    return None
+
+
+def _fee_bps(value: Any, default: int, key: str) -> int:
+    """A fee bound of the escrow config as the uint16 the paymentInfo signs.
+
+    Absent or ``None``: ``default``. Otherwise a :func:`_config_integer` from 0
+    to 65535, or ``ValueError``.
+    """
+    if value is None:
+        return default
+    bps = _config_integer(value)
+    if bps is None or not 0 <= bps <= 65535:
+        raise ValueError(
+            f"Invalid {key} {value!r} in the escrow config (an integer number of "
+            "bps, 0 to 65535) — refusing to sign."
+        )
+    return bps
+
+
 def _tier_windows(tier: str, timings: Any) -> dict[str, int]:
     """The ``pre`` / ``auth`` / ``refund`` windows of ``tier``, each one checked.
 
-    A whole number of seconds (an int, or a float with no fraction: what a JSON
-    ``3600.0`` parses to) from 0 to its ``ESCROW_MAX_TIER_WINDOWS`` ceiling.
+    A :func:`_config_integer` number of seconds from 0 to its
+    ``ESCROW_MAX_TIER_WINDOWS`` ceiling.
     """
     if not isinstance(timings, dict):
         raise ValueError(
@@ -433,12 +480,11 @@ def _tier_windows(tier: str, timings: Any) -> dict[str, int]:
         )
     windows: dict[str, int] = {}
     for key, ceiling in ESCROW_MAX_TIER_WINDOWS.items():
-        value = timings.get(key)
-        if isinstance(value, float) and value.is_integer():
-            value = int(value)
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        given = timings.get(key)
+        value = _config_integer(given)
+        if value is None or value < 0:
             raise ValueError(
-                f"Escrow tier '{tier}' has {value!r} as its '{key}' window, not a "
+                f"Escrow tier '{tier}' has {given!r} as its '{key}' window, not a "
                 "whole number of seconds from 0 — refusing to sign."
             )
         if value > ceiling:
@@ -559,7 +605,7 @@ def build_escrow_pre_auth(
             release/refund windows are extended to outlast it + a review
             buffer so a human publisher can still approve after the worker
             delivers near the deadline. Whole epoch seconds (an int, or a
-            float with no fraction), at most 30 days and an hour ahead
+            float with no fraction, within 2**53 - 1), at most 30 days ahead
             (``ESCROW_MAX_AUTHORIZATION_SEC``).
         wallet: WalletAdapter that signs the ``ReceiveWithAuthorization``
             EIP-712 typed data.
@@ -582,9 +628,11 @@ def build_escrow_pre_auth(
             and ``VERIFIED_USDC_DOMAINS``, a tier window that is not a whole
             number of seconds within ``ESCROW_MAX_TIER_WINDOWS``, and an
             ``authorizationExpiry`` more than ``ESCROW_MAX_AUTHORIZATION_SEC``
-            after signing (a ``deadline`` more than 30 days and an hour
-            ahead), a ``deadline`` that is not whole epoch seconds, and a
-            ``min_fee_bps`` outside 0..1300 (the operator's static fee).
+            after signing (a ``deadline`` more than 30 days ahead), a
+            ``deadline`` that is not whole epoch seconds, a ``chain_id``,
+            ``min_fee_bps`` or ``max_fee_bps`` that is not an integer (a
+            number with no fraction, or ASCII digits), and a ``min_fee_bps``
+            outside 0..1300 (the operator's static fee).
     """
     _, _, to_checksum_address = _require_eth_libs()
 
@@ -615,12 +663,13 @@ def build_escrow_pre_auth(
         )
 
     # La cadena, contra la red que el llamador nombro: todo lo que sigue (el
-    # dominio, las filas de las tablas) se busca por este chain id.
-    if isinstance(net["chain_id"], bool):
+    # dominio, las filas de las tablas, lo que se firma) se busca por este chain id.
+    _cid = _config_integer(net["chain_id"])
+    if _cid is None or not 0 < _cid <= _MAX_SAFE_INTEGER:
         raise ValueError(
-            f"Invalid chain_id {net['chain_id']!r} for '{network}' — refusing to sign."
+            f"Invalid chain_id {net['chain_id']!r} for '{network}' (a positive "
+            "integer) — refusing to sign."
         )
-    _cid = int(net["chain_id"])
     _check_chain_id(network, _cid)
     # Una fila en cada tabla, o no se firma: sin fila no hay contra que contrastar.
     _check_rows(network, _cid)
@@ -675,8 +724,8 @@ def build_escrow_pre_auth(
             f"(${deposit_limit})."
         )
 
-    min_fee_bps = int(escrow_cfg.get("min_fee_bps", DEFAULT_MIN_FEE_BPS))
-    max_fee_bps = int(escrow_cfg.get("max_fee_bps", DEFAULT_MAX_FEE_BPS))
+    min_fee_bps = _fee_bps(escrow_cfg.get("min_fee_bps"), DEFAULT_MIN_FEE_BPS, "min_fee_bps")
+    max_fee_bps = _fee_bps(escrow_cfg.get("max_fee_bps"), DEFAULT_MAX_FEE_BPS, "max_fee_bps")
     # The capture takes the operator's static fee, and the escrow requires
     # minFeeBps <= fee <= maxFeeBps: a floor above the fee locks funds that the
     # capture can never move.
@@ -693,13 +742,18 @@ def build_escrow_pre_auth(
         )
     _check_fee_ceiling(network, _cid, max_fee_bps)
 
-    timings = (escrow_cfg.get("tier_timings") or {}).get(
-        tier
-    ) or ESCROW_TIER_WINDOWS.get(tier)
+    # The config's tier unless it is absent or null, as the twin reads it
+    # (``cfg.tiers?.[tier] ?? ESCROW_TIER_WINDOWS[tier]``): an empty or falsy
+    # tier is the config's, and refused, never replaced by the SDK's.
+    served = escrow_cfg.get("tier_timings")
+    served = served if isinstance(served, dict) else {}
+    timings = served.get(tier)
+    if timings is None:
+        timings = ESCROW_TIER_WINDOWS.get(tier)
     if timings is None:
         raise ValueError(
             f"Unknown escrow tier '{tier}' — known tiers: "
-            f"{sorted(set(escrow_cfg.get('tier_timings') or {}) | set(ESCROW_TIER_WINDOWS))}"
+            f"{sorted(set(served) | set(ESCROW_TIER_WINDOWS))}"
         )
     timings = _tier_windows(tier, timings)
 
@@ -715,6 +769,7 @@ def build_escrow_pre_auth(
     if isinstance(deadline, float) and deadline.is_integer():
         deadline = int(deadline)
     whole = isinstance(deadline, int) and not isinstance(deadline, bool)
+    whole = whole and abs(deadline) <= _MAX_SAFE_INTEGER  # the twin's isSafeInteger
     if deadline is not None and not whole:
         raise ValueError(
             f"deadline {deadline!r} is not whole epoch seconds — refusing to sign: "
@@ -746,7 +801,7 @@ def build_escrow_pre_auth(
     }
 
     nonce = compute_escrow_nonce(
-        int(net["chain_id"]), net["escrow"], typehash, payment_info
+        _cid, net["escrow"], typehash, payment_info
     )
 
     typed = {
@@ -756,7 +811,7 @@ def build_escrow_pre_auth(
             # signed as 2, another digest.
             "name": _afirmado[0],
             "version": _afirmado[1],
-            "chainId": int(net["chain_id"]),
+            "chainId": _cid,
             "verifyingContract": to_checksum_address(net["usdc"]),
         },
         "types": RECEIVE_WITH_AUTHORIZATION_TYPES,
@@ -805,7 +860,7 @@ def build_escrow_pre_auth(
         inner = _erc7702.eip712_digest(typed["domain"], typed["types"], typed["message"])
         signature = _erc7702.sign_eip3009_for_delegated(
             wallet=wallet, inner_digest=inner,
-            chain_id=int(net["chain_id"]), account=to_checksum_address(payer),
+            chain_id=_cid, account=to_checksum_address(payer),
         )
         signed = {"signature": signature}
     else:
@@ -833,7 +888,7 @@ def build_escrow_pre_auth(
             },
             "paymentRequirements": {
                 "scheme": "escrow",
-                "network": f"eip155:{int(net['chain_id'])}",
+                "network": f"eip155:{_cid}",
             },
         },
         separators=(",", ":"),

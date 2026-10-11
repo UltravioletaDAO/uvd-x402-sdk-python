@@ -30,6 +30,10 @@ must be, statement for statement, the port below, or the script exits 2.
 Never edit the fixture by hand: re-run this against EM's ``origin/main`` and
 review the diff.
 
+``--check`` compares the VALUES: a fixture that records an older EM commit with
+the same values is not drift (EM moves on every push); it exits 0 and says the
+pointer is stale. A re-run without ``--check`` moves it.
+
 Usage: python scripts/em_escrow_networks.py --em <EM checkout> [--ref origin/main] [--check]
 Exit codes: 0 ok, 1 --check found drift, 2 could not read EM.
 """
@@ -199,6 +203,12 @@ def record(em: Path, ref: str) -> dict[str, Any]:
     }
 
 
+def _values(fixture: dict[str, Any]) -> dict[str, Any]:
+    """The fixture without the EM commit it was read at."""
+    source = {k: v for k, v in (fixture.get("source") or {}).items() if k != "commit"}
+    return {**fixture, "source": source}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--em", type=Path, required=True, help="Execution Market checkout")
@@ -212,11 +222,23 @@ def main() -> int:
         return 2
     text = json.dumps(recorded, indent=2) + "\n"
     if args.check:
-        current = OUT_PATH.read_text(encoding="utf-8") if OUT_PATH.exists() else ""
-        if current != text:
-            print(f"{OUT_PATH.relative_to(REPO)} drifted from {args.ref}", file=sys.stderr)
+        fixture = OUT_PATH.relative_to(REPO)
+        try:
+            current = json.loads(OUT_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        pinned = (current.get("source") or {}).get("commit")
+        now = recorded["source"]["commit"]
+        if _values(current) != _values(recorded):
+            print(f"{fixture} drifted from {args.ref} ({now})", file=sys.stderr)
             return 1
-        print(f"{OUT_PATH.relative_to(REPO)} matches {args.ref} ({recorded['source']['commit']})")
+        if pinned != now:
+            print(
+                f"{fixture} matches {args.ref} ({now}) value for value; it records "
+                f"{pinned}: a re-run without --check moves the pointer"
+            )
+            return 0
+        print(f"{fixture} matches {args.ref} ({now})")
         return 0
     OUT_PATH.write_text(text, encoding="utf-8")
     print(f"wrote {OUT_PATH.relative_to(REPO)}: {len(recorded['networks'])} networks")
