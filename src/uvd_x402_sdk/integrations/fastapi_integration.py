@@ -8,6 +8,7 @@ Provides:
 """
 
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -21,6 +22,7 @@ import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
+    from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -467,7 +469,7 @@ async def _buffered(
     ``deadline`` (``time.monotonic()``) while read, or whose stream fails, is
     not kept: the answer streams the chunks already read ahead of the untouched
     rest (a failure is raised again after them), with ``too_large`` /
-    ``timeout`` / ``anchor_failed``. Never a byte less.
+    ``timeout`` / ``not_capturable``. Never a byte less.
     """
     body = getattr(response, "body", None)
     if isinstance(body, (bytes, bytearray, memoryview)):
@@ -549,7 +551,7 @@ async def _buffered(
                         yield seen
                     raise broken
 
-                return again_with(read_then_fail()), b"", "anchor_failed"
+                return again_with(read_then_fail()), b"", "not_capturable"
             data = _as_bytes(item, response.charset)
             chunks.append(data)
             size += len(data)
@@ -592,6 +594,64 @@ class _RecordsRouteFailure:
             raise
 
 
+async def _route_response(
+    request: Request, content: Any, arguments: dict[str, Any]
+) -> Optional[Response]:
+    """The response FastAPI builds for a non-``Response`` return of this route.
+
+    Same steps as FastAPI's request handler: the route's ``response_model``
+    (with its ``response_model_*`` options), ``response_class`` and
+    ``status_code``, then the status and headers set on an injected
+    ``Response`` parameter. ``None`` when the scope carries no ``APIRoute``.
+    """
+    from fastapi.datastructures import DefaultPlaceholder
+    from fastapi.routing import APIRoute, serialize_response
+    from fastapi.utils import is_body_allowed_for_status_code
+
+    route = request.scope.get("route")
+    if not isinstance(route, APIRoute):
+        return None
+    field = getattr(route, "secure_cloned_response_field", None) or route.response_field
+    response_class: Any = route.response_class
+    default_class = isinstance(response_class, DefaultPlaceholder)
+    if default_class:
+        response_class = response_class.value
+    options: dict[str, Any] = {
+        "field": field,
+        "response_content": content,
+        "include": route.response_model_include,
+        "exclude": route.response_model_exclude,
+        "by_alias": route.response_model_by_alias,
+        "exclude_unset": route.response_model_exclude_unset,
+        "exclude_defaults": route.response_model_exclude_defaults,
+        "exclude_none": route.response_model_exclude_none,
+        "is_coroutine": True,
+    }
+    dump_json = (
+        field is not None
+        and default_class
+        and "dump_json" in inspect.signature(serialize_response).parameters
+    )
+    if dump_json:
+        options["dump_json"] = True
+    serialized = await serialize_response(**options)
+    injected = next((v for v in arguments.values() if isinstance(v, Response)), None)
+    status = route.status_code
+    if injected is not None and injected.status_code:
+        status = injected.status_code
+    extra: dict[str, Any] = {} if not status else {"status_code": status}
+    built: Response
+    if dump_json:
+        built = Response(content=serialized, media_type="application/json", **extra)
+    else:
+        built = response_class(serialized, **extra)
+    if not is_body_allowed_for_status_code(built.status_code):
+        built.body = b""
+    if injected is not None:
+        built.headers.raw.extend(injected.headers.raw)
+    return built
+
+
 async def _with_durable_evidence(
     durable: Optional[DurableConfig],
     client: X402Client,
@@ -617,7 +677,7 @@ async def _with_durable_evidence(
         deadline = time.monotonic() + durable.timeout
         current, body, skipped = await _buffered(response, durable.max_body_bytes, deadline)
         if skipped is None and scope is not None and scope.get(_ROUTE_FAILED):
-            skipped = "anchor_failed"
+            skipped = "not_capturable"
         try:
             payee: Optional[str] = client.config.get_recipient(result.network)
         except Exception:  # noqa: BLE001 - durable.payee or an empty payee
@@ -709,15 +769,17 @@ def fastapi_require_payment(
                 # Store result in request state
                 request.state.payment_result = result
                 response = await func(request, *args, **kwargs)
-                if getattr(result, "receipt", None):
-                    headers = payment_response_headers(result)
-                    if isinstance(response, Response):
-                        response.headers.update(headers)
-                    else:
-                        response = JSONResponse(response, headers=headers)
-                # A return that is not a Response goes to FastAPI's own
-                # serialization (status_code, response_model, response_class),
-                # as without durable, and is not anchored.
+                receipt = getattr(result, "receipt", None)
+                if not isinstance(response, Response) and (receipt or durable is not None):
+                    # The response FastAPI would build for this route, so the
+                    # receipt headers and the evidence go on those bytes.
+                    built = await _route_response(request, response, kwargs)
+                    if built is None and receipt:
+                        built = JSONResponse(jsonable_encoder(response))
+                    if built is not None:
+                        response = built
+                if receipt and isinstance(response, Response):
+                    response.headers.update(payment_response_headers(result))
                 if durable is not None and isinstance(response, Response):
                     response = await _with_durable_evidence(
                         durable, client, result, payment_header, response, request.method

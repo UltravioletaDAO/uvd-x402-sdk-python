@@ -12,8 +12,10 @@ is read from anywhere.
 
 import asyncio
 import base64
+import contextlib
 import contextvars
 import json
+import socket
 import threading
 import time
 from datetime import datetime, timezone
@@ -29,7 +31,7 @@ pytest.importorskip("cryptography")
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
-from fastapi import FastAPI, Request  # noqa: E402
+from fastapi import FastAPI, Request, Response  # noqa: E402
 from fastapi.responses import (  # noqa: E402
     FileResponse,
     JSONResponse,
@@ -199,11 +201,6 @@ def test_a_sale_with_durable_anchors_once_and_emits_the_header(scripted, mount, 
     assert response.status_code == _expected_status(kind)
     assert json.loads(response.content) == json.loads(BODY)
     assert rail.calls == ["/verify", "/settle"]
-    if kind == "dict" and mount is decorator_app:
-        # Not a Response: FastAPI serializes it, as without durable, unanchored.
-        assert "x-durable-evidence" not in response.headers
-        assert sink.requests == []
-        return
     assert len(sink.requests) == 1
     url, sent = sink.requests[0]
     assert url == f"{FACILITATOR}/dx402/anchor"
@@ -590,7 +587,7 @@ def test_a_stream_that_fails_keeps_the_bytes_already_read(scripted, mount_name):
         _failing_app(mount_name, scripted().url, _durable(sink))
     )
     assert (on_status, on_bytes) == (off_status, off_bytes) == (201, BODY[:9])
-    assert _decode(headers["x-durable-evidence"]) == {"v": 1, "skipped": "anchor_failed"}
+    assert _decode(headers["x-durable-evidence"]) == {"v": 1, "skipped": "not_capturable"}
     assert sink.requests == []
 
 
@@ -1097,8 +1094,8 @@ def test_a_decorated_route_returning_a_model_with_dates_is_delivered(scripted):
                            answer))
     assert (response.status_code, response.content) == (off.status_code, off.content)
     assert response.json()["at"].startswith("2026-10-11T00:00:00")
-    assert "x-durable-evidence" not in response.headers
-    assert recorder.bodies == []
+    assert _decode(response.headers["x-durable-evidence"]) == ANCHORED
+    assert recorder.bodies == [response.content]
 
 
 # -- VER-SDKPY-71 ------------------------------------------------------------
@@ -1146,13 +1143,19 @@ _DECLARED = {
 }
 
 
+@pytest.mark.parametrize("receipt", [False, True], ids=["no-receipt", "receipt"])
 @pytest.mark.parametrize("declared", sorted(_DECLARED))
-def test_a_decorated_return_that_is_not_a_response_is_served_as_without_durable(
-    scripted, declared
+def test_a_decorated_return_that_is_not_a_response_is_served_as_the_route_declares(
+    scripted, declared, receipt
 ):
+    """Durable on or off, and with a receipt or not, the bytes are FastAPI's
+    for this route (declared status, response_model, response_class), and the
+    anchor seals those bytes."""
+
     def build(durable: Optional[DurableConfig]) -> FastAPI:
         app = FastAPI()
-        config = X402Config(facilitator_url=scripted().url, recipient_evm=RECIPIENT)
+        rail = _confirmed_rail(scripted) if receipt else scripted()
+        config = X402Config(facilitator_url=rail.url, recipient_evm=RECIPIENT)
 
         @app.get("/paid", **_DECLARED[declared])
         @fastapi_require_payment(amount_usd=PRICE, config=config, durable=durable)
@@ -1163,16 +1166,98 @@ def test_a_decorated_return_that_is_not_a_response_is_served_as_without_durable(
 
         return app
 
+    plain = _get(build(None))
     recorder = Recorder()
-    off = _get(build(None))
     on = _get(build(_durable(Sink(), anchor=recorder)))
-    assert on.status_code == off.status_code == (201 if declared == "status_code" else 200)
-    assert on.headers["content-type"] == off.headers["content-type"]
-    assert on.content == off.content
-    if declared == "response_model":
-        assert "hidden" not in on.json()
-    assert "x-durable-evidence" not in on.headers
-    assert recorder.bodies == []
+    for response in (plain, on):
+        assert response.status_code == (201 if declared == "status_code" else 200)
+        if declared == "response_class":
+            assert response.headers["content-type"].startswith("text/plain")
+            assert response.content == b"plain text answer"
+        else:
+            assert response.headers["content-type"] == "application/json"
+        if declared == "response_model":
+            assert response.json() == {"answer": "the paid content"}
+        assert ("payment-response" in response.headers) is receipt
+    assert on.content == plain.content
+    assert on.headers["content-type"] == plain.headers["content-type"]
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+    assert recorder.bodies == [on.content]
+
+
+@pytest.mark.parametrize("receipt", [False, True], ids=["no-receipt", "receipt"])
+def test_an_injected_response_parameter_keeps_its_status_and_headers(scripted, receipt):
+    def build(durable: Optional[DurableConfig]) -> FastAPI:
+        app = FastAPI()
+        rail = _confirmed_rail(scripted) if receipt else scripted()
+        config = X402Config(facilitator_url=rail.url, recipient_evm=RECIPIENT)
+
+        @app.get("/paid")
+        @fastapi_require_payment(amount_usd=PRICE, config=config, durable=durable)
+        async def paid(request: Request, response: Response) -> Any:
+            response.status_code = 202
+            response.headers["X-Route"] = "kept"
+            return {"answer": "the paid content"}
+
+        return app
+
+    plain = _get(build(None))
+    on = _get(build(_durable(Sink(), anchor=Recorder())))
+    for response in (plain, on):
+        assert response.status_code == 202
+        assert response.headers["x-route"] == "kept"
+        assert response.json() == {"answer": "the paid content"}
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+
+
+@contextlib.contextmanager
+def _served(app: FastAPI) -> Any:
+    """``app`` behind a real uvicorn on 127.0.0.1 (a free port), in a thread."""
+    import uvicorn
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="off"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    try:
+        for _ in range(1000):
+            if server.started:
+                break
+            time.sleep(0.01)
+        assert server.started
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        thread.join(10)
+        sock.close()
+
+
+@MOUNT_NAMES
+def test_under_uvicorn_a_stream_holding_its_task_is_delivered_and_anchored(
+    scripted, mount_name
+):
+    async def chunks() -> Any:
+        for part in (BODY[:5], BODY[5:12], BODY[12:]):
+            token = _TRACE.set(part)
+            with anyio.move_on_after(30):
+                yield part
+            _TRACE.reset(token)
+
+    async def answer(request: Request) -> Any:
+        return StreamingResponse(chunks(), status_code=201)
+
+    def fetch(app: FastAPI) -> httpx.Response:
+        with _served(app) as base:
+            with httpx.Client(base_url=base, trust_env=False, timeout=10) as client:
+                return client.get("/paid", headers={"X-PAYMENT": x_payment()})
+
+    recorder = Recorder()
+    off = fetch(_mount(mount_name, scripted().url, None, answer))
+    on = fetch(_mount(mount_name, scripted().url, _durable(Sink(), anchor=recorder), answer))
+    assert (on.status_code, on.content) == (off.status_code, off.content) == (201, BODY)
+    assert recorder.bodies == [BODY]
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
 
 
 @pytest.mark.parametrize("key", ["a-str-key", 7, ["k"]], ids=["str", "int", "list"])
