@@ -573,13 +573,13 @@ def _swap(block: str, a: str, b: str) -> str:
 MUTATIONS = {
     # The 'USD Coin' fallback: right on the chains that call USDC that, wrong elsewhere.
     "domain name hard-coded": (
-        '"name": net["usdc_domain_name"],',
+        '"name": _afirmado[0],',
         '"name": "USD Coin",',
         SDK_NOT_USD_COIN,
         KK_NOT_USD_COIN,
     ),
     "domain version hard-coded": (
-        '"version": net["usdc_domain_version"],',
+        '"version": _afirmado[1],',
         '"version": "1",',
         ALL_SDK,
         ALL_KK,

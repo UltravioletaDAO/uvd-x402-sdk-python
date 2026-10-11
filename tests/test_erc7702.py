@@ -205,27 +205,29 @@ def test_un_dominio_que_contradice_la_cadena_NO_se_firma():
     assert w.llamadas == [], "no se puede haber pedido ninguna firma"
 
 
-def test_una_cadena_DESCONOCIDA_avisa_pero_no_bloquea(caplog):
-    """Bloquear rompería a cualquiera que agregue una red antes de que el SDK la
-    conozca; avisar deja la decisión a la vista sin frenar el trabajo."""
-    import logging
+def test_una_cadena_DESCONOCIDA_NO_se_firma():
+    """Hasta 0.96.0 se firmaba con un aviso en el log, para no frenar a quien
+    agregara una red antes que el SDK. Desde 0.97.0 se rehusa: sin fila en las
+    tablas del SDK no hay contra que contrastar el dominio, el escrow, el
+    operador ni el techo de fee, y lo que no se puede contrastar no se firma."""
     from uvd_x402_sdk.escrow_signing import build_escrow_pre_auth
-    cfg = _config()
-    # Una red que el SDK no conoce: "base" con otra cadena ya no es una cadena
-    # desconocida, es una que contradice el registro de redes, y se rehusa.
-    red = cfg["escrow"]["networks"].pop("base")
-    cfg["escrow"]["networks"]["red-nueva"] = red
-    red["chain_id"] = 999999                                          # no está en la tabla
-    red["usdc_domain_name"] = "Lo que sea"
-    caplog.set_level(logging.WARNING)
-    w = _Wallet()
-    build_escrow_pre_auth(
-        payment_config=cfg, network="red-nueva",
-        payer="0x5555555555555555555555555555555555555555",
-        receiver="0x6666666666666666666666666666666666666666",
-        amount_usd=0.05, deadline=None, wallet=w)
-    assert w.llamadas, "una cadena desconocida sí se firma"
-    assert any("UNVERIFIED chain" in r.getMessage() for r in caplog.records)
+    for nombre, motivo in (
+        ("red-nueva", "not a network this SDK registers"),   # nombre que el registro no conoce
+        ("eip155:999999", "no escrow row for chain 999999"),  # la cadena por su id, sin filas
+    ):
+        cfg = _config()
+        red = cfg["escrow"]["networks"].pop("base")
+        cfg["escrow"]["networks"][nombre] = red
+        red["chain_id"] = 999999                                      # no está en la tabla
+        red["usdc_domain_name"] = "Lo que sea"
+        w = _Wallet()
+        with pytest.raises(ValueError, match=motivo):
+            build_escrow_pre_auth(
+                payment_config=cfg, network=nombre,
+                payer="0x5555555555555555555555555555555555555555",
+                receiver="0x6666666666666666666666666666666666666666",
+                amount_usd=0.05, deadline=None, wallet=w)
+        assert w.llamadas == [], "no se puede haber pedido ninguna firma"
 
 
 # ── El dialecto depende del TARGET, no de "delegado sí/no" (fix 2026-08-25) ──

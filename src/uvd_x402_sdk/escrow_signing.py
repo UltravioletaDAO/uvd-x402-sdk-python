@@ -41,13 +41,20 @@ named, the USDC domain against ``VERIFIED_USDC_DOMAINS``, the escrow,
 token collector, USDC and operator against
 :mod:`uvd_x402_sdk.escrow_contracts` (``ESCROW_CONTRACTS``,
 ``ESCROW_OPERATORS``), and ``maxFeeBps`` against that chain's ceiling
-(``ESCROW_MAX_FEE_BPS``). A contradiction raises ``ValueError``; a chain the
-tables have no row for is signed with a logged warning.
+(``ESCROW_MAX_FEE_BPS``). A contradiction raises ``ValueError``. So does a
+network name this SDK does not register, and a chain without a row in every
+one of those four tables (since 0.97.0; until 0.96.0 both were signed with a
+logged warning): what cannot be checked is not signed.
+
+The windows of the tier come from the payment config too: each one is a
+whole number of seconds within ``ESCROW_MAX_TIER_WINDOWS``, and the signed
+``authorizationExpiry`` is at most ``ESCROW_MAX_AUTHORIZATION_SEC`` after
+signing.
 
 On-chain limits enforced client-side:
   - bounty <= $100 (AuthCaptureEscrow deposit condition)
   - signed ``maxFeeBps`` must cover the operator's 1300 bps static fee
-    (canonical 13% flat)
+    (canonical 13% flat), and ``minFeeBps`` must not exceed it
 
 SDK policy, not an on-chain limit: the signed ``maxFeeBps`` stays within the
 chain's ceiling (``escrow_contracts.ESCROW_MAX_FEE_BPS``, 1800 bps).
@@ -99,7 +106,8 @@ importer turns a test red here first.
   ``ESCROW_DEPOSIT_LIMIT_USD``, ``OPERATOR_FEE_BPS``,
   ``DEFAULT_MIN_FEE_BPS`` / ``DEFAULT_MAX_FEE_BPS``, ``USDC_DECIMALS``.
 * The windows: ``ESCROW_TIER_WINDOWS``, ``REVIEW_WINDOW_SEC``,
-  ``REFUND_WINDOW_SEC``.
+  ``REFUND_WINDOW_SEC``, and their ceilings ``ESCROW_MAX_TIER_WINDOWS``,
+  ``ESCROW_MAX_AUTHORIZATION_SEC``.
 
 What each byte of the signature is, per chain, is pinned by the golden
 vectors in ``tests/test_escrow_vectors.py`` (this SDK's own, Execution
@@ -117,13 +125,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from uvd_x402_sdk.wallet import WalletAdapter
 
-import logging
-
 from . import erc7702 as _erc7702
 from .escrow_contracts import ESCROW_CONTRACTS, ESCROW_MAX_FEE_BPS, ESCROW_OPERATORS
 from .networks.base import get_network, to_base_units
-
-_log = logging.getLogger("uvd_x402_sdk.escrow_signing")
 
 __all__ = [
     # signing
@@ -156,6 +160,8 @@ __all__ = [
     "ESCROW_TIER_WINDOWS",
     "REVIEW_WINDOW_SEC",
     "REFUND_WINDOW_SEC",
+    "ESCROW_MAX_TIER_WINDOWS",
+    "ESCROW_MAX_AUTHORIZATION_SEC",
 ]
 
 # ── Dominios EIP-712 de USDC VERIFICADOS ON-CHAIN ────────────────────────────
@@ -169,11 +175,12 @@ __all__ = [
 # cadena), no copiando documentacion. Contribuida por KarmaCadabra, que corre el flujo
 # en 9 cadenas y la construyo asi.
 #
-# Politica deliberada:
+# Politica:
 #   - cadena EN la tabla y el servidor no coincide  -> se REHUSA firmar
-#   - cadena que no esta en la tabla                -> se firma, con AVISO fuerte
-# Bloquear una cadena desconocida rompería a cualquiera que agregue una red antes de
-# que este SDK la conozca; avisar deja la decision a la vista sin frenar el trabajo.
+#   - cadena que no esta en la tabla                -> se REHUSA firmar (desde 0.97.0)
+# Hasta 0.96.0 una cadena sin fila se firmaba con un aviso en el log, para no frenar
+# a quien agregara una red antes que el SDK. Desde 0.97.0 una red nueva se firma
+# cuando una version del SDK trae sus filas (esta tabla y las de escrow_contracts).
 VERIFIED_USDC_DOMAINS: dict[int, tuple[str, str]] = {
     8453: ("USD Coin", "2"),                          # base
     1: ("USD Coin", "2"),                             # ethereum
@@ -259,6 +266,29 @@ ESCROW_TIER_WINDOWS: dict[str, dict[str, int]] = {
 REVIEW_WINDOW_SEC = 7 * 24 * 3600  # >=7 days to approve after the deadline
 REFUND_WINDOW_SEC = 7 * 24 * 3600  # +7 days to refund after that
 
+# The longest window of each kind a payment config may ask for, in seconds: the
+# longest this SDK defines itself (advanced_escrow.TIER_TIMINGS, the enterprise
+# tier; equality pinned in tests/test_escrow_signing_rows.py). ``pre`` is the
+# authorization's validBefore, so a signed lock cannot be submitted more than a
+# day later. ``auth`` equals REVIEW_WINDOW_SEC, the floor applied below: the
+# config cannot move authorizationExpiry past max(now, deadline) +
+# REVIEW_WINDOW_SEC. Execution Market serves pre 3600 / 7200, auth 604800 and
+# refund 1209600. A window above its ceiling is refused, never clamped.
+ESCROW_MAX_TIER_WINDOWS: dict[str, int] = {
+    "pre": 86400,  # 1 day
+    "auth": 604800,  # 7 days
+    "refund": 2592000,  # 30 days
+}
+
+# The latest authorizationExpiry signed, in seconds after signing. Until then the
+# payer cannot take the escrow back (a refund by the payer needs it to have
+# passed), and its only other input is the caller's ``deadline``. 30 days, the
+# longest task deadline Execution Market accepts (deadline_hours <= 720), plus
+# REVIEW_WINDOW_SEC, plus one hour for a marketplace clock ahead of the
+# signer's (the deadline is set on the marketplace's clock, ``now`` is read on
+# this one): 37 days and 1 hour. A later authorizationExpiry is refused.
+ESCROW_MAX_AUTHORIZATION_SEC = 720 * 3600 + REVIEW_WINDOW_SEC + 3600
+
 _REQUIRED_NETWORK_KEYS = (
     "chain_id",
     "operator",
@@ -279,11 +309,21 @@ REQUIRED_NETWORK_KEYS = _REQUIRED_NETWORK_KEYS
 #   usdc            -> domain.verifyingContract y paymentInfo.token
 #   operator        -> paymentInfo.operator y paymentInfo.feeReceiver
 # Misma politica que VERIFIED_USDC_DOMAINS, con las tablas de escrow_contracts:
-#   - red que el SDK conoce y el servidor dice otra cadena     -> se REHUSA
+#   - red que el registro del SDK no conoce                     -> se REHUSA
+#   - red que el SDK conoce y el servidor dice otra cadena      -> se REHUSA
+#   - cadena sin fila en alguna de las cuatro tablas            -> se REHUSA
 #   - cadena con fila y una direccion distinta de la de la fila -> se REHUSA
-#   - cadena sin fila                                           -> se firma, con AVISO
 # Las direcciones se comparan en la forma en que se firman (checksum).
 _REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector", "usdc")
+
+# Las tablas en las que la cadena tiene que tener fila para que se firme: lo que
+# cada una contrasta deja de estar contrastado si falta la fila.
+_REQUIRED_ROWS = (
+    "ESCROW_CONTRACTS",  # escrow, token collector, USDC
+    "ESCROW_OPERATORS",  # operator (= feeReceiver)
+    "ESCROW_MAX_FEE_BPS",  # techo de maxFeeBps
+    "VERIFIED_USDC_DOMAINS",  # nombre / version del dominio EIP-712 de USDC
+)
 
 
 def _registered_chain_id(network: str) -> int | None:
@@ -293,7 +333,8 @@ def _registered_chain_id(network: str) -> int | None:
     raises); any other name goes through the network registry (aliases
     included: ``skale`` is ``skale-base``). A non-EVM network is registered
     with chain id 0, which no config can match (0 is a missing ``chain_id``),
-    so it is refused like any other mismatch.
+    so it is refused like any other mismatch. ``None`` (a name the registry
+    does not know) is refused by :func:`_check_chain_id`.
     """
     name = str(network).strip().lower()
     if name.startswith("eip155:"):
@@ -310,6 +351,12 @@ def _registered_chain_id(network: str) -> int | None:
 
 def _check_chain_id(network: str, chain_id: int) -> None:
     registered = _registered_chain_id(network)
+    if registered is None:
+        raise ValueError(
+            f"'{network}' is not a network this SDK registers (a name of its network "
+            f"registry, or eip155:<decimal id>): the payment config's chain {chain_id} "
+            "cannot be checked against it — refusing to sign."
+        )
     if registered is not None and registered != chain_id:
         raise ValueError(
             f"Chain id mismatch for '{network}': the payment config asserts chain "
@@ -318,16 +365,30 @@ def _check_chain_id(network: str, chain_id: int) -> None:
         )
 
 
+def _check_rows(network: str, chain_id: int) -> None:
+    tables: dict[str, Any] = {
+        "ESCROW_CONTRACTS": ESCROW_CONTRACTS,
+        "ESCROW_OPERATORS": ESCROW_OPERATORS,
+        "ESCROW_MAX_FEE_BPS": ESCROW_MAX_FEE_BPS,
+        "VERIFIED_USDC_DOMAINS": VERIFIED_USDC_DOMAINS,
+    }
+    absent = [name for name in _REQUIRED_ROWS if chain_id not in tables[name]]
+    if absent:
+        raise ValueError(
+            f"This SDK has no escrow row for chain {chain_id} ('{network}') in "
+            f"{', '.join(absent)}: what the payment config asserts there cannot be "
+            "checked — refusing to sign. A chain is signed once a release of this "
+            "SDK carries its rows."
+        )
+
+
 def _check_registered_addresses(
     network: str, chain_id: int, net: dict[str, Any], to_checksum_address: Any
 ) -> None:
+    # A chain without a row never gets here (_check_rows): the ``is not None``
+    # keeps each check independent of that guard.
     contracts = ESCROW_CONTRACTS.get(chain_id)
-    if contracts is None:
-        _log.warning(
-            "signing escrow on chain %s (network %r), which has no row in "
-            "ESCROW_CONTRACTS: escrow, token collector and USDC are the payment "
-            "config's, unchecked", chain_id, network)
-    else:
+    if contracts is not None:
         for key in _REGISTERED_ADDRESS_KEYS:
             asserted = to_checksum_address(net[key])
             expected = to_checksum_address(contracts[key])
@@ -338,12 +399,9 @@ def _check_registered_addresses(
                     f"escrow registry has {expected} — refusing to sign."
                 )
     operator = ESCROW_OPERATORS.get(chain_id)
-    if operator is None:
-        _log.warning(
-            "signing escrow on chain %s (network %r) with the payment config's "
-            "operator %r: this SDK has no operator for that chain in "
-            "ESCROW_OPERATORS", chain_id, network, net["operator"])
-    elif to_checksum_address(net["operator"]) != to_checksum_address(operator):
+    if operator is not None and (
+        to_checksum_address(net["operator"]) != to_checksum_address(operator)
+    ):
         raise ValueError(
             f"Escrow operator mismatch for '{network}' (chain {chain_id}): the "
             f"payment config asserts operator {to_checksum_address(net['operator'])} "
@@ -354,17 +412,42 @@ def _check_registered_addresses(
 
 def _check_fee_ceiling(network: str, chain_id: int, max_fee_bps: int) -> None:
     ceiling = ESCROW_MAX_FEE_BPS.get(chain_id)
-    if ceiling is None:
-        _log.warning(
-            "signing escrow on chain %s (network %r) with maxFeeBps=%s: this SDK "
-            "has no fee ceiling for that chain in ESCROW_MAX_FEE_BPS",
-            chain_id, network, max_fee_bps)
-    elif max_fee_bps > ceiling:
+    if ceiling is not None and max_fee_bps > ceiling:
         raise ValueError(
             f"maxFeeBps={max_fee_bps} for '{network}' (chain {chain_id}) is above "
             f"this SDK's ceiling for that chain ({ceiling} bps, ESCROW_MAX_FEE_BPS) — "
             "refusing to sign."
         )
+
+
+def _tier_windows(tier: str, timings: Any) -> dict[str, int]:
+    """The ``pre`` / ``auth`` / ``refund`` windows of ``tier``, each one checked.
+
+    A whole number of seconds (an int, or a float with no fraction: what a JSON
+    ``3600.0`` parses to) from 0 to its ``ESCROW_MAX_TIER_WINDOWS`` ceiling.
+    """
+    if not isinstance(timings, dict):
+        raise ValueError(
+            f"Escrow tier '{tier}' is {timings!r}, not an object of windows — "
+            "refusing to sign."
+        )
+    windows: dict[str, int] = {}
+    for key, ceiling in ESCROW_MAX_TIER_WINDOWS.items():
+        value = timings.get(key)
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(
+                f"Escrow tier '{tier}' has {value!r} as its '{key}' window, not a "
+                "whole number of seconds from 0 — refusing to sign."
+            )
+        if value > ceiling:
+            raise ValueError(
+                f"Escrow tier '{tier}' asks a '{key}' window of {value} s, above this "
+                f"SDK's ceiling ({ceiling} s, ESCROW_MAX_TIER_WINDOWS) — refusing to sign."
+            )
+        windows[key] = value
+    return windows
 
 
 def _require_eth_libs() -> tuple[Any, Any, Any]:
@@ -464,7 +547,8 @@ def build_escrow_pre_auth(
             as a dict (must contain the ``escrow`` block with ``networks``,
             ``payment_info_typehash``, fee bounds and tier timings). A
             Pydantic model exposing ``model_dump()`` is also accepted.
-        network: Escrow-capable payment network key (e.g. ``"base"``).
+        network: Escrow-capable payment network key (e.g. ``"base"``), a
+            name of this SDK's network registry or ``eip155:<chain id>``.
             Unknown network -> ``ValueError`` (never a silent domain
             fallback).
         payer: Publisher wallet (must match the signing wallet's address).
@@ -474,7 +558,9 @@ def build_escrow_pre_auth(
         deadline: Task deadline (epoch seconds) or ``None``. The
             release/refund windows are extended to outlast it + a review
             buffer so a human publisher can still approve after the worker
-            delivers near the deadline.
+            delivers near the deadline. Whole epoch seconds (an int, or a
+            float with no fraction), at most 30 days and an hour ahead
+            (``ESCROW_MAX_AUTHORIZATION_SEC``).
         wallet: WalletAdapter that signs the ``ReceiveWithAuthorization``
             EIP-712 typed data.
         tier: Expiry tier (``"micro"`` or ``"standard"``); windows come from
@@ -490,8 +576,15 @@ def build_escrow_pre_auth(
             ``VERIFIED_USDC_DOMAINS``' for that chain, an ``escrow``,
             ``token_collector``, ``usdc`` or ``operator`` other than the
             chain's row in ``escrow_contracts``, or a ``max_fee_bps`` above
-            the chain's ``ESCROW_MAX_FEE_BPS`` (a chain without a row is
-            signed with a logged warning).
+            the chain's ``ESCROW_MAX_FEE_BPS``. Also a ``network`` this SDK
+            does not register, a chain without a row in each of
+            ``ESCROW_CONTRACTS``, ``ESCROW_OPERATORS``, ``ESCROW_MAX_FEE_BPS``
+            and ``VERIFIED_USDC_DOMAINS``, a tier window that is not a whole
+            number of seconds within ``ESCROW_MAX_TIER_WINDOWS``, and an
+            ``authorizationExpiry`` more than ``ESCROW_MAX_AUTHORIZATION_SEC``
+            after signing (a ``deadline`` more than 30 days and an hour
+            ahead), a ``deadline`` that is not whole epoch seconds, and a
+            ``min_fee_bps`` outside 0..1300 (the operator's static fee).
     """
     _, _, to_checksum_address = _require_eth_libs()
 
@@ -529,6 +622,8 @@ def build_escrow_pre_auth(
         )
     _cid = int(net["chain_id"])
     _check_chain_id(network, _cid)
+    # Una fila en cada tabla, o no se firma: sin fila no hay contra que contrastar.
+    _check_rows(network, _cid)
 
     # El dominio con el que se va a firmar, contra la verdad leida de la cadena.
     _verificado = VERIFIED_USDC_DOMAINS.get(_cid)
@@ -540,11 +635,6 @@ def build_escrow_pre_auth(
             f"is {_verificado} — refusing to sign. A wrong domain produces an "
             f"authorization that either never settles or authorizes something else."
         )
-    if _verificado is None:
-        _log.warning(
-            "signing escrow on UNVERIFIED chain %s (network %r) with the "
-            "server-asserted domain %s — read name()/version() from the token and add "
-            "it to VERIFIED_USDC_DOMAINS", _cid, network, _afirmado)
 
     # Escrow, token collector, USDC y operador, contra escrow_contracts.
     _check_registered_addresses(network, _cid, net, to_checksum_address)
@@ -587,6 +677,14 @@ def build_escrow_pre_auth(
 
     min_fee_bps = int(escrow_cfg.get("min_fee_bps", DEFAULT_MIN_FEE_BPS))
     max_fee_bps = int(escrow_cfg.get("max_fee_bps", DEFAULT_MAX_FEE_BPS))
+    # The capture takes the operator's static fee, and the escrow requires
+    # minFeeBps <= fee <= maxFeeBps: a floor above the fee locks funds that the
+    # capture can never move.
+    if not 0 <= min_fee_bps <= OPERATOR_FEE_BPS:
+        raise ValueError(
+            f"minFeeBps={min_fee_bps} must be between 0 and the operator's "
+            f"{OPERATOR_FEE_BPS} bps static fee — the on-chain capture would revert."
+        )
     if max_fee_bps < OPERATOR_FEE_BPS:
         raise ValueError(
             f"maxFeeBps={max_fee_bps} cannot cover the operator's "
@@ -603,6 +701,7 @@ def build_escrow_pre_auth(
             f"Unknown escrow tier '{tier}' — known tiers: "
             f"{sorted(set(escrow_cfg.get('tier_timings') or {}) | set(ESCROW_TIER_WINDOWS))}"
         )
+    timings = _tier_windows(tier, timings)
 
     now = int(time.time())
     # The settle's conversion: float noise rounds, a real digit below one base
@@ -613,8 +712,23 @@ def build_escrow_pre_auth(
     # deadline (the worker delivers near it) plus a generous buffer, and
     # never shorter than the SDK tier window. preApprovalExpiry stays short —
     # the lock executes immediately at assignment.
+    if isinstance(deadline, float) and deadline.is_integer():
+        deadline = int(deadline)
+    whole = isinstance(deadline, int) and not isinstance(deadline, bool)
+    if deadline is not None and not whole:
+        raise ValueError(
+            f"deadline {deadline!r} is not whole epoch seconds — refusing to sign: "
+            "the expiries signed in the nonce would not be the ones sent."
+        )
     review_base = max(now, deadline or now)
     auth_expiry = max(now + timings["auth"], review_base + REVIEW_WINDOW_SEC)
+    if auth_expiry - now > ESCROW_MAX_AUTHORIZATION_SEC:
+        raise ValueError(
+            f"authorizationExpiry {auth_expiry} would be {auth_expiry - now} s after "
+            f"signing (deadline {deadline}), above this SDK's ceiling "
+            f"({ESCROW_MAX_AUTHORIZATION_SEC} s, ESCROW_MAX_AUTHORIZATION_SEC) — "
+            "refusing to sign."
+        )
     refund_expiry = max(now + timings["refund"], auth_expiry + REFUND_WINDOW_SEC)
 
     payment_info: dict[str, Any] = {
@@ -637,8 +751,11 @@ def build_escrow_pre_auth(
 
     typed = {
         "domain": {
-            "name": net["usdc_domain_name"],
-            "version": net["usdc_domain_version"],
+            # The pair the domain check compared, not the raw config values: a
+            # version written as the number 2 would be checked as "2" and
+            # signed as 2, another digest.
+            "name": _afirmado[0],
+            "version": _afirmado[1],
             "chainId": int(net["chain_id"]),
             "verifyingContract": to_checksum_address(net["usdc"]),
         },

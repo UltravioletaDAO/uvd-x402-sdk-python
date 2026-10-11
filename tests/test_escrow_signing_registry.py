@@ -18,10 +18,12 @@ config key         where the signature carries it              checked against
 
 For each address, on every chain of ``VERIFIED_USDC_DOMAINS``: the table's
 value is signed, and a changed one is refused with nothing signed; the fee
-ceiling is signed and one bps above it is refused. A chain without a row is
-signed with a warning (same policy as the domain).
+ceiling is signed and one bps above it is refused. A chain without a row, and
+a network name the SDK does not register, are refused (since 0.97.0; the
+cases are in ``tests/test_escrow_signing_rows.py``).
 ``EXECUTION_MARKET_NETWORKS`` is Execution Market's config of each of its
-escrow networks: every one of them signs with no warning.
+escrow networks, recorded from its registry: every one of them signs with no
+warning.
 ``TestGuardMutations`` removes each guard from a copy of the module's source
 and checks that the refusal it owns turns into a signature.
 """
@@ -249,116 +251,32 @@ def test_the_base_operator_is_execution_markets():
 
 
 # Execution Market's config of each network of its registry with an escrow and
-# an operator (execution-market, mcp_server/integrations/x402/network_registry.py
-# at f75d4171), with the keys build_escrow_pre_auth reads, taken from the
-# registry the way mcp_server/api/h2a.py takes them: the network's ``operator``
-# and ``escrow``, ``x402r_infra.tokenCollector``, and the address, name and
-# version of its USDC (h2a.py also serves ``tokens`` and ``tier_timings``,
-# which the pre-auth does not check). Nine of them are what GET
+# an operator, with the keys build_escrow_pre_auth reads, taken the way
+# mcp_server/api/h2a.py takes them (the network's ``operator`` and ``escrow``,
+# ``x402r_infra.tokenCollector``, and the address, name and version of its
+# USDC), and the escrow block h2a.py serves (``min_fee_bps`` 0, ``max_fee_bps``
+# 1800, ``tier_timings``). Recorded from EM's own table by
+# scripts/em_escrow_networks.py (tests/fixtures/em-escrow-networks.json, its
+# ``source.commit``), never written here by hand. Nine of the ten are what GET
 # /api/v1/h2a/payment-config serves in ``escrow.networks`` (each while
 # EM_ENABLED_NETWORKS enables it). ``skale`` is not: it is retired in EM
 # (ADR-009, 2026-08-24) and h2a.py skips it, but its registry entry is still
 # the operator and contracts of the escrows in flight there, which is what the
-# SDK's SKALE rows hold. The escrow block serves ``min_fee_bps`` 0 and ``max_fee_bps``
-# 1800 (``EXECUTION_MARKET_ESCROW``).
-def _em_network(
-    chain_id: int, *, operator: str, escrow: str, collector: str, usdc: str, domain_name: str
-) -> dict[str, Any]:
-    """One block of ``escrow.networks``, with the keys build_escrow_pre_auth reads."""
-    return {
-        "chain_id": chain_id,
-        "operator": operator,
-        "escrow": escrow,
-        "token_collector": collector,
-        "usdc": usdc,
-        "usdc_domain_name": domain_name,
-        "usdc_domain_version": "2",
-    }
+# SDK's SKALE rows hold.
+EM_ESCROW_NETWORKS = json.loads((FIXTURES / "em-escrow-networks.json").read_text(encoding="utf-8"))
+
+
+def _served(block: dict[str, Any]) -> dict[str, Any]:
+    """The block as the payment config serves it (the fixture writes ``collector``)."""
+    served = {k: v for k, v in block.items() if k != "collector"}
+    served["token_collector"] = block["collector"]
+    return served
 
 
 EXECUTION_MARKET_NETWORKS: dict[str, dict[str, Any]] = {
-    "base": _em_network(
-        8453,
-        operator="0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
-        escrow="0xb9488351E48b23D798f24e8174514F28B741Eb4f",
-        collector="0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
-        usdc="0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        domain_name="USD Coin",
-    ),
-    "ethereum": _em_network(
-        1,
-        operator="0x69B67962ffb7c5C7078ff348a87DF604dfA8001b",
-        escrow="0x9D4146EF898c8E60B3e865AE254ef438E7cEd2A0",
-        collector="0x206D4DbB6E7b876e4B5EFAAD2a04e7d7813FB6ba",
-        usdc="0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-        domain_name="USD Coin",
-    ),
-    "polygon": _em_network(
-        137,
-        operator="0xB87F1ECC85f074e50df3DD16A1F40e4e1EC4102e",
-        escrow="0x32d6AC59BCe8DFB3026F10BcaDB8D00AB218f5b6",
-        collector="0xc1256Bb30bd0cdDa07D8C8Cf67a59105f2EA1b98",
-        usdc="0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-        domain_name="USD Coin",
-    ),
-    "arbitrum": _em_network(
-        42161,
-        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
-        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
-        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
-        usdc="0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-        domain_name="USD Coin",
-    ),
-    "celo": _em_network(
-        42220,
-        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
-        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
-        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
-        usdc="0xcebA9300f2b948710d2653dD7B07f33A8B32118C",
-        domain_name="USDC",
-    ),
-    "monad": _em_network(
-        143,
-        operator="0x9620Dbe2BB549E1d080Dc8e7982623A9e1Df8cC3",
-        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
-        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
-        usdc="0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
-        domain_name="USDC",
-    ),
-    "avalanche": _em_network(
-        43114,
-        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
-        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
-        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
-        usdc="0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
-        domain_name="USD Coin",
-    ),
-    "optimism": _em_network(
-        10,
-        operator="0xC2377a9Db1de2520BD6b2756eD012f4E82F7938e",
-        escrow="0x320a3c35F131E5D2Fb36af56345726B298936037",
-        collector="0x230fd3A171750FA45db2976121376b7F47Cba308",
-        usdc="0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
-        domain_name="USD Coin",
-    ),
-    "skale": _em_network(
-        1187947933,
-        operator="0x43E46d4587fCCc382285C52012227555ed78D183",
-        escrow="0xBC151792f80C0EB1973d56b0235e6bee2A60e245",
-        collector="0x9A12A116a44636F55c9e135189A1321Abcfe2f30",
-        usdc="0x85889c8c714505E0c94b30fcfcF64fE3Ac8FCb20",
-        domain_name="Bridged USDC (SKALE Bridge)",
-    ),
-    "arc": _em_network(
-        5042,
-        operator="0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
-        escrow="0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
-        collector="0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
-        usdc="0x3600000000000000000000000000000000000000",
-        domain_name="USDC",
-    ),
+    name: _served(block) for name, block in EM_ESCROW_NETWORKS["networks"].items()
 }
-EXECUTION_MARKET_ESCROW = {"min_fee_bps": 0, "max_fee_bps": 1800, "deposit_limit_usd": 100}
+EXECUTION_MARKET_ESCROW: dict[str, Any] = dict(EM_ESCROW_NETWORKS["escrow"])
 
 
 @pytest.mark.parametrize("network", sorted(EXECUTION_MARKET_NETWORKS))
@@ -448,16 +366,11 @@ def test_another_chains_whole_config_under_this_name_is_refused(chain_id):
 
 
 @pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
-def test_a_chain_without_an_operator_row_signs_the_configs_with_a_warning(
-    network, chain_id, caplog
-):
-    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
+def test_a_chain_without_an_operator_row_is_refused(network, chain_id):
+    """Until 0.96.0: signed, the config's operator, with a warning."""
     block = table_block(chain_id)
     block["operator"] = to_checksum_address("0x" + "0e" * 20)
-    wrapper, wallet = build(network, block)
-    assert len(wallet.signed) == 1
-    assert wrapper["payload"]["paymentInfo"]["operator"] == block["operator"]
-    assert any("ESCROW_OPERATORS" in r.getMessage() for r in caplog.records)
+    refused(f"eip155:{chain_id}", block, "no escrow row for chain .*ESCROW_OPERATORS")
 
 
 # ── the fee ceiling ──────────────────────────────────────────────────────────
@@ -520,12 +433,14 @@ def test_the_operator_fee_floor_still_applies_under_the_ceiling():
 
 
 @pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
-def test_a_chain_without_a_fee_ceiling_signs_with_a_warning(network, chain_id, caplog):
-    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
-    wrapper, wallet = build(network, table_block(chain_id), max_fee_bps=2500)
-    assert len(wallet.signed) == 1
-    assert wrapper["payload"]["paymentInfo"]["maxFeeBps"] == 2500
-    assert any("ESCROW_MAX_FEE_BPS" in r.getMessage() for r in caplog.records)
+def test_a_chain_without_a_fee_ceiling_is_refused(network, chain_id):
+    """Until 0.96.0: signed, any maxFeeBps, with a warning."""
+    refused(
+        f"eip155:{chain_id}",
+        table_block(chain_id),
+        "no escrow row for chain .*ESCROW_MAX_FEE_BPS",
+        max_fee_bps=2500,
+    )
 
 
 @pytest.mark.parametrize("spelling", ["lower", "upper"])
@@ -539,26 +454,23 @@ def test_the_table_address_in_another_case_is_the_same_address(spelling):
 
 
 @pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
-def test_a_registry_testnet_is_signed_with_its_rows(network, chain_id, caplog):
-    """No network name and no verified domain here, but a row in ESCROW_CONTRACTS."""
-    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
-    wrapper, _ = build(network, table_block(chain_id))
-    assert wrapper["paymentRequirements"]["network"] == f"eip155:{chain_id}"
-    collector = ESCROW_CONTRACTS[chain_id]["token_collector"]
-    assert wrapper["payload"]["authorization"]["to"] == collector
-    assert any("UNVERIFIED chain" in r.getMessage() for r in caplog.records)
+def test_a_registry_testnet_with_only_its_contracts_is_refused(network, chain_id):
+    """A row in ESCROW_CONTRACTS, but no operator, fee ceiling or verified domain.
 
-
-@pytest.mark.parametrize("key", ADDRESS_KEYS)
-@pytest.mark.parametrize("network,chain_id", TESTNETS, ids=TESTNET_IDS)
-def test_a_changed_registry_address_is_refused_on_a_testnet(network, chain_id, key):
+    Until 0.96.0 it was signed with warnings. Its name is not one of the network
+    registry, and under its chain id the missing rows refuse it.
+    """
     block = table_block(chain_id)
-    block[key] = changed(block[key])
-    refused(network, block, f"Escrow address mismatch .* asserts {key} ")
+    refused(network, block, "not a network this SDK registers")
+    refused(
+        f"eip155:{chain_id}",
+        block,
+        "no escrow row for chain .*ESCROW_OPERATORS, ESCROW_MAX_FEE_BPS, VERIFIED_USDC_DOMAINS",
+    )
 
 
-def test_a_chain_without_any_row_signs_with_both_warnings(caplog):
-    caplog.set_level(logging.WARNING, logger="uvd_x402_sdk.escrow_signing")
+def test_a_chain_without_any_row_is_refused():
+    """Until 0.96.0: signed with a warning per table."""
     block = {
         "chain_id": 999999,
         "operator": "0x" + "01" * 20,
@@ -568,11 +480,13 @@ def test_a_chain_without_any_row_signs_with_both_warnings(caplog):
         "usdc_domain_name": "USD Coin",
         "usdc_domain_version": "2",
     }
-    _, wallet = build("red-nueva", block)
-    assert len(wallet.signed) == 1
-    messages = " ".join(r.getMessage() for r in caplog.records)
-    assert "no row in ESCROW_CONTRACTS" in messages
-    assert "ESCROW_OPERATORS" in messages
+    refused("red-nueva", block, "not a network this SDK registers")
+    refused(
+        "eip155:999999",
+        block,
+        "no escrow row for chain 999999 .*ESCROW_CONTRACTS, ESCROW_OPERATORS, "
+        "ESCROW_MAX_FEE_BPS, VERIFIED_USDC_DOMAINS",
+    )
 
 
 @pytest.mark.parametrize("network", ["eip155:8453", "EIP155:8453", " eip155:8453 "])
@@ -620,10 +534,10 @@ def test_a_chain_id_written_as_a_decimal_string_is_the_same_chain():
 
 
 def test_a_bool_chain_id_is_refused():
-    """``True`` would be read as chain 1."""
+    """``True`` would be read as chain 1, Ethereum's."""
     block = table_block(1)
     block["chain_id"] = True
-    refused("red-nueva", block, "Invalid chain_id")
+    refused("ethereum", block, "Invalid chain_id")
 
 
 def test_an_address_that_is_not_one_is_refused_before_signing():
@@ -701,14 +615,12 @@ def _neutral_block(guard: str) -> tuple[str, dict[str, Any]]:
         return "base", table_block(8453)
     if guard == "chain_id":
         return "base", table_block(10)
-    if guard == "caip2":
-        return "eip155:10", table_block(8453)
     if guard == "caip2_id":
         return "eip155:\uff18\uff14\uff15\uff13", table_block(8453)
     if guard == "bool":
         block = table_block(1)
         block["chain_id"] = True
-        return "red-nueva", block
+        return "ethereum", block
     if guard == "operator":
         block = table_block(8453)
         block["operator"] = changed(block["operator"])
@@ -723,10 +635,6 @@ GUARD_MUTATIONS = {
         "    if registered is not None and registered != chain_id:\n",
         "    if False:\n",
     ),
-    "caip2": (
-        '    if name.startswith("eip155:"):\n',
-        '    if False:\n',
-    ),
     "caip2_id": (
         "        if not (reference.isascii() and reference.isdigit()):\n",
         "        if False:\n",
@@ -736,8 +644,8 @@ GUARD_MUTATIONS = {
         "    if False:\n",
     ),
     "operator": (
-        '    elif to_checksum_address(net["operator"]) != to_checksum_address(operator):\n',
-        "    elif False:\n",
+        "    if operator is not None and (\n",
+        "    if False and (\n",
     ),
     "escrow": (
         '_REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector", "usdc")\n',
@@ -752,8 +660,8 @@ GUARD_MUTATIONS = {
         '_REGISTERED_ADDRESS_KEYS = ("escrow", "token_collector")\n',
     ),
     "max_fee_bps": (
-        "    elif max_fee_bps > ceiling:\n",
-        "    elif False:\n",
+        "    if ceiling is not None and max_fee_bps > ceiling:\n",
+        "    if False:\n",
     ),
 }
 
@@ -772,6 +680,16 @@ class TestGuardMutations:
         network, block, escrow = _neutral_case(guard)
         _, wallet = build(network, block, module=module, **escrow)
         assert len(wallet.signed) == 1
+
+    @pytest.mark.parametrize("network", ["eip155:10", "eip155:8453"])
+    def test_without_the_eip155_branch_a_caip2_name_is_refused_not_signed(self, network):
+        """Until 0.96.0 this mutant signed ``eip155:10`` with Base's config.
+
+        Without the branch an ``eip155:<id>`` name is not a network the registry
+        knows, so it is refused: the chain of the same name included.
+        """
+        module = mutant('    if name.startswith("eip155:"):\n', "    if False:\n")
+        refused(network, table_block(8453), "not a network this SDK registers", module=module)
 
     @pytest.mark.parametrize("guard", ["escrow", "token_collector", "usdc"])
     def test_dropping_one_address_leaves_the_other_two_guarded(self, guard):
