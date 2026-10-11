@@ -7,9 +7,13 @@ Provides:
 - fastapi_require_payment: Decorator for protected routes
 """
 
+import asyncio
+import inspect
+import logging
 import re
+import time
 from decimal import Decimal
-from functools import wraps
+from functools import partial, wraps
 from ipaddress import AddressValueError, IPv6Address
 from typing import Any, Callable, Optional, TypeVar, Union
 from urllib.parse import quote, unquote
@@ -18,7 +22,8 @@ import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
-    from fastapi.responses import JSONResponse
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
 except ImportError:
@@ -35,10 +40,19 @@ from uvd_x402_sdk.bindings import (
 )
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
+from uvd_x402_sdk.durable import (
+    EVIDENCE_HEADER,
+    DurableConfig,
+    durable_evidence,
+    skip_notice,
+    wants_evidence,
+)
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.response import create_402_response, create_402_headers
 from uvd_x402_sdk.receipts import payment_response_headers, validate_purchase_context
+
+logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -420,11 +434,289 @@ class X402Depends:
             raise HTTPException(status_code=status, detail=detail, headers=headers)
 
 
+def _as_bytes(chunk: Any, charset: str) -> bytes:
+    """A body chunk as Starlette sends it: buffers as they are, ``str`` encoded."""
+    if isinstance(chunk, (bytes, bytearray, memoryview)):
+        return bytes(chunk)
+    return str(chunk).encode(charset)
+
+
+def _is_event_stream(response: Response) -> bool:
+    kind = response.headers.get("content-type", "")
+    return kind.split(";")[0].strip().lower() == "text/event-stream"
+
+
+#: The end of the route's stream, on the capture queue.
+_END = object()
+
+
+class _Failed:
+    """The route's stream raised: ``error`` goes to the reader after the bytes."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+
+async def _buffered(
+    response: Response, limit: int, deadline: float
+) -> tuple[Response, bytes, Optional[str]]:
+    """``response`` with its body in memory, that body, and a skip reason.
+
+    As x402-rs ``buffer_body`` and the TypeScript post-hook: a response without
+    a readable body (``FileResponse``) or a ``text/event-stream`` is not read
+    (``not_capturable``); one that announces (``Content-Length``) more than
+    ``limit`` is not read (``too_large``); one that goes over ``limit`` or past
+    ``deadline`` (``time.monotonic()``) while read, or whose stream fails, is
+    not kept: the answer streams the chunks already read ahead of the untouched
+    rest (a failure is raised again after them), with ``too_large`` /
+    ``timeout`` / ``not_capturable``. Never a byte less.
+    """
+    body = getattr(response, "body", None)
+    if isinstance(body, (bytes, bytearray, memoryview)):
+        return response, bytes(body), None
+    iterable = getattr(response, "body_iterator", None)
+    if iterable is None or _is_event_stream(response):
+        return response, b"", "not_capturable"
+    announced = response.headers.get("content-length", "")
+    if announced.isdigit() and int(announced) > limit:
+        return response, b"", "too_large"
+    # One task walks the route's iterator from start to end, as Starlette does
+    # without the hook: a contextvar or a cancel scope held across a ``yield``
+    # stays in the task it was entered in. The capture waits on the queue.
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
+    iterator = iterable.__aiter__()
+
+    async def pump() -> None:
+        try:
+            async for chunk in iterator:
+                await queue.put(chunk)
+        except asyncio.CancelledError:
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except BaseException:  # noqa: BLE001 - already going away
+                    pass
+            raise
+        except BaseException as failure:  # noqa: BLE001 - raised to the reader
+            await queue.put(_Failed(failure))
+            if not isinstance(failure, Exception):
+                raise
+            return
+        await queue.put(_END)
+
+    walker = asyncio.ensure_future(pump())
+    chunks: list[bytes] = []
+    size = 0
+
+    def again_with(rest: Any) -> Response:
+        again: Response = StreamingResponse(
+            rest, status_code=response.status_code, background=response.background
+        )
+        again.raw_headers = list(response.raw_headers)
+        return again
+
+    async def resumed(pending: Optional["asyncio.Future[Any]"]) -> Any:
+        try:
+            for seen in chunks:
+                yield seen
+            while True:
+                item = await (pending if pending is not None else queue.get())
+                pending = None
+                if item is _END:
+                    return
+                if isinstance(item, _Failed):
+                    raise item.error
+                yield item
+        finally:
+            if pending is not None:
+                pending.cancel()
+            walker.cancel()
+
+    waiting: Optional[asyncio.Future[Any]] = None
+    try:
+        while True:
+            pending = waiting = asyncio.ensure_future(queue.get())
+            done, _ = await asyncio.wait({pending}, timeout=max(deadline - time.monotonic(), 0))
+            if not done:
+                return again_with(resumed(pending)), b"", "timeout"
+            item = pending.result()
+            if item is _END:
+                break
+            if isinstance(item, _Failed):
+                broken = item.error
+
+                async def read_then_fail() -> Any:
+                    for seen in chunks:
+                        yield seen
+                    raise broken
+
+                return again_with(read_then_fail()), b"", "not_capturable"
+            data = _as_bytes(item, response.charset)
+            chunks.append(data)
+            size += len(data)
+            if size > limit:
+                return again_with(resumed(None)), b"", "too_large"
+    except BaseException:
+        # The capture itself was cancelled: the route's stream goes with it.
+        if waiting is not None:
+            waiting.cancel()
+        walker.cancel()
+        raise
+    whole = b"".join(chunks)
+    again = Response(
+        content=whole, status_code=response.status_code, background=response.background
+    )
+    again.raw_headers = list(response.raw_headers)
+    return again, whole, None
+
+
+#: Set in the ASGI scope by :class:`_RecordsRouteFailure` when the route raised.
+_ROUTE_FAILED = "uvd_x402.route_failed"
+
+
+class _RecordsRouteFailure:
+    """The app behind :class:`X402Middleware`, marking a failure in the scope.
+
+    ``BaseHTTPMiddleware`` ends ``call_next``'s stream without an error when the
+    route raises mid-stream (it raises later), so the bytes read look like a
+    whole body; this mark is how the hook tells them apart.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await self.app(scope, receive, send)
+        except BaseException:
+            scope[_ROUTE_FAILED] = True
+            raise
+
+
+async def _route_response(
+    request: Request, content: Any, arguments: dict[str, Any]
+) -> Optional[Response]:
+    """The response FastAPI builds for a non-``Response`` return of this route.
+
+    Same steps as FastAPI's request handler: the route's ``response_model``
+    (with its ``response_model_*`` options), ``response_class`` and
+    ``status_code``, then the status and headers set on an injected
+    ``Response`` parameter. ``None`` when the scope carries no ``APIRoute``.
+    """
+    from fastapi.datastructures import DefaultPlaceholder
+    from fastapi.routing import APIRoute, serialize_response
+    from fastapi.utils import is_body_allowed_for_status_code
+
+    route = request.scope.get("route")
+    if not isinstance(route, APIRoute):
+        return None
+    field = getattr(route, "secure_cloned_response_field", None) or route.response_field
+    response_class: Any = route.response_class
+    default_class = isinstance(response_class, DefaultPlaceholder)
+    if default_class:
+        response_class = response_class.value
+    options: dict[str, Any] = {
+        "field": field,
+        "response_content": content,
+        "include": route.response_model_include,
+        "exclude": route.response_model_exclude,
+        "by_alias": route.response_model_by_alias,
+        "exclude_unset": route.response_model_exclude_unset,
+        "exclude_defaults": route.response_model_exclude_defaults,
+        "exclude_none": route.response_model_exclude_none,
+        "is_coroutine": True,
+    }
+    dump_json = (
+        field is not None
+        and default_class
+        and "dump_json" in inspect.signature(serialize_response).parameters
+    )
+    if dump_json:
+        options["dump_json"] = True
+    serialized = await serialize_response(**options)
+    injected = next((v for v in arguments.values() if isinstance(v, Response)), None)
+    status = route.status_code
+    if injected is not None and injected.status_code:
+        status = injected.status_code
+    extra: dict[str, Any] = {} if not status else {"status_code": status}
+    built: Response
+    if dump_json:
+        built = Response(content=serialized, media_type="application/json", **extra)
+    else:
+        built = response_class(serialized, **extra)
+    if not is_body_allowed_for_status_code(built.status_code):
+        built.body = b""
+    if injected is not None:
+        built.headers.raw.extend(injected.headers.raw)
+    return built
+
+
+async def _with_durable_evidence(
+    durable: Optional[DurableConfig],
+    client: X402Client,
+    result: Any,
+    payment_header: str,
+    response: Response,
+    method: str,
+    scope: Optional[Any] = None,
+) -> Response:
+    """The DX402 post-hook (:mod:`uvd_x402_sdk.durable`): runs after the handler
+    answered, on a payment that already settled. Off without ``durable``.
+
+    It never raises: the payment is settled by now, so a failure of the hook
+    itself is a skip notice on the response, never a 500 in its place.
+    """
+    if durable is None:
+        return response
+    current = response
+    try:
+        has_header = EVIDENCE_HEADER in response.headers
+        if not wants_evidence(durable, result, response.status_code, method, has_header):
+            return response
+        deadline = time.monotonic() + durable.timeout
+        current, body, skipped = await _buffered(response, durable.max_body_bytes, deadline)
+        if skipped is None and scope is not None and scope.get(_ROUTE_FAILED):
+            skipped = "not_capturable"
+        try:
+            payee: Optional[str] = client.config.get_recipient(result.network)
+        except Exception:  # noqa: BLE001 - durable.payee or an empty payee
+            payee = None
+        # Off the event loop, and not waited past the deadline: a thread left
+        # behind finds the deadline gone and starts no anchor.
+        future = asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                durable_evidence,
+                durable,
+                result,
+                payment_header,
+                body,
+                current.status_code,
+                payee,
+                skipped,
+                deadline,
+            ),
+        )
+        done, _ = await asyncio.wait({future}, timeout=max(deadline - time.monotonic(), 0))
+        value = future.result() if done else skip_notice("timeout")
+        if value is not None:
+            current.headers[EVIDENCE_HEADER] = value
+    except Exception:  # noqa: BLE001 - evidence is never a gate on the sale
+        logger.warning("DX402 post-hook failed; delivered without evidence", exc_info=True)
+        try:
+            current.headers[EVIDENCE_HEADER] = skip_notice("anchor_failed")
+        except Exception:  # noqa: BLE001 - the response goes out as it is
+            pass
+    return current
+
+
 def fastapi_require_payment(
     amount_usd: Union[Decimal, float, str],
     config: X402Config,
     message: Optional[str] = None,
     binding_store: Optional[BindingStore] = None,
+    durable: Optional[DurableConfig] = None,
 ) -> Callable[[F], F]:
     """
     Decorator for FastAPI routes requiring payment.
@@ -437,6 +729,9 @@ def fastapi_require_payment(
         message: Custom 402 message
         binding_store: Persist each payment's key before the facilitator is
             called (:mod:`uvd_x402_sdk.bindings`). Without one, nothing changes.
+        durable: DX402 durable evidence of the response the route returned
+            (:mod:`uvd_x402_sdk.durable`), in ``X-Durable-Evidence``. Off by
+            default; never changes the body, the status or the settlement.
 
     Example:
         >>> @app.get("/resource")
@@ -474,12 +769,21 @@ def fastapi_require_payment(
                 # Store result in request state
                 request.state.payment_result = result
                 response = await func(request, *args, **kwargs)
-                if getattr(result, "receipt", None):
-                    headers = payment_response_headers(result)
-                    if isinstance(response, Response):
-                        response.headers.update(headers)
-                    else:
-                        response = JSONResponse(response, headers=headers)
+                receipt = getattr(result, "receipt", None)
+                if not isinstance(response, Response) and (receipt or durable is not None):
+                    # The response FastAPI would build for this route, so the
+                    # receipt headers and the evidence go on those bytes.
+                    built = await _route_response(request, response, kwargs)
+                    if built is None and receipt:
+                        built = JSONResponse(jsonable_encoder(response))
+                    if built is not None:
+                        response = built
+                if receipt and isinstance(response, Response):
+                    response.headers.update(payment_response_headers(result))
+                if durable is not None and isinstance(response, Response):
+                    response = await _with_durable_evidence(
+                        durable, client, result, payment_header, response, request.method
+                    )
                 return response
 
             except X402Error as e:
@@ -560,6 +864,11 @@ class X402Middleware(BaseHTTPMiddleware):
     count). Under a mount (``root_path``) a protected path may be written with
     or without it.
 
+    ``durable`` (:class:`~uvd_x402_sdk.durable.DurableConfig`, off by default)
+    anchors DX402 durable evidence of the route's response once the payment
+    settled and the route answered, in ``X-Durable-Evidence``; the body, the
+    status and the settlement are delivered as they are, whatever it does.
+
     Example:
         >>> from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
         >>>
@@ -579,8 +888,10 @@ class X402Middleware(BaseHTTPMiddleware):
         config: X402Config,
         protected_paths: dict[str, Decimal],
         binding_store: Optional[BindingStore] = None,
+        durable: Optional[DurableConfig] = None,
     ) -> None:
-        super().__init__(app)
+        super().__init__(app if durable is None else _RecordsRouteFailure(app))
+        self._durable = durable
         self._config = config
         self._client = X402Client(config=config)
         self._protected_paths = protected_paths
@@ -625,7 +936,15 @@ class X402Middleware(BaseHTTPMiddleware):
             response = await call_next(request)
             if getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
-            return response
+            return await _with_durable_evidence(
+                self._durable,
+                self._client,
+                result,
+                payment_header,
+                response,
+                request.method,
+                request.scope,
+            )
 
         except HTTPException as e:
             # `_receipt_context`'s 400 receipt_context_mismatch. A middleware
