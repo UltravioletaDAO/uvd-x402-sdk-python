@@ -21,7 +21,6 @@ import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
-    from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -445,6 +444,17 @@ def _is_event_stream(response: Response) -> bool:
     return kind.split(";")[0].strip().lower() == "text/event-stream"
 
 
+#: The end of the route's stream, on the capture queue.
+_END = object()
+
+
+class _Failed:
+    """The route's stream raised: ``error`` goes to the reader after the bytes."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+
 async def _buffered(
     response: Response, limit: int, deadline: float
 ) -> tuple[Response, bytes, Optional[str]]:
@@ -468,7 +478,32 @@ async def _buffered(
     announced = response.headers.get("content-length", "")
     if announced.isdigit() and int(announced) > limit:
         return response, b"", "too_large"
+    # One task walks the route's iterator from start to end, as Starlette does
+    # without the hook: a contextvar or a cancel scope held across a ``yield``
+    # stays in the task it was entered in. The capture waits on the queue.
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
     iterator = iterable.__aiter__()
+
+    async def pump() -> None:
+        try:
+            async for chunk in iterator:
+                await queue.put(chunk)
+        except asyncio.CancelledError:
+            close = getattr(iterator, "aclose", None)
+            if close is not None:
+                try:
+                    await close()
+                except BaseException:  # noqa: BLE001 - already going away
+                    pass
+            raise
+        except BaseException as failure:  # noqa: BLE001 - raised to the reader
+            await queue.put(_Failed(failure))
+            if not isinstance(failure, Exception):
+                raise
+            return
+        await queue.put(_END)
+
+    walker = asyncio.ensure_future(pump())
     chunks: list[bytes] = []
     size = 0
 
@@ -480,40 +515,52 @@ async def _buffered(
         return again
 
     async def resumed(pending: Optional["asyncio.Future[Any]"]) -> Any:
-        for seen in chunks:
-            yield seen
-        if pending is not None:
-            try:
-                yield await pending
-            except StopAsyncIteration:
-                return
-        async for more in iterator:
-            yield more
+        try:
+            for seen in chunks:
+                yield seen
+            while True:
+                item = await (pending if pending is not None else queue.get())
+                pending = None
+                if item is _END:
+                    return
+                if isinstance(item, _Failed):
+                    raise item.error
+                yield item
+        finally:
+            if pending is not None:
+                pending.cancel()
+            walker.cancel()
 
+    waiting: Optional["asyncio.Future[Any]"] = None
     try:
         while True:
-            pending = asyncio.ensure_future(iterator.__anext__())
+            pending = waiting = asyncio.ensure_future(queue.get())
             done, _ = await asyncio.wait({pending}, timeout=max(deadline - time.monotonic(), 0))
             if not done:
                 return again_with(resumed(pending)), b"", "timeout"
-            try:
-                chunk = pending.result()
-            except StopAsyncIteration:
+            item = pending.result()
+            if item is _END:
                 break
-            data = _as_bytes(chunk, response.charset)
+            if isinstance(item, _Failed):
+                broken = item.error
+
+                async def read_then_fail() -> Any:
+                    for seen in chunks:
+                        yield seen
+                    raise broken
+
+                return again_with(read_then_fail()), b"", "anchor_failed"
+            data = _as_bytes(item, response.charset)
             chunks.append(data)
             size += len(data)
             if size > limit:
                 return again_with(resumed(None)), b"", "too_large"
-    except Exception as failure:  # noqa: BLE001 - delivered as it would be without the hook
-        broken = failure
-
-        async def read_then_fail() -> Any:
-            for seen in chunks:
-                yield seen
-            raise broken
-
-        return again_with(read_then_fail()), b"", "anchor_failed"
+    except BaseException:
+        # The capture itself was cancelled: the route's stream goes with it.
+        if waiting is not None:
+            waiting.cancel()
+        walker.cancel()
+        raise
     whole = b"".join(chunks)
     again = Response(
         content=whole, status_code=response.status_code, background=response.background
@@ -668,15 +715,13 @@ def fastapi_require_payment(
                         response.headers.update(headers)
                     else:
                         response = JSONResponse(response, headers=headers)
-                if durable is not None:
-                    if not isinstance(response, Response) and wants_evidence(
-                        durable, result, 200, request.method
-                    ):
-                        response = JSONResponse(jsonable_encoder(response))
-                    if isinstance(response, Response):
-                        response = await _with_durable_evidence(
-                            durable, client, result, payment_header, response, request.method
-                        )
+                # A return that is not a Response goes to FastAPI's own
+                # serialization (status_code, response_model, response_class),
+                # as without durable, and is not anchored.
+                if durable is not None and isinstance(response, Response):
+                    response = await _with_durable_evidence(
+                        durable, client, result, payment_header, response, request.method
+                    )
                 return response
 
             except X402Error as e:

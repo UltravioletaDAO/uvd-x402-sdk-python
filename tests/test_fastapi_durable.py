@@ -12,6 +12,7 @@ is read from anywhere.
 
 import asyncio
 import base64
+import contextvars
 import json
 import threading
 import time
@@ -19,6 +20,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
+import anyio
 import httpx
 import pytest
 
@@ -28,7 +30,13 @@ pytest.importorskip("cryptography")
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
 from fastapi import FastAPI, Request  # noqa: E402
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse  # noqa: E402
+from fastapi.responses import (  # noqa: E402
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
+from pydantic import BaseModel  # noqa: E402
 from starlette.background import BackgroundTask  # noqa: E402
 
 from tests.receipt_rail import PAYER, RECIPIENT, x_payment
@@ -191,6 +199,11 @@ def test_a_sale_with_durable_anchors_once_and_emits_the_header(scripted, mount, 
     assert response.status_code == _expected_status(kind)
     assert json.loads(response.content) == json.loads(BODY)
     assert rail.calls == ["/verify", "/settle"]
+    if kind == "dict" and mount is decorator_app:
+        # Not a Response: FastAPI serializes it, as without durable, unanchored.
+        assert "x-durable-evidence" not in response.headers
+        assert sink.requests == []
+        return
     assert len(sink.requests) == 1
     url, sent = sink.requests[0]
     assert url == f"{FACILITATOR}/dx402/anchor"
@@ -486,7 +499,7 @@ def _echo_app(mount_name: str, url: str, durable: DurableConfig) -> FastAPI:
 
     async def answer(request: Request) -> Any:
         await asyncio.sleep(0.05)  # both requests are inside the route at once
-        return {"tx": request.state.payment_result.transaction_hash}
+        return JSONResponse({"tx": request.state.payment_result.transaction_hash})
 
     if mount_name == "decorator_app":
         app.get("/paid")(fastapi_require_payment(amount_usd=PRICE, config=config,
@@ -1079,8 +1092,138 @@ def test_a_decorated_route_returning_a_model_with_dates_is_delivered(scripted):
         return {"at": at, "price": PRICE}
 
     recorder = Recorder()
+    off = _get(_mount("decorator_app", scripted().url, None, answer))
     response = _get(_mount("decorator_app", scripted().url, _durable(Sink(), anchor=recorder),
                            answer))
-    assert response.status_code == 200
-    assert response.json() == {"at": "2026-10-11T00:00:00+00:00", "price": 0.01}
-    assert recorder.bodies == [response.content]
+    assert (response.status_code, response.content) == (off.status_code, off.content)
+    assert response.json()["at"].startswith("2026-10-11T00:00:00")
+    assert "x-durable-evidence" not in response.headers
+    assert recorder.bodies == []
+
+
+# -- VER-SDKPY-71 ------------------------------------------------------------
+
+_TRACE: contextvars.ContextVar = contextvars.ContextVar("trace", default=None)
+
+
+@MOUNT_NAMES
+@pytest.mark.parametrize("held", ["contextvar", "cancel_scope"])
+def test_a_stream_that_holds_its_task_across_yields_is_delivered_and_anchored(
+    scripted, mount_name, held
+):
+    """A contextvar set/reset or an anyio cancel scope around a ``yield`` only
+    works if one task walks the generator, as Starlette does without durable."""
+
+    async def chunks() -> Any:
+        for part in (BODY[:5], BODY[5:12], BODY[12:]):
+            if held == "contextvar":
+                token = _TRACE.set(part)
+                yield part
+                _TRACE.reset(token)
+            else:
+                with anyio.move_on_after(30):
+                    yield part
+
+    async def answer(request: Request) -> Any:
+        return StreamingResponse(chunks(), status_code=201)
+
+    recorder = Recorder()
+    off = _get(_mount(mount_name, scripted().url, None, answer))
+    on = _get(_mount(mount_name, scripted().url, _durable(Sink(), anchor=recorder), answer))
+    assert (on.status_code, on.content) == (off.status_code, off.content) == (201, BODY)
+    assert recorder.bodies == [BODY]
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+
+
+class _Public(BaseModel):
+    answer: str
+
+
+_DECLARED = {
+    "status_code": {"status_code": 201},
+    "response_model": {"response_model": _Public},
+    "response_class": {"response_class": PlainTextResponse},
+}
+
+
+@pytest.mark.parametrize("declared", sorted(_DECLARED))
+def test_a_decorated_return_that_is_not_a_response_is_served_as_without_durable(
+    scripted, declared
+):
+    def build(durable: Optional[DurableConfig]) -> FastAPI:
+        app = FastAPI()
+        config = X402Config(facilitator_url=scripted().url, recipient_evm=RECIPIENT)
+
+        @app.get("/paid", **_DECLARED[declared])
+        @fastapi_require_payment(amount_usd=PRICE, config=config, durable=durable)
+        async def paid(request: Request) -> Any:
+            if declared == "response_class":
+                return "plain text answer"
+            return {"answer": "the paid content", "hidden": "seller only"}
+
+        return app
+
+    recorder = Recorder()
+    off = _get(build(None))
+    on = _get(build(_durable(Sink(), anchor=recorder)))
+    assert on.status_code == off.status_code == (201 if declared == "status_code" else 200)
+    assert on.headers["content-type"] == off.headers["content-type"]
+    assert on.content == off.content
+    if declared == "response_model":
+        assert "hidden" not in on.json()
+    assert "x-durable-evidence" not in on.headers
+    assert recorder.bodies == []
+
+
+@pytest.mark.parametrize("key", ["a-str-key", 7, ["k"]], ids=["str", "int", "list"])
+def test_a_payer_key_that_is_not_bytes_is_no_payer_key(key):
+    sink = Sink()
+    config = DurableConfig(
+        payer_key=lambda result, header: key, facilitator=FACILITATOR, client=sink.client
+    )
+    assert _decode(durable_evidence(config, _result(), "h", BODY, 200)) == _skip("no_payer_key")
+    assert sink.requests == []
+
+
+def test_a_decorated_non_response_with_a_confirmed_receipt_is_served_as_without_durable(
+    scripted,
+):
+    async def answer(request: Request) -> Any:
+        return {"answer": "the paid content"}
+
+    recorder = Recorder()
+    off = _get(_mount("decorator_app", _confirmed_rail(scripted).url, None, answer))
+    on = _get(_mount("decorator_app", _confirmed_rail(scripted).url,
+                     _durable(Sink(), anchor=recorder), answer))
+    assert (on.status_code, on.content) == (off.status_code, off.content)
+    for name in ("content-type", "payment-response", "x-payment-response"):
+        assert on.headers.get_list(name) == off.headers.get_list(name), name
+    assert "payment-response" in on.headers
+    # The receipt already made it a JSONResponse, durable or not: those bytes are anchored.
+    assert recorder.bodies == [on.content]
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+
+
+def test_a_capture_cancelled_mid_stream_closes_the_routes_stream():
+    closed: list = []
+
+    async def chunks() -> Any:
+        try:
+            yield b"a"
+            await asyncio.sleep(30)
+            yield b"b"
+        finally:
+            closed.append(True)
+
+    async def main() -> None:
+        response = StreamingResponse(chunks())
+        deadline = time.monotonic() + 30
+        capture = asyncio.ensure_future(fastapi_integration._buffered(response, 100, deadline))
+        await asyncio.sleep(0.05)
+        capture.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await capture
+        await asyncio.sleep(0.05)
+        assert closed == [True]
+
+    asyncio.run(main())

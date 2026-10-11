@@ -72,7 +72,7 @@ class DurableConfig:
     - ``payer_key(result, x_payment_header) -> bytes | None`` (required): the
       payer's PUBLIC encryption key (33-byte secp256k1 or 32-byte X25519, e.g.
       from ``payer_key_from_evm_signature`` / ``payer_key_from_solana_address``).
-      ``None``, empty or raising = ``no_payer_key``, delivered anyway.
+      ``None``, empty, not bytes or raising = ``no_payer_key``, delivered anyway.
     - ``proof_of_payment(result) -> dict | None``: the settlement proof in the
       facilitator's ``ProofOfPayment`` shape; the only thing that reaches
       ``verified: true`` on the anchor.
@@ -86,7 +86,8 @@ class DurableConfig:
     - ``timeout``: the whole budget, capture and anchor, in seconds. The
       anchor's HTTP timeout is what is left of it (a custom ``client`` brings
       its own); after it the response goes out with ``timeout`` and no anchor
-      is started.
+      is started. An anchor already in flight at the deadline finishes in its
+      thread, and no response names what it recorded.
 
     The facilitator hosts the sealed blob (the anchor sends it inline): there is
     no fixed ``pointer`` here, since one pointer for every sale would name a blob
@@ -204,7 +205,7 @@ def durable_evidence(
             key = config.payer_key(result, x_payment_header)
         except Exception:  # noqa: BLE001 - no key is a skip, never a failed sale
             key = None
-        if not key:
+        if not isinstance(key, (bytes, bytearray, memoryview)) or not key:
             return _skipped("no_payer_key")
         proof = config.proof_of_payment(result) if config.proof_of_payment else None
         left = config.timeout if deadline is None else deadline - time.monotonic()
