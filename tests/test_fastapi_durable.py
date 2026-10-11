@@ -421,3 +421,13 @@ def test_the_module_reuses_anchor_evidence():
     assert DurableConfig().anchor is dx402.anchor_evidence
     assert DurableConfig().max_body_bytes == 32 * 1024 * 1024
     assert DurableConfig().payer_key is None
+
+
+@mounts
+def test_a_stream_whose_first_chunks_fill_the_limit_exactly_is_too_large(scripted, mount):
+    """The stream is ``BODY[:5]`` then the rest: at 5 bytes it is not over the
+    limit yet, and anchoring those 5 would seal a truncated body."""
+    sink = Sink()
+    evidence = _skip_case(scripted, mount, "stream", _durable(sink, max_body_bytes=5), sink)
+    assert evidence == {"v": 1, "skipped": "too_large"}
+    assert sink.requests == []
