@@ -299,6 +299,11 @@ payment_requirements = {
 - `SettlementAccountPayload` - For Crossmint/custodial wallets that sendTransaction (not signTransaction)
 - Fields: `transactionSignature`, `settleSecretKey`, `settlementRentDestination`
 
+### DX402 durable evidence in the seller middleware (durable.py, Unreleased)
+- `durable=DurableConfig(...)` on `fastapi_require_payment` and `X402Middleware` ONLY: the two FastAPI points that hold the route's response after the settle. Off by default (no call, no header). `FastAPIX402.require_payment` / `X402Depends` are dependencies that run before the route and never see its body: they do not take it, and neither do Flask, Django or Lambda (not wired yet)
+- Contract of x402-rs `crates/x402-axum/src/durable.rs`: never a gate on the sale (too_large / no_payer_key / anchor_failed are skip notices, body/status/settlement unchanged); no evidence and no header without a confirmed settlement (no tx hash, receipt pending/unknown/rejected) or on a 4xx/5xx response. Sealing is `dx402.anchor_evidence`, never a second implementation; the payer PUBLIC key, the proof and the anchor's HTTP client come from the config
+- `tests/test_fastapi_durable.py` (offline: `Scripted` facilitator + `httpx.MockTransport` anchor)
+
 ## Known Limitations
 
 > Verificadas contra el codigo el 2026-09-05. Dos de las tres que estaban aqui

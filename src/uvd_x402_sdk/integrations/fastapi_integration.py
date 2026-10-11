@@ -18,7 +18,7 @@ import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
 except ImportError:
@@ -35,6 +35,7 @@ from uvd_x402_sdk.bindings import (
 )
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
+from uvd_x402_sdk.durable import EVIDENCE_HEADER, DurableConfig, durable_evidence
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.response import create_402_response, create_402_headers
@@ -420,11 +421,74 @@ class X402Depends:
             raise HTTPException(status_code=status, detail=detail, headers=headers)
 
 
+async def _buffered(response: Response, limit: int) -> tuple[Response, bytes]:
+    """``response`` with its body in memory, and that body.
+
+    A body over ``limit`` is not kept: the answer streams the chunks read so
+    far and the rest, unchanged, and the bytes returned are just over the limit
+    (enough for ``too_large``).
+    """
+    body = getattr(response, "body", None)
+    if isinstance(body, (bytes, bytearray)):
+        return response, bytes(body)
+    iterator = response.body_iterator  # type: ignore[attr-defined]
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in iterator:
+        data = chunk if isinstance(chunk, bytes) else str(chunk).encode(response.charset)
+        chunks.append(data)
+        size += len(data)
+        if size > limit:
+
+            async def rest() -> Any:
+                for seen in chunks:
+                    yield seen
+                async for more in iterator:
+                    yield more
+
+            again: Response = StreamingResponse(
+                rest(), status_code=response.status_code, background=response.background
+            )
+            again.raw_headers = list(response.raw_headers)
+            return again, b"".join(chunks)
+    whole = b"".join(chunks)
+    again = Response(
+        content=whole, status_code=response.status_code, background=response.background
+    )
+    again.raw_headers = list(response.raw_headers)
+    return again, whole
+
+
+async def _with_durable_evidence(
+    durable: Optional[DurableConfig],
+    client: X402Client,
+    result: Any,
+    payment_header: str,
+    response: Response,
+) -> Response:
+    """The DX402 post-hook (:mod:`uvd_x402_sdk.durable`): runs after the handler
+    answered, on a payment that already settled. Off without ``durable``."""
+    if durable is None:
+        return response
+    response, body = await _buffered(response, durable.max_body_bytes)
+    try:
+        payee: Optional[str] = client.config.get_recipient(result.network)
+    except Exception:  # noqa: BLE001 - durable.payee or an empty payee
+        payee = None
+    value = await run_in_threadpool(
+        durable_evidence, durable, result, payment_header, body, response.status_code, payee
+    )
+    if value is not None:
+        response.headers[EVIDENCE_HEADER] = value
+    return response
+
+
 def fastapi_require_payment(
     amount_usd: Union[Decimal, float, str],
     config: X402Config,
     message: Optional[str] = None,
     binding_store: Optional[BindingStore] = None,
+    durable: Optional[DurableConfig] = None,
 ) -> Callable[[F], F]:
     """
     Decorator for FastAPI routes requiring payment.
@@ -437,6 +501,9 @@ def fastapi_require_payment(
         message: Custom 402 message
         binding_store: Persist each payment's key before the facilitator is
             called (:mod:`uvd_x402_sdk.bindings`). Without one, nothing changes.
+        durable: DX402 durable evidence of the response the route returned
+            (:mod:`uvd_x402_sdk.durable`), in ``X-Durable-Evidence``. Off by
+            default; never changes the body, the status or the settlement.
 
     Example:
         >>> @app.get("/resource")
@@ -480,6 +547,12 @@ def fastapi_require_payment(
                         response.headers.update(headers)
                     else:
                         response = JSONResponse(response, headers=headers)
+                if durable is not None:
+                    if not isinstance(response, Response):
+                        response = JSONResponse(response)
+                    response = await _with_durable_evidence(
+                        durable, client, result, payment_header, response
+                    )
                 return response
 
             except X402Error as e:
@@ -560,6 +633,11 @@ class X402Middleware(BaseHTTPMiddleware):
     count). Under a mount (``root_path``) a protected path may be written with
     or without it.
 
+    ``durable`` (:class:`~uvd_x402_sdk.durable.DurableConfig`, off by default)
+    anchors DX402 durable evidence of the route's response once the payment
+    settled and the route answered, in ``X-Durable-Evidence``; the body, the
+    status and the settlement are delivered as they are, whatever it does.
+
     Example:
         >>> from uvd_x402_sdk.integrations.fastapi_integration import X402Middleware
         >>>
@@ -579,8 +657,10 @@ class X402Middleware(BaseHTTPMiddleware):
         config: X402Config,
         protected_paths: dict[str, Decimal],
         binding_store: Optional[BindingStore] = None,
+        durable: Optional[DurableConfig] = None,
     ) -> None:
         super().__init__(app)
+        self._durable = durable
         self._config = config
         self._client = X402Client(config=config)
         self._protected_paths = protected_paths
@@ -625,7 +705,9 @@ class X402Middleware(BaseHTTPMiddleware):
             response = await call_next(request)
             if getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
-            return response
+            return await _with_durable_evidence(
+                self._durable, self._client, result, payment_header, response
+            )
 
         except HTTPException as e:
             # `_receipt_context`'s 400 receipt_context_mismatch. A middleware
