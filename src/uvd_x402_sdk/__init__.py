@@ -228,6 +228,7 @@ from uvd_x402_sdk.response import (
     payment_required_response_v2,
     Payment402BuilderV2,
     bazaar_extension,
+    with_discoverable,
 )
 from uvd_x402_sdk.facilitator import (
     # Facilitator URL and constants
@@ -514,6 +515,7 @@ __all__ = [
     "payer_key_from_evm_signature",
     "sealed_roles",
     "bazaar_extension",
+    "with_discoverable",
     "SAFE_TO_FALLBACK",
     "is_fallback_safe",
     "DelegationResolver",
