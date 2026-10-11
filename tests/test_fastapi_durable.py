@@ -14,6 +14,8 @@ import asyncio
 import base64
 import json
 import threading
+import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
@@ -26,7 +28,8 @@ pytest.importorskip("cryptography")
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat  # noqa: E402
 from fastapi import FastAPI, Request  # noqa: E402
-from fastapi.responses import PlainTextResponse, StreamingResponse  # noqa: E402
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse  # noqa: E402
+from starlette.background import BackgroundTask  # noqa: E402
 
 from tests.receipt_rail import PAYER, RECIPIENT, x_payment
 from tests.receipt_rail import _receipt as rail_receipt  # noqa: E402
@@ -38,6 +41,7 @@ from tests.test_integrations_undelivered import (  # noqa: E402
 from uvd_x402_sdk import X402Config  # noqa: E402
 from uvd_x402_sdk.durable import DurableConfig, durable_evidence  # noqa: E402
 from uvd_x402_sdk.dx402 import parse_evidence_header, payment_id  # noqa: E402
+from uvd_x402_sdk.integrations import fastapi_integration  # noqa: E402
 from uvd_x402_sdk.integrations.fastapi_integration import (  # noqa: E402
     X402Middleware,
     fastapi_require_payment,
@@ -277,13 +281,14 @@ def test_a_payer_key_resolver_that_raises_is_no_payer_key(scripted, mount):
     assert evidence == {"v": 1, "skipped": "no_payer_key"}
 
 
-@mounts
-def test_without_a_resolver_it_is_no_payer_key(scripted, mount):
-    sink = Sink()
-    durable = DurableConfig(facilitator=FACILITATOR, client=sink.client)
-    evidence = _skip_case(scripted, mount, "plain", durable, sink)
-    assert evidence == {"v": 1, "skipped": "no_payer_key"}
-    assert sink.requests == []
+@pytest.mark.parametrize(
+    "bad",
+    [{}, {"payer_key": None}, {"payer_key": b"key"}],
+    ids=["missing", "none", "not-callable"],
+)
+def test_a_config_without_a_resolver_is_refused_when_built(bad):
+    with pytest.raises(TypeError):
+        DurableConfig(**bad)
 
 
 @mounts
@@ -377,14 +382,14 @@ def test_without_a_settled_payment_there_is_no_evidence(result):
     assert sink.requests == []
 
 
-@pytest.mark.parametrize("status", [199, 400, 402, 404, 500, 503])
+@pytest.mark.parametrize("status", [199, 300, 304, 399, 400, 402, 404, 500, 503])
 def test_an_error_response_is_not_evidence(status):
     sink = Sink()
     assert durable_evidence(_durable(sink), _result(), "h", BODY, status) is None
     assert sink.requests == []
 
 
-@pytest.mark.parametrize("status", [200, 201, 204, 304, 399])
+@pytest.mark.parametrize("status", [200, 201, 204, 299])
 def test_a_delivered_response_is_evidence(status):
     sink = Sink()
     assert durable_evidence(_durable(sink), _result(), "h", BODY, status) is not None
@@ -431,9 +436,10 @@ def test_an_anchor_that_answers_no_dict_is_anchor_failed():
 def test_the_module_reuses_anchor_evidence():
     from uvd_x402_sdk import dx402
 
-    assert DurableConfig().anchor is dx402.anchor_evidence
-    assert DurableConfig().max_body_bytes == 32 * 1024 * 1024
-    assert DurableConfig().payer_key is None
+    config = DurableConfig(payer_key=lambda result, header: None)
+    assert config.anchor is dx402.anchor_evidence
+    assert config.max_body_bytes == dx402.ANCHOR_MAX_REQUEST_BYTES == 64 * 1024
+    assert config.timeout == 5.0
 
 
 @mounts
@@ -614,3 +620,453 @@ def test_a_capture_skip_is_the_notice_only_for_a_settled_delivery():
     assert durable_evidence(_durable(sink), _result(), "h", b"", 500, skipped="too_large") is None
     assert durable_evidence(None, _result(), "h", b"", 201, skipped="too_large") is None
     assert sink.requests == []
+
+
+# -- REF-SDKPY-71: what the hook cannot read, and how it passes it on ---------
+
+
+def _mount(mount_name: str, url: str, durable: Optional[DurableConfig], answer: Callable,
+           methods: Optional[list] = None) -> FastAPI:
+    """``answer(request)`` behind the decorator or the middleware."""
+    app = FastAPI()
+    config = X402Config(facilitator_url=url, recipient_evm=RECIPIENT)
+    route = app.api_route("/paid", methods=methods or ["GET"])
+    if mount_name == "decorator_app":
+        route(fastapi_require_payment(amount_usd=PRICE, config=config, durable=durable)(answer))
+    else:
+        route(answer)
+        app.add_middleware(X402Middleware, config=config, protected_paths={"/paid": PRICE},
+                           durable=durable)
+    return app
+
+
+MOUNT_NAMES = pytest.mark.parametrize("mount_name", ["decorator_app", "middleware_app"])
+
+
+class Recorder:
+    """An ``anchor`` that keeps the plaintext it was given."""
+
+    def __init__(self) -> None:
+        self.bodies: list = []
+        self.kwargs: list = []
+
+    def __call__(self, body: bytes, **kwargs: Any) -> dict:
+        self.bodies.append(body)
+        self.kwargs.append(kwargs)
+        return ANCHORED
+
+
+def _skip(reason: str) -> dict:
+    return {"v": 1, "skipped": reason}
+
+
+@MOUNT_NAMES
+def test_a_file_response_is_delivered_untouched_as_not_capturable(scripted, mount_name, tmp_path):
+    served = tmp_path / "paid.bin"
+    served.write_bytes(BODY * 3)
+
+    async def answer(request: Request) -> Any:
+        return FileResponse(served, media_type="application/octet-stream")
+
+    recorder = Recorder()
+    off = _get(_mount(mount_name, scripted().url, None, answer))
+    on = _get(_mount(mount_name, scripted().url, _durable(Sink(), anchor=recorder), answer))
+    assert (on.status_code, on.content) == (off.status_code, off.content) == (200, BODY * 3)
+    assert on.headers["content-length"] == off.headers["content-length"]
+    if mount_name == "decorator_app":
+        # The route's own FileResponse: no body, no iterator, nothing to read.
+        assert _decode(on.headers["x-durable-evidence"]) == _skip("not_capturable")
+        assert recorder.bodies == []
+    else:
+        # Behind BaseHTTPMiddleware the file arrives as a stream of its bytes.
+        assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+        assert recorder.bodies == [BODY * 3]
+
+
+@MOUNT_NAMES
+def test_a_hook_that_breaks_is_a_notice_never_a_500(scripted, mount_name, monkeypatch):
+    async def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("capture broke")
+
+    monkeypatch.setattr(fastapi_integration, "_buffered", broken)
+
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode(), status_code=201)
+
+    sink = Sink()
+    response = _get(_mount(mount_name, scripted().url, _durable(sink), answer))
+    assert (response.status_code, response.content) == (201, BODY)
+    assert _decode(response.headers["x-durable-evidence"]) == _skip("anchor_failed")
+    assert sink.requests == []
+
+
+def _buffer_chunks() -> list:
+    # What Starlette's StreamingResponse sends: bytes, memoryview, str.
+    return [memoryview(BODY[:5]), memoryview(bytearray(BODY[5:9])), BODY[9:20],
+            BODY[20:].decode()]
+
+
+@pytest.mark.parametrize("chunk", [b"ab\xc3\xb1", bytearray(b"ab\xc3\xb1"),
+                                   memoryview(b"ab\xc3\xb1"), "ab\u00f1"],
+                         ids=["bytes", "bytearray", "memoryview", "str"])
+def test_a_chunk_is_its_own_bytes(chunk):
+    assert fastapi_integration._as_bytes(chunk, "utf-8") == b"ab\xc3\xb1"
+
+
+@MOUNT_NAMES
+@pytest.mark.parametrize("source", ["sync", "async"])
+def test_buffer_chunks_are_sealed_and_delivered_as_the_same_bytes(scripted, mount_name, source):
+    async def chunks() -> Any:
+        for chunk in _buffer_chunks():
+            yield chunk
+
+    async def answer(request: Request) -> Any:
+        content = iter(_buffer_chunks()) if source == "sync" else chunks()
+        return StreamingResponse(content, status_code=201)
+
+    recorder = Recorder()
+    off = _get(_mount(mount_name, scripted().url, None, answer))
+    on = _get(_mount(mount_name, scripted().url, _durable(Sink(), anchor=recorder), answer))
+    assert (on.status_code, on.content) == (off.status_code, off.content) == (201, BODY)
+    assert recorder.bodies == [BODY]
+    assert _decode(on.headers["x-durable-evidence"]) == ANCHORED
+
+
+def _call_raw(app: FastAPI, on_body: Callable[[dict], None]) -> dict:
+    """Drive the ASGI app directly: unlike ``httpx.ASGITransport`` it sees each
+    body message as it is sent."""
+    messages: list = []
+
+    async def main() -> None:
+        sent = False
+
+        async def receive() -> dict:
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await asyncio.sleep(3600)
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict) -> None:
+            messages.append(message)
+            if message["type"] == "http.response.body":
+                on_body(message)
+
+        scope = {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+            "method": "GET", "scheme": "http", "path": "/paid", "raw_path": b"/paid",
+            "root_path": "", "query_string": b"", "server": ("testserver", 80),
+            "client": ("127.0.0.1", 1),
+            "headers": [(b"host", b"testserver"), (b"x-payment", x_payment().encode())],
+        }
+        await asyncio.wait_for(app(scope, receive, send), 10)
+
+    asyncio.run(main())
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    return {
+        "status": start["status"],
+        "headers": {k.decode().lower(): v.decode() for k, v in start["headers"]},
+        "body": b"".join(m.get("body", b"") for m in messages
+                         if m["type"] == "http.response.body"),
+    }
+
+
+@MOUNT_NAMES
+@pytest.mark.parametrize("media_type", ["text/event-stream", "Text/Event-Stream"])
+def test_an_event_stream_goes_out_as_it_comes_with_not_capturable(scripted, mount_name,
+                                                                 media_type):
+    first_out = threading.Event()
+
+    async def events() -> Any:
+        yield b"data: one\n\n"
+        # Only reached once the first event left: a hook that holds the stream
+        # back never gets here.
+        for _ in range(500):
+            if first_out.is_set():
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("the first event was held back")
+        yield b"data: two\n\n"
+
+    async def answer(request: Request) -> Any:
+        return StreamingResponse(events(), media_type=media_type)
+
+    def on_body(message: dict) -> None:
+        if message.get("body"):
+            first_out.set()
+
+    sink = Sink()
+    got = _call_raw(_mount(mount_name, scripted().url, _durable(sink), answer), on_body)
+    assert got["status"] == 200
+    assert got["body"] == b"data: one\n\ndata: two\n\n"
+    assert _decode(got["headers"]["x-durable-evidence"]) == _skip("not_capturable")
+    assert sink.requests == []
+
+
+def _confirmed_rail(scripted: Callable) -> Scripted:
+    body = {"success": True, "transaction": TX, "network": "arc", "payer": PAYER,
+            "receipt": rail_receipt("confirmed", TX, None)}
+    return scripted(settle=(200, body, {}))
+
+
+@MOUNT_NAMES
+@pytest.mark.parametrize("path", ["whole", "stream", "too_large"])
+def test_route_and_payment_headers_and_the_background_task_survive(scripted, mount_name, path):
+    ran: list = []
+
+    async def answer(request: Request) -> Any:
+        extra = {"X-Route": "kept", "Cache-Control": "private"}
+        task = BackgroundTask(ran.append, "ran")
+        if path == "whole":
+            return PlainTextResponse(BODY.decode(), status_code=201, headers=extra,
+                                     background=task)
+        return StreamingResponse(iter([BODY[:5], BODY[5:]]), status_code=201, headers=extra,
+                                 background=task, media_type="application/json")
+
+    limit = 5 if path == "too_large" else DEFAULT_LIMIT
+    off = _get(_mount(mount_name, _confirmed_rail(scripted).url, None, answer))
+    assert ran == ["ran"]
+    sink = Sink()
+    on = _get(_mount(mount_name, _confirmed_rail(scripted).url,
+                     _durable(sink, max_body_bytes=limit), answer))
+    assert ran == ["ran", "ran"]
+    assert (on.status_code, on.content) == (off.status_code, off.content) == (201, BODY)
+    for name in ("x-route", "payment-response", "x-payment-response", "cache-control",
+                 "access-control-expose-headers", "content-type"):
+        assert on.headers.get_list(name) == off.headers.get_list(name), name
+    assert "payment-response" in on.headers
+    assert on.headers["x-route"] == "kept"
+    evidence = _decode(on.headers["x-durable-evidence"])
+    if path == "too_large":
+        assert evidence == _skip("too_large")
+        assert sink.requests == []
+    else:
+        assert evidence == ANCHORED
+        assert len(sink.requests) == 1
+
+
+DEFAULT_LIMIT = DurableConfig(payer_key=lambda result, header: None).max_body_bytes
+
+
+def test_a_replayed_payment_gets_no_evidence():
+    sink = Sink()
+    result = _result(idempotent_replayed=True)
+    assert durable_evidence(_durable(sink), result, "h", BODY, 200) is None
+    assert durable_evidence(_durable(sink), result, "h", b"", 200, skipped="too_large") is None
+    assert sink.requests == []
+
+
+@MOUNT_NAMES
+def test_a_foreign_replay_is_refused_and_gets_no_evidence(scripted, mount_name):
+    """A replay this request did not admit never reaches the route."""
+    rail = scripted(settle=(200, {"success": True, "transaction": TX, "network": "arc",
+                                  "payer": PAYER}, {"Idempotent-Replayed": "true"}))
+
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode(), status_code=201)
+
+    sink = Sink()
+    response = _get(_mount(mount_name, rail.url, _durable(sink), answer))
+    assert response.status_code >= 400
+    assert "x-durable-evidence" not in response.headers
+    assert sink.requests == []
+
+
+def test_the_post_hook_leaves_a_replayed_sale_without_anchor_or_header():
+    """The route's own replay (purchase context): delivered, not anchored again."""
+    sink = Sink()
+    client = type("Client", (), {"config": X402Config(recipient_evm=RECIPIENT)})()
+    original = PlainTextResponse(BODY.decode(), status_code=201)
+    response = asyncio.run(fastapi_integration._with_durable_evidence(
+        _durable(sink), client, _result(idempotent_replayed=True), "h", original, "GET"))
+    assert response is original
+    assert "x-durable-evidence" not in response.headers
+    assert sink.requests == []
+
+
+@MOUNT_NAMES
+def test_the_route_own_evidence_is_kept_and_not_anchored_again(scripted, mount_name):
+    own = "the-route-anchored-this-itself"
+
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode(), status_code=201,
+                                 headers={"X-Durable-Evidence": own})
+
+    sink = Sink()
+    response = _get(_mount(mount_name, scripted().url, _durable(sink), answer))
+    assert (response.status_code, response.content) == (201, BODY)
+    assert response.headers.get_list("x-durable-evidence") == [own]
+    assert sink.requests == []
+
+
+@MOUNT_NAMES
+def test_a_head_request_is_not_anchored(scripted, mount_name):
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode(), status_code=200)
+
+    sink = Sink()
+    app = _mount(mount_name, scripted().url, _durable(sink), answer, methods=["GET", "HEAD"])
+
+    async def main() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            return await c.head("/paid", headers={"X-PAYMENT": x_payment()})
+
+    response = asyncio.run(main())
+    assert response.status_code == 200
+    assert "x-durable-evidence" not in response.headers
+    assert sink.requests == []
+
+
+@pytest.mark.parametrize("method", ["HEAD", "head", "Head"])
+def test_wants_evidence_skips_head_in_any_case(method):
+    config = _durable(Sink())
+    assert durable_evidence is not None
+    assert fastapi_integration.wants_evidence(config, _result(), 200, method) is False
+    assert fastapi_integration.wants_evidence(config, _result(), 200, "GET") is True
+    assert fastapi_integration.wants_evidence(config, _result(), 200, "GET", True) is False
+
+
+def test_there_is_no_fixed_pointer_and_each_sale_sends_its_own_sealed_blob():
+    from dataclasses import fields
+
+    assert "pointer" not in {f.name for f in fields(DurableConfig)}
+    sink = Sink()
+    config = _durable(sink)
+    durable_evidence(config, _result(transaction_hash="0x" + "a1" * 32), "h", b"one", 200)
+    durable_evidence(config, _result(transaction_hash="0x" + "b2" * 32), "h", b"two", 200)
+    sent = [payload for _, payload in sink.requests]
+    assert all("pointer" not in payload and payload["sealed"] for payload in sent)
+    assert sent[0]["sealed"] != sent[1]["sealed"]
+    assert sent[0]["contentHash"] != sent[1]["contentHash"]
+
+
+@MOUNT_NAMES
+def test_a_stream_that_fails_still_raises_after_the_bytes_read(scripted, mount_name):
+    """The route's error reaches the server as it would without the hook."""
+    app = _failing_app(mount_name, scripted().url, _durable(Sink()))
+
+    async def main() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            await c.get("/paid", headers={"X-PAYMENT": x_payment()})
+
+    with pytest.raises(RuntimeError, match="the stream broke"):
+        asyncio.run(main())
+
+
+@MOUNT_NAMES
+def test_the_anchor_runs_off_the_event_loop(scripted, mount_name):
+    seen: list = []
+
+    def anchor(body: bytes, **kwargs: Any) -> dict:
+        try:
+            asyncio.get_running_loop()
+            seen.append("on the loop")
+        except RuntimeError:
+            seen.append("in a thread")
+        return ANCHORED
+
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode())
+
+    _get(_mount(mount_name, scripted().url, _durable(Sink(), anchor=anchor), answer))
+    assert seen == ["in a thread"]
+
+
+@MOUNT_NAMES
+def test_a_slow_anchor_is_cut_at_the_deadline(scripted, mount_name):
+    release = threading.Event()
+
+    def slow(body: bytes, **kwargs: Any) -> dict:
+        release.wait(5)
+        return ANCHORED
+
+    async def answer(request: Request) -> Any:
+        return PlainTextResponse(BODY.decode(), status_code=201)
+
+    app = _mount(mount_name, scripted().url, _durable(Sink(), anchor=slow, timeout=0.2), answer)
+    took: list = []
+
+    async def main() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            started = time.monotonic()
+            got = await c.get("/paid", headers={"X-PAYMENT": x_payment()})
+            took.append(time.monotonic() - started)
+            release.set()  # the thread left behind ends; asyncio.run waits for it
+            return got
+
+    response = asyncio.run(main())
+    assert took[0] < 3
+    assert (response.status_code, response.content) == (201, BODY)
+    assert _decode(response.headers["x-durable-evidence"]) == _skip("timeout")
+
+
+@MOUNT_NAMES
+def test_a_slow_stream_is_delivered_whole_with_timeout(scripted, mount_name):
+    async def chunks() -> Any:
+        yield BODY[:5]
+        await asyncio.sleep(0.4)
+        yield BODY[5:]
+
+    async def answer(request: Request) -> Any:
+        return StreamingResponse(chunks(), status_code=201)
+
+    sink = Sink()
+    response = _get(_mount(mount_name, scripted().url, _durable(sink, timeout=0.1), answer))
+    assert (response.status_code, response.content) == (201, BODY)
+    assert _decode(response.headers["x-durable-evidence"]) == _skip("timeout")
+    assert sink.requests == []
+
+
+def test_a_deadline_already_gone_starts_no_anchor():
+    sink = Sink()
+    value = durable_evidence(_durable(sink), _result(), "h", BODY, 200,
+                             deadline=time.monotonic() - 1)
+    assert _decode(value) == _skip("timeout")
+    assert sink.requests == []
+
+
+def test_the_anchor_timeout_is_what_is_left_of_the_budget():
+    recorder = Recorder()
+    durable_evidence(_durable(Sink(), anchor=recorder, timeout=4.0), _result(), "h", BODY, 200,
+                     deadline=time.monotonic() + 1.0)
+    assert 0 < recorder.kwargs[0]["timeout"] <= 1.0
+    assert "pointer" not in recorder.kwargs[0]
+
+
+@pytest.mark.parametrize("size", [0, -1, True, 1.5, "10", None])
+def test_a_bad_body_limit_is_refused_when_built(size):
+    with pytest.raises(TypeError):
+        DurableConfig(payer_key=lambda result, header: None, max_body_bytes=size)
+
+
+@pytest.mark.parametrize("budget", [0, -1, True, float("nan"), float("inf"), "5", None])
+def test_a_bad_timeout_is_refused_when_built(budget):
+    with pytest.raises(TypeError):
+        DurableConfig(payer_key=lambda result, header: None, timeout=budget)
+
+
+def test_a_body_over_the_default_limit_is_too_large():
+    sink = Sink()
+    body = b"x" * (DEFAULT_LIMIT + 1)
+    assert _decode(durable_evidence(_durable(sink), _result(), "h", body, 200)) \
+        == _skip("too_large")
+    assert sink.requests == []
+
+
+def test_a_decorated_route_returning_a_model_with_dates_is_delivered(scripted):
+    at = datetime(2026, 10, 11, tzinfo=timezone.utc)
+
+    async def answer(request: Request) -> Any:
+        return {"at": at, "price": PRICE}
+
+    recorder = Recorder()
+    response = _get(_mount("decorator_app", scripted().url, _durable(Sink(), anchor=recorder),
+                           answer))
+    assert response.status_code == 200
+    assert response.json() == {"at": "2026-10-11T00:00:00+00:00", "price": 0.01}
+    assert recorder.bodies == [response.content]

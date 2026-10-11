@@ -7,9 +7,12 @@ Provides:
 - fastapi_require_payment: Decorator for protected routes
 """
 
+import asyncio
+import logging
 import re
+import time
 from decimal import Decimal
-from functools import wraps
+from functools import partial, wraps
 from ipaddress import AddressValueError, IPv6Address
 from typing import Any, Callable, Optional, TypeVar, Union
 from urllib.parse import quote, unquote
@@ -18,6 +21,7 @@ import httpx
 
 try:
     from fastapi import FastAPI, Request, Response, HTTPException, Depends
+    from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
     from starlette.middleware.base import BaseHTTPMiddleware
@@ -35,11 +39,19 @@ from uvd_x402_sdk.bindings import (
 )
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
-from uvd_x402_sdk.durable import EVIDENCE_HEADER, DurableConfig, durable_evidence
+from uvd_x402_sdk.durable import (
+    EVIDENCE_HEADER,
+    DurableConfig,
+    durable_evidence,
+    skip_notice,
+    wants_evidence,
+)
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
 from uvd_x402_sdk.response import create_402_response, create_402_headers
 from uvd_x402_sdk.receipts import payment_response_headers, validate_purchase_context
+
+logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -421,22 +433,42 @@ class X402Depends:
             raise HTTPException(status_code=status, detail=detail, headers=headers)
 
 
-async def _buffered(response: Response, limit: int) -> tuple[Response, bytes, Optional[str]]:
+def _as_bytes(chunk: Any, charset: str) -> bytes:
+    """A body chunk as Starlette sends it: buffers as they are, ``str`` encoded."""
+    if isinstance(chunk, (bytes, bytearray, memoryview)):
+        return bytes(chunk)
+    return str(chunk).encode(charset)
+
+
+def _is_event_stream(response: Response) -> bool:
+    kind = response.headers.get("content-type", "")
+    return kind.split(";")[0].strip().lower() == "text/event-stream"
+
+
+async def _buffered(
+    response: Response, limit: int, deadline: float
+) -> tuple[Response, bytes, Optional[str]]:
     """``response`` with its body in memory, that body, and a skip reason.
 
-    As x402-rs ``buffer_body``: a body that announces (``Content-Length``) more
-    than ``limit`` is not read at all; one that goes over ``limit`` while read,
-    or whose stream fails, is not kept: the answer streams the chunks already
-    read ahead of the untouched rest (a failure is raised again after them), and
-    the reason is ``too_large`` / ``anchor_failed``. Never a byte less.
+    As x402-rs ``buffer_body`` and the TypeScript post-hook: a response without
+    a readable body (``FileResponse``) or a ``text/event-stream`` is not read
+    (``not_capturable``); one that announces (``Content-Length``) more than
+    ``limit`` is not read (``too_large``); one that goes over ``limit`` or past
+    ``deadline`` (``time.monotonic()``) while read, or whose stream fails, is
+    not kept: the answer streams the chunks already read ahead of the untouched
+    rest (a failure is raised again after them), with ``too_large`` /
+    ``timeout`` / ``anchor_failed``. Never a byte less.
     """
     body = getattr(response, "body", None)
-    if isinstance(body, (bytes, bytearray)):
+    if isinstance(body, (bytes, bytearray, memoryview)):
         return response, bytes(body), None
+    iterable = getattr(response, "body_iterator", None)
+    if iterable is None or _is_event_stream(response):
+        return response, b"", "not_capturable"
     announced = response.headers.get("content-length", "")
     if announced.isdigit() and int(announced) > limit:
         return response, b"", "too_large"
-    iterator = response.body_iterator  # type: ignore[attr-defined]
+    iterator = iterable.__aiter__()
     chunks: list[bytes] = []
     size = 0
 
@@ -447,20 +479,32 @@ async def _buffered(response: Response, limit: int) -> tuple[Response, bytes, Op
         again.raw_headers = list(response.raw_headers)
         return again
 
+    async def resumed(pending: Optional["asyncio.Future[Any]"]) -> Any:
+        for seen in chunks:
+            yield seen
+        if pending is not None:
+            try:
+                yield await pending
+            except StopAsyncIteration:
+                return
+        async for more in iterator:
+            yield more
+
     try:
-        async for chunk in iterator:
-            data = chunk if isinstance(chunk, bytes) else str(chunk).encode(response.charset)
+        while True:
+            pending = asyncio.ensure_future(iterator.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=max(deadline - time.monotonic(), 0))
+            if not done:
+                return again_with(resumed(pending)), b"", "timeout"
+            try:
+                chunk = pending.result()
+            except StopAsyncIteration:
+                break
+            data = _as_bytes(chunk, response.charset)
             chunks.append(data)
             size += len(data)
             if size > limit:
-
-                async def rest() -> Any:
-                    for seen in chunks:
-                        yield seen
-                    async for more in iterator:
-                        yield more
-
-                return again_with(rest()), b"", "too_large"
+                return again_with(resumed(None)), b"", "too_large"
     except Exception as failure:  # noqa: BLE001 - delivered as it would be without the hook
         broken = failure
 
@@ -507,32 +551,57 @@ async def _with_durable_evidence(
     result: Any,
     payment_header: str,
     response: Response,
+    method: str,
     scope: Optional[Any] = None,
 ) -> Response:
     """The DX402 post-hook (:mod:`uvd_x402_sdk.durable`): runs after the handler
-    answered, on a payment that already settled. Off without ``durable``."""
+    answered, on a payment that already settled. Off without ``durable``.
+
+    It never raises: the payment is settled by now, so a failure of the hook
+    itself is a skip notice on the response, never a 500 in its place.
+    """
     if durable is None:
         return response
-    response, body, skipped = await _buffered(response, durable.max_body_bytes)
-    if skipped is None and scope is not None and scope.get(_ROUTE_FAILED):
-        skipped = "anchor_failed"
+    current = response
     try:
-        payee: Optional[str] = client.config.get_recipient(result.network)
-    except Exception:  # noqa: BLE001 - durable.payee or an empty payee
-        payee = None
-    value = await run_in_threadpool(
-        durable_evidence,
-        durable,
-        result,
-        payment_header,
-        body,
-        response.status_code,
-        payee,
-        skipped,
-    )
-    if value is not None:
-        response.headers[EVIDENCE_HEADER] = value
-    return response
+        has_header = EVIDENCE_HEADER in response.headers
+        if not wants_evidence(durable, result, response.status_code, method, has_header):
+            return response
+        deadline = time.monotonic() + durable.timeout
+        current, body, skipped = await _buffered(response, durable.max_body_bytes, deadline)
+        if skipped is None and scope is not None and scope.get(_ROUTE_FAILED):
+            skipped = "anchor_failed"
+        try:
+            payee: Optional[str] = client.config.get_recipient(result.network)
+        except Exception:  # noqa: BLE001 - durable.payee or an empty payee
+            payee = None
+        # Off the event loop, and not waited past the deadline: a thread left
+        # behind finds the deadline gone and starts no anchor.
+        future = asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                durable_evidence,
+                durable,
+                result,
+                payment_header,
+                body,
+                current.status_code,
+                payee,
+                skipped,
+                deadline,
+            ),
+        )
+        done, _ = await asyncio.wait({future}, timeout=max(deadline - time.monotonic(), 0))
+        value = future.result() if done else skip_notice("timeout")
+        if value is not None:
+            current.headers[EVIDENCE_HEADER] = value
+    except Exception:  # noqa: BLE001 - evidence is never a gate on the sale
+        logger.warning("DX402 post-hook failed; delivered without evidence", exc_info=True)
+        try:
+            current.headers[EVIDENCE_HEADER] = skip_notice("anchor_failed")
+        except Exception:  # noqa: BLE001 - the response goes out as it is
+            pass
+    return current
 
 
 def fastapi_require_payment(
@@ -600,11 +669,14 @@ def fastapi_require_payment(
                     else:
                         response = JSONResponse(response, headers=headers)
                 if durable is not None:
-                    if not isinstance(response, Response):
-                        response = JSONResponse(response)
-                    response = await _with_durable_evidence(
-                        durable, client, result, payment_header, response
-                    )
+                    if not isinstance(response, Response) and wants_evidence(
+                        durable, result, 200, request.method
+                    ):
+                        response = JSONResponse(jsonable_encoder(response))
+                    if isinstance(response, Response):
+                        response = await _with_durable_evidence(
+                            durable, client, result, payment_header, response, request.method
+                        )
                 return response
 
             except X402Error as e:
@@ -758,7 +830,13 @@ class X402Middleware(BaseHTTPMiddleware):
             if getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
             return await _with_durable_evidence(
-                self._durable, self._client, result, payment_header, response, request.scope
+                self._durable,
+                self._client,
+                result,
+                payment_header,
+                response,
+                request.method,
+                request.scope,
             )
 
         except HTTPException as e:
