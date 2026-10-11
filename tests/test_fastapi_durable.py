@@ -1312,3 +1312,23 @@ def test_a_capture_cancelled_mid_stream_closes_the_routes_stream():
         assert closed == [True]
 
     asyncio.run(main())
+
+
+@pytest.mark.parametrize("receipt", [False, True], ids=["no-receipt", "receipt"])
+def test_a_declared_204_goes_out_without_a_body(scripted, receipt):
+    def build(durable: Optional[DurableConfig]) -> FastAPI:
+        app = FastAPI()
+        rail = _confirmed_rail(scripted) if receipt else scripted()
+        config = X402Config(facilitator_url=rail.url, recipient_evm=RECIPIENT)
+
+        @app.get("/paid", status_code=204)
+        @fastapi_require_payment(amount_usd=PRICE, config=config, durable=durable)
+        async def paid(request: Request) -> None:
+            return None
+
+        return app
+
+    plain = _get(build(None))
+    on = _get(build(_durable(Sink(), anchor=Recorder())))
+    for response in (plain, on):
+        assert (response.status_code, response.content) == (204, b"")

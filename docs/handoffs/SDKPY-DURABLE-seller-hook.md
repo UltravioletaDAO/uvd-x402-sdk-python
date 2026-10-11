@@ -28,6 +28,16 @@
   that is not bytes is `no_payer_key`. Tests: contextvar / cancel scope (decorator + middleware,
   durable on vs off), status 201 / response_model / PlainTextResponse (on vs off), confirmed
   receipt + dict, cancelled capture closes the route stream. On base 0c02077: 10 of them red.
+- Ronda 4b (c0der, same comment): main merged (#69, 0.98.0) and version 0.99.0. P2 done the
+  way asked: `_route_response` builds what FastAPI builds for the route (response_model,
+  response_class, status_code, injected `Response`), in the durable path AND the receipt branch
+  (which sent `JSONResponse(raw)` before, durable or not); the anchor seals those bytes. A
+  failing stream is `not_capturable` (TS name). Regression test under real uvicorn on
+  127.0.0.1 (contextvar + anyio cancel scope across yields, decorator + middleware). `uvicorn`
+  added to the `dev` extra for that test. The deadline stays on the queue wait, not
+  `move_on_after` in the route's task: cancelling there would cut the paid stream on timeout.
+  An anchor in flight is bounded by its HTTP timeout (what is left of the budget); a hard abort
+  of the thread is not done (follow-up, with a BYO sink).
 - Falta: CI of the round-4 push.
 - Proximo paso: review of the PR; wiring Flask / Django / Lambda is a separate task.
 
