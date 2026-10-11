@@ -1525,6 +1525,8 @@ def _merge_caller_extra(
     if not isinstance(extra, Mapping) or not all(isinstance(k, str) for k in extra):
         raise TypeError("extra must be a mapping with string keys")
     caller = dict(extra)
+    if "discoverable" in caller and not isinstance(caller["discoverable"], bool):
+        raise ValueError(f"discoverable must be a bool, got {caller['discoverable']!r}")
     try:
         # allow_nan=False: NaN / Infinity are not JSON, and some httpx
         # versions within the supported range would send them as bare tokens.
@@ -2123,6 +2125,8 @@ class X402Client:
                 "name": network_config.usdc_domain_name,
                 "version": network_config.usdc_domain_version,
             }
+
+        requirements.extra = self.config.with_discoverable(requirements.extra)
 
         return requirements
 
