@@ -421,42 +421,84 @@ class X402Depends:
             raise HTTPException(status_code=status, detail=detail, headers=headers)
 
 
-async def _buffered(response: Response, limit: int) -> tuple[Response, bytes]:
-    """``response`` with its body in memory, and that body.
+async def _buffered(response: Response, limit: int) -> tuple[Response, bytes, Optional[str]]:
+    """``response`` with its body in memory, that body, and a skip reason.
 
-    A body over ``limit`` is not kept: the answer streams the chunks read so
-    far and the rest, unchanged, and the bytes returned are just over the limit
-    (enough for ``too_large``).
+    As x402-rs ``buffer_body``: a body that announces (``Content-Length``) more
+    than ``limit`` is not read at all; one that goes over ``limit`` while read,
+    or whose stream fails, is not kept: the answer streams the chunks already
+    read ahead of the untouched rest (a failure is raised again after them), and
+    the reason is ``too_large`` / ``anchor_failed``. Never a byte less.
     """
     body = getattr(response, "body", None)
     if isinstance(body, (bytes, bytearray)):
-        return response, bytes(body)
+        return response, bytes(body), None
+    announced = response.headers.get("content-length", "")
+    if announced.isdigit() and int(announced) > limit:
+        return response, b"", "too_large"
     iterator = response.body_iterator  # type: ignore[attr-defined]
     chunks: list[bytes] = []
     size = 0
-    async for chunk in iterator:
-        data = chunk if isinstance(chunk, bytes) else str(chunk).encode(response.charset)
-        chunks.append(data)
-        size += len(data)
-        if size > limit:
 
-            async def rest() -> Any:
-                for seen in chunks:
-                    yield seen
-                async for more in iterator:
-                    yield more
+    def again_with(rest: Any) -> Response:
+        again: Response = StreamingResponse(
+            rest, status_code=response.status_code, background=response.background
+        )
+        again.raw_headers = list(response.raw_headers)
+        return again
 
-            again: Response = StreamingResponse(
-                rest(), status_code=response.status_code, background=response.background
-            )
-            again.raw_headers = list(response.raw_headers)
-            return again, b"".join(chunks)
+    try:
+        async for chunk in iterator:
+            data = chunk if isinstance(chunk, bytes) else str(chunk).encode(response.charset)
+            chunks.append(data)
+            size += len(data)
+            if size > limit:
+
+                async def rest() -> Any:
+                    for seen in chunks:
+                        yield seen
+                    async for more in iterator:
+                        yield more
+
+                return again_with(rest()), b"", "too_large"
+    except Exception as failure:  # noqa: BLE001 - delivered as it would be without the hook
+        broken = failure
+
+        async def read_then_fail() -> Any:
+            for seen in chunks:
+                yield seen
+            raise broken
+
+        return again_with(read_then_fail()), b"", "anchor_failed"
     whole = b"".join(chunks)
     again = Response(
         content=whole, status_code=response.status_code, background=response.background
     )
     again.raw_headers = list(response.raw_headers)
-    return again, whole
+    return again, whole, None
+
+
+#: Set in the ASGI scope by :class:`_RecordsRouteFailure` when the route raised.
+_ROUTE_FAILED = "uvd_x402.route_failed"
+
+
+class _RecordsRouteFailure:
+    """The app behind :class:`X402Middleware`, marking a failure in the scope.
+
+    ``BaseHTTPMiddleware`` ends ``call_next``'s stream without an error when the
+    route raises mid-stream (it raises later), so the bytes read look like a
+    whole body; this mark is how the hook tells them apart.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await self.app(scope, receive, send)
+        except BaseException:
+            scope[_ROUTE_FAILED] = True
+            raise
 
 
 async def _with_durable_evidence(
@@ -465,18 +507,28 @@ async def _with_durable_evidence(
     result: Any,
     payment_header: str,
     response: Response,
+    scope: Optional[Any] = None,
 ) -> Response:
     """The DX402 post-hook (:mod:`uvd_x402_sdk.durable`): runs after the handler
     answered, on a payment that already settled. Off without ``durable``."""
     if durable is None:
         return response
-    response, body = await _buffered(response, durable.max_body_bytes)
+    response, body, skipped = await _buffered(response, durable.max_body_bytes)
+    if skipped is None and scope is not None and scope.get(_ROUTE_FAILED):
+        skipped = "anchor_failed"
     try:
         payee: Optional[str] = client.config.get_recipient(result.network)
     except Exception:  # noqa: BLE001 - durable.payee or an empty payee
         payee = None
     value = await run_in_threadpool(
-        durable_evidence, durable, result, payment_header, body, response.status_code, payee
+        durable_evidence,
+        durable,
+        result,
+        payment_header,
+        body,
+        response.status_code,
+        payee,
+        skipped,
     )
     if value is not None:
         response.headers[EVIDENCE_HEADER] = value
@@ -659,7 +711,7 @@ class X402Middleware(BaseHTTPMiddleware):
         binding_store: Optional[BindingStore] = None,
         durable: Optional[DurableConfig] = None,
     ) -> None:
-        super().__init__(app)
+        super().__init__(app if durable is None else _RecordsRouteFailure(app))
         self._durable = durable
         self._config = config
         self._client = X402Client(config=config)
@@ -706,7 +758,7 @@ class X402Middleware(BaseHTTPMiddleware):
             if getattr(result, "receipt", None):
                 response.headers.update(payment_response_headers(result))
             return await _with_durable_evidence(
-                self._durable, self._client, result, payment_header, response
+                self._durable, self._client, result, payment_header, response, request.scope
             )
 
         except HTTPException as e:

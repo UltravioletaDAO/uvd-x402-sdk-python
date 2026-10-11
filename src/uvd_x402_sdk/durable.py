@@ -110,17 +110,22 @@ def durable_evidence(
     body: bytes,
     status_code: int,
     payee: str | None = None,
+    skipped: str | None = None,
 ) -> str | None:
     """The ``X-Durable-Evidence`` value for one delivered response, or ``None``.
 
     ``None`` means "no header": durable off, a payment without a confirmed
     settlement, or an error response. Otherwise the anchor's result or a skip
-    notice, encoded with :func:`evidence_header`. Never raises.
+    notice, encoded with :func:`evidence_header`. ``skipped`` is a reason the
+    caller already has (the body could not be captured): it is the notice, on
+    the same conditions. Never raises.
     """
     if config is None:
         return None
     if not 200 <= status_code < 400 or not _settled(result):
         return None
+    if skipped is not None:
+        return _skipped(skipped)
     try:
         if len(body) > config.max_body_bytes:
             return _skipped("too_large")

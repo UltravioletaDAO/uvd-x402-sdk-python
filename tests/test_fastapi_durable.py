@@ -13,6 +13,7 @@ is read from anywhere.
 import asyncio
 import base64
 import json
+import threading
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
@@ -84,15 +85,27 @@ def _public_key() -> bytes:
 class Sink:
     """The anchor endpoint: counts the calls and answers as it is told."""
 
-    def __init__(self, status: int = 200, answer: Optional[dict] = None) -> None:
+    def __init__(
+        self,
+        status: int = 200,
+        answer: Optional[dict] = None,
+        log: Optional[list] = None,
+        echo: bool = False,
+    ) -> None:
         self.requests: list = []
         self.status = status
         self.answer = ANCHORED if answer is None else answer
+        self.log = log
+        self.echo = echo
         self.client = httpx.Client(transport=httpx.MockTransport(self._handle))
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append((str(request.url), json.loads(request.content)))
-        return httpx.Response(self.status, json=self.answer)
+        sent = json.loads(request.content)
+        self.requests.append((str(request.url), sent))
+        if self.log is not None:
+            self.log.append("anchor")
+        answer = {**self.answer, "paymentId": sent["paymentId"]} if self.echo else self.answer
+        return httpx.Response(self.status, json=answer)
 
 
 def _durable(sink: Sink, key: Optional[bytes] = b"", **extra: Any) -> DurableConfig:
@@ -430,4 +443,176 @@ def test_a_stream_whose_first_chunks_fill_the_limit_exactly_is_too_large(scripte
     sink = Sink()
     evidence = _skip_case(scripted, mount, "stream", _durable(sink, max_body_bytes=5), sink)
     assert evidence == {"v": 1, "skipped": "too_large"}
+    assert sink.requests == []
+
+
+# -- parity with the TypeScript twin (uvd-x402-sdk-typescript #52/#53) ---------
+
+
+@mounts
+def test_the_anchor_follows_the_one_settle(scripted, mount):
+    rail = scripted()
+    sink = Sink(log=rail.calls)
+    response = _get(mount(rail.url, _durable(sink)))
+    assert response.status_code == 201
+    assert rail.calls == ["/verify", "/settle", "anchor"]
+
+
+class _Settles(dict):
+    """``/settle`` answers a different transaction on each call."""
+
+    def __init__(self, base: dict, txs: list) -> None:
+        super().__init__(base)
+        self._txs = list(txs)
+        self._lock = threading.Lock()
+
+    def get(self, path: str, default: Any = None) -> Any:
+        if path != "/settle":
+            return super().get(path, default)
+        with self._lock:
+            tx = self._txs.pop(0)
+        return (200, {"success": True, "transaction": tx, "network": "arc", "payer": PAYER}, {})
+
+
+def _echo_app(mount_name: str, url: str, durable: DurableConfig) -> FastAPI:
+    app = FastAPI()
+    config = X402Config(facilitator_url=url, recipient_evm=RECIPIENT)
+
+    async def answer(request: Request) -> Any:
+        await asyncio.sleep(0.05)  # both requests are inside the route at once
+        return {"tx": request.state.payment_result.transaction_hash}
+
+    if mount_name == "decorator_app":
+        app.get("/paid")(fastapi_require_payment(amount_usd=PRICE, config=config,
+                                                 durable=durable)(answer))
+    else:
+        app.get("/paid")(answer)
+        app.add_middleware(X402Middleware, config=config, protected_paths={"/paid": PRICE},
+                           durable=durable)
+    return app
+
+
+@pytest.mark.parametrize("mount_name", ["decorator_app", "middleware_app"])
+def test_concurrent_sales_anchor_each_its_own_settlement(scripted, mount_name):
+    rail = scripted()
+    tx_a, tx_b = "0x" + "a1" * 32, "0x" + "b2" * 32
+    rail.answers = _Settles(rail.answers, [tx_a, tx_b])
+    sink = Sink(echo=True)
+    app = _echo_app(mount_name, rail.url, _durable(sink))
+
+    async def main() -> list:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            return await asyncio.gather(
+                c.get("/paid", headers={"X-PAYMENT": x_payment("0x01")}),
+                c.get("/paid", headers={"X-PAYMENT": x_payment("0x02")}),
+            )
+
+    responses = asyncio.run(main())
+    delivered = [r.json()["tx"] for r in responses]
+    assert sorted(delivered) == sorted([tx_a, tx_b])
+    for response, tx in zip(responses, delivered):
+        evidence = _decode(response.headers["x-durable-evidence"])
+        assert evidence["paymentId"] == payment_id("eip155:5042", tx)
+    assert sorted(sent["txHash"] for _, sent in sink.requests) == sorted([tx_a, tx_b])
+    assert rail.calls.count("/settle") == 2
+
+
+def _failing_app(mount_name: str, url: str, durable: Optional[DurableConfig]) -> FastAPI:
+    app = FastAPI()
+    config = X402Config(facilitator_url=url, recipient_evm=RECIPIENT)
+
+    async def chunks() -> Any:
+        yield BODY[:5]
+        yield BODY[5:9]
+        raise RuntimeError("the stream broke")
+
+    async def answer(request: Request) -> Any:
+        return StreamingResponse(chunks(), status_code=201)
+
+    if mount_name == "decorator_app":
+        app.get("/paid")(fastapi_require_payment(amount_usd=PRICE, config=config,
+                                                 durable=durable)(answer))
+    else:
+        app.get("/paid")(answer)
+        app.add_middleware(X402Middleware, config=config, protected_paths={"/paid": PRICE},
+                           durable=durable)
+    return app
+
+
+def _received(app: FastAPI) -> tuple:
+    """Status, headers and every byte the client got before the stream broke."""
+    got: list = []
+    meta: dict = {}
+
+    async def main() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            async with c.stream("GET", "/paid", headers={"X-PAYMENT": x_payment()}) as r:
+                meta["status"] = r.status_code
+                meta["headers"] = _lower_headers(r.headers)
+                async for data in r.aiter_raw():
+                    got.append(data)
+
+    with pytest.raises(RuntimeError, match="the stream broke"):
+        asyncio.run(main())
+    return meta.get("status"), meta.get("headers", {}), b"".join(got)
+
+
+def _lower_headers(headers: Any) -> dict:
+    return {str(k).lower(): v for k, v in headers.items()}
+
+
+@pytest.mark.parametrize("mount_name", ["decorator_app", "middleware_app"])
+def test_a_stream_that_fails_keeps_the_bytes_already_read(scripted, mount_name):
+    sink = Sink()
+    off_status, _, off_bytes = _received(_failing_app(mount_name, scripted().url, None))
+    on_status, headers, on_bytes = _received(
+        _failing_app(mount_name, scripted().url, _durable(sink))
+    )
+    assert (on_status, on_bytes) == (off_status, off_bytes)
+    assert on_bytes.startswith(BODY[:9]) or on_status is None
+    if on_status is not None:
+        assert _decode(headers["x-durable-evidence"]) == {"v": 1, "skipped": "anchor_failed"}
+    assert sink.requests == []
+
+
+@mounts
+def test_a_body_that_announces_more_than_the_limit_is_not_read(scripted, mount):
+    """``Content-Length`` over the limit: ``too_large`` before reading a byte,
+    even though these bytes alone would fit."""
+    rail = scripted()
+    sink = Sink()
+    app = FastAPI()
+    config = X402Config(facilitator_url=rail.url, recipient_evm=RECIPIENT)
+    durable = _durable(sink, max_body_bytes=len(BODY))
+
+    def answer() -> Any:
+        return StreamingResponse(iter([BODY]), status_code=201,
+                                 headers={"content-length": str(len(BODY) + 1)})
+
+    if mount is decorator_app:
+        async def paid(request: Request):
+            return answer()
+        app.get("/paid")(fastapi_require_payment(amount_usd=PRICE, config=config,
+                                                 durable=durable)(paid))
+    else:
+        app.get("/paid")(answer)
+        app.add_middleware(X402Middleware, config=config, protected_paths={"/paid": PRICE},
+                           durable=durable)
+    response = _get(app)
+    assert response.status_code == 201
+    assert response.content.startswith(BODY)
+    assert _decode(response.headers["x-durable-evidence"]) == {"v": 1, "skipped": "too_large"}
+    assert sink.requests == []
+
+
+def test_a_capture_skip_is_the_notice_only_for_a_settled_delivery():
+    sink = Sink()
+    assert durable_evidence(_durable(sink), _result(), "h", b"", 201, skipped="too_large") \
+        == "eyJ2IjogMSwgInNraXBwZWQiOiAidG9vX2xhcmdlIn0"
+    assert durable_evidence(_durable(sink), _result(transaction_hash=None), "h", b"", 201,
+                            skipped="too_large") is None
+    assert durable_evidence(_durable(sink), _result(), "h", b"", 500, skipped="too_large") is None
+    assert durable_evidence(None, _result(), "h", b"", 201, skipped="too_large") is None
     assert sink.requests == []
