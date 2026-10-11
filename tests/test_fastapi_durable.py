@@ -546,7 +546,8 @@ def _received(app: FastAPI) -> tuple:
     meta: dict = {}
 
     async def main() -> None:
-        transport = httpx.ASGITransport(app=app)
+        # The route's error is not raised at the client: it gets what was sent.
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
             async with c.stream("GET", "/paid", headers={"X-PAYMENT": x_payment()}) as r:
                 meta["status"] = r.status_code
@@ -554,9 +555,8 @@ def _received(app: FastAPI) -> tuple:
                 async for data in r.aiter_raw():
                     got.append(data)
 
-    with pytest.raises(RuntimeError, match="the stream broke"):
-        asyncio.run(main())
-    return meta.get("status"), meta.get("headers", {}), b"".join(got)
+    asyncio.run(main())
+    return meta["status"], meta["headers"], b"".join(got)
 
 
 def _lower_headers(headers: Any) -> dict:
@@ -570,10 +570,8 @@ def test_a_stream_that_fails_keeps_the_bytes_already_read(scripted, mount_name):
     on_status, headers, on_bytes = _received(
         _failing_app(mount_name, scripted().url, _durable(sink))
     )
-    assert (on_status, on_bytes) == (off_status, off_bytes)
-    assert on_bytes.startswith(BODY[:9]) or on_status is None
-    if on_status is not None:
-        assert _decode(headers["x-durable-evidence"]) == {"v": 1, "skipped": "anchor_failed"}
+    assert (on_status, on_bytes) == (off_status, off_bytes) == (201, BODY[:9])
+    assert _decode(headers["x-durable-evidence"]) == {"v": 1, "skipped": "anchor_failed"}
     assert sink.requests == []
 
 
