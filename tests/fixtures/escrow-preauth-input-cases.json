@@ -1,0 +1,584 @@
+{
+  "_note": "Inputs of build_escrow_pre_auth (Python) / buildEscrowPreAuth (TypeScript) and the verdict both SDKs give, one field changed per case on the base config below, signed on network 'base' at the frozen 'now'. 'value' null means: chain_id absent from the network block; a fee absent (its default); the tier absent (the SDK's own); no deadline. 'signed' is the value the paymentInfo / domain carries. Python: fees and tier_timings in the escrow block; TypeScript: min_fee_bps, max_fee_bps and tiers in the network config, the deadline as reviewDeadlineSec. 'collector' is the token_collector.",
+  "now": 1790000000,
+  "base_network": "base",
+  "base_config": {
+    "chain_id": 8453,
+    "operator": "0x271f9fa7f8907aCf178CCFB470076D9129D8F0Eb",
+    "escrow": "0xb9488351E48b23D798f24e8174514F28B741Eb4f",
+    "collector": "0x48ADf6E37F9b31dC2AAD0462C5862B5422C736B8",
+    "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "usdc_domain_name": "USD Coin",
+    "usdc_domain_version": "2"
+  },
+  "tier_timings": {
+    "micro": {
+      "pre": 3600,
+      "auth": 604800,
+      "refund": 1209600
+    }
+  },
+  "cases": [
+    {
+      "field": "chain_id",
+      "value": 8453,
+      "expect": "sign",
+      "signed": 8453,
+      "id": "chain_id/000"
+    },
+    {
+      "field": "chain_id",
+      "value": "8453",
+      "expect": "sign",
+      "signed": 8453,
+      "id": "chain_id/001"
+    },
+    {
+      "field": "chain_id",
+      "value": "08453",
+      "expect": "sign",
+      "signed": 8453,
+      "id": "chain_id/002"
+    },
+    {
+      "field": "chain_id",
+      "value": 8453.0,
+      "expect": "sign",
+      "signed": 8453,
+      "id": "chain_id/003"
+    },
+    {
+      "field": "chain_id",
+      "value": " 8453",
+      "expect": "refuse",
+      "id": "chain_id/004"
+    },
+    {
+      "field": "chain_id",
+      "value": "8453 ",
+      "expect": "refuse",
+      "id": "chain_id/005"
+    },
+    {
+      "field": "chain_id",
+      "value": "+8453",
+      "expect": "refuse",
+      "id": "chain_id/006"
+    },
+    {
+      "field": "chain_id",
+      "value": "8_453",
+      "expect": "refuse",
+      "id": "chain_id/007"
+    },
+    {
+      "field": "chain_id",
+      "value": "\uff18\uff14\uff15\uff13",
+      "expect": "refuse",
+      "id": "chain_id/008"
+    },
+    {
+      "field": "chain_id",
+      "value": 8453.5,
+      "expect": "refuse",
+      "id": "chain_id/009"
+    },
+    {
+      "field": "chain_id",
+      "value": "8453.5",
+      "expect": "refuse",
+      "id": "chain_id/010"
+    },
+    {
+      "field": "chain_id",
+      "value": "0x2105",
+      "expect": "refuse",
+      "id": "chain_id/011"
+    },
+    {
+      "field": "chain_id",
+      "value": true,
+      "expect": "refuse",
+      "id": "chain_id/012"
+    },
+    {
+      "field": "chain_id",
+      "value": false,
+      "expect": "refuse",
+      "id": "chain_id/013"
+    },
+    {
+      "field": "chain_id",
+      "value": 0,
+      "expect": "refuse",
+      "id": "chain_id/014"
+    },
+    {
+      "field": "chain_id",
+      "value": "0",
+      "expect": "refuse",
+      "id": "chain_id/015"
+    },
+    {
+      "field": "chain_id",
+      "value": -8453,
+      "expect": "refuse",
+      "id": "chain_id/016"
+    },
+    {
+      "field": "chain_id",
+      "value": "-8453",
+      "expect": "refuse",
+      "id": "chain_id/017"
+    },
+    {
+      "field": "chain_id",
+      "value": 9007199254740993,
+      "expect": "refuse",
+      "id": "chain_id/018"
+    },
+    {
+      "field": "chain_id",
+      "value": [
+        8453
+      ],
+      "expect": "refuse",
+      "id": "chain_id/019"
+    },
+    {
+      "field": "chain_id",
+      "value": {
+        "id": 8453
+      },
+      "expect": "refuse",
+      "id": "chain_id/020"
+    },
+    {
+      "field": "chain_id",
+      "value": null,
+      "expect": "refuse",
+      "id": "chain_id/021"
+    },
+    {
+      "field": "chain_id",
+      "value": "",
+      "expect": "refuse",
+      "id": "chain_id/022"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1800,
+      "expect": "sign",
+      "signed": 1800,
+      "id": "max_fee_bps/023"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": "1800",
+      "expect": "sign",
+      "signed": 1800,
+      "id": "max_fee_bps/024"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1800.0,
+      "expect": "sign",
+      "signed": 1800,
+      "id": "max_fee_bps/025"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1300,
+      "expect": "sign",
+      "signed": 1300,
+      "id": "max_fee_bps/026"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": null,
+      "expect": "sign",
+      "signed": 1800,
+      "id": "max_fee_bps/027"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1800.5,
+      "expect": "refuse",
+      "id": "max_fee_bps/028"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": "1800.5",
+      "expect": "refuse",
+      "id": "max_fee_bps/029"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": " 1800",
+      "expect": "refuse",
+      "id": "max_fee_bps/030"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": true,
+      "expect": "refuse",
+      "id": "max_fee_bps/031"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": "0x708",
+      "expect": "refuse",
+      "id": "max_fee_bps/032"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1801,
+      "expect": "refuse",
+      "id": "max_fee_bps/033"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": "1801",
+      "expect": "refuse",
+      "id": "max_fee_bps/034"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 1299,
+      "expect": "refuse",
+      "id": "max_fee_bps/035"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": 65536,
+      "expect": "refuse",
+      "id": "max_fee_bps/036"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": -1,
+      "expect": "refuse",
+      "id": "max_fee_bps/037"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": [
+        1800
+      ],
+      "expect": "refuse",
+      "id": "max_fee_bps/038"
+    },
+    {
+      "field": "max_fee_bps",
+      "value": {},
+      "expect": "refuse",
+      "id": "max_fee_bps/039"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": 0,
+      "expect": "sign",
+      "signed": 0,
+      "id": "min_fee_bps/040"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": "0",
+      "expect": "sign",
+      "signed": 0,
+      "id": "min_fee_bps/041"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": null,
+      "expect": "sign",
+      "signed": 0,
+      "id": "min_fee_bps/042"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": 1300,
+      "expect": "sign",
+      "signed": 1300,
+      "id": "min_fee_bps/043"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": "1",
+      "expect": "sign",
+      "signed": 1,
+      "id": "min_fee_bps/044"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": 0.5,
+      "expect": "refuse",
+      "id": "min_fee_bps/045"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": true,
+      "expect": "refuse",
+      "id": "min_fee_bps/046"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": -1,
+      "expect": "refuse",
+      "id": "min_fee_bps/047"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": " 0",
+      "expect": "refuse",
+      "id": "min_fee_bps/048"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": 65536,
+      "expect": "refuse",
+      "id": "min_fee_bps/049"
+    },
+    {
+      "field": "min_fee_bps",
+      "value": 1301,
+      "expect": "refuse",
+      "note": "Python only: TS 2.104.0 has no min_fee_bps ceiling",
+      "id": "min_fee_bps/050"
+    },
+    {
+      "field": "window.pre",
+      "value": 86400,
+      "expect": "sign",
+      "signed": 86400,
+      "id": "window.pre/051"
+    },
+    {
+      "field": "window.pre",
+      "value": "86400",
+      "expect": "sign",
+      "signed": 86400,
+      "id": "window.pre/052"
+    },
+    {
+      "field": "window.pre",
+      "value": 3600.0,
+      "expect": "sign",
+      "signed": 3600,
+      "id": "window.pre/053"
+    },
+    {
+      "field": "window.pre",
+      "value": 0,
+      "expect": "sign",
+      "signed": 0,
+      "id": "window.pre/054"
+    },
+    {
+      "field": "window.pre",
+      "value": 86401,
+      "expect": "refuse",
+      "id": "window.pre/055"
+    },
+    {
+      "field": "window.pre",
+      "value": "86401",
+      "expect": "refuse",
+      "id": "window.pre/056"
+    },
+    {
+      "field": "window.pre",
+      "value": " 3600",
+      "expect": "refuse",
+      "id": "window.pre/057"
+    },
+    {
+      "field": "window.pre",
+      "value": "3600.0",
+      "expect": "refuse",
+      "id": "window.pre/058"
+    },
+    {
+      "field": "window.pre",
+      "value": 3600.5,
+      "expect": "refuse",
+      "id": "window.pre/059"
+    },
+    {
+      "field": "window.pre",
+      "value": -1,
+      "expect": "refuse",
+      "id": "window.pre/060"
+    },
+    {
+      "field": "window.pre",
+      "value": "-1",
+      "expect": "refuse",
+      "id": "window.pre/061"
+    },
+    {
+      "field": "window.pre",
+      "value": true,
+      "expect": "refuse",
+      "id": "window.pre/062"
+    },
+    {
+      "field": "window.pre",
+      "value": null,
+      "expect": "refuse",
+      "id": "window.pre/063"
+    },
+    {
+      "field": "window.pre",
+      "value": [
+        3600
+      ],
+      "expect": "refuse",
+      "id": "window.pre/064"
+    },
+    {
+      "field": "window.auth",
+      "value": 604800,
+      "expect": "sign",
+      "id": "window.auth/065"
+    },
+    {
+      "field": "window.auth",
+      "value": "604800",
+      "expect": "sign",
+      "id": "window.auth/066"
+    },
+    {
+      "field": "window.auth",
+      "value": 604801,
+      "expect": "refuse",
+      "id": "window.auth/067"
+    },
+    {
+      "field": "window.refund",
+      "value": "2592000",
+      "expect": "sign",
+      "id": "window.refund/068"
+    },
+    {
+      "field": "window.refund",
+      "value": 2592001,
+      "expect": "refuse",
+      "id": "window.refund/069"
+    },
+    {
+      "field": "tier",
+      "value": null,
+      "expect": "sign",
+      "id": "tier/070"
+    },
+    {
+      "field": "tier",
+      "value": {},
+      "expect": "refuse",
+      "id": "tier/071"
+    },
+    {
+      "field": "tier",
+      "value": [],
+      "expect": "refuse",
+      "id": "tier/072"
+    },
+    {
+      "field": "tier",
+      "value": 0,
+      "expect": "refuse",
+      "id": "tier/073"
+    },
+    {
+      "field": "tier",
+      "value": "",
+      "expect": "refuse",
+      "id": "tier/074"
+    },
+    {
+      "field": "tier",
+      "value": false,
+      "expect": "refuse",
+      "id": "tier/075"
+    },
+    {
+      "field": "tier",
+      "value": "micro",
+      "expect": "refuse",
+      "id": "tier/076"
+    },
+    {
+      "field": "deadline",
+      "value": null,
+      "expect": "sign",
+      "id": "deadline/077"
+    },
+    {
+      "field": "deadline",
+      "value": 1790000000,
+      "expect": "sign",
+      "id": "deadline/078"
+    },
+    {
+      "field": "deadline",
+      "value": 1789913600,
+      "expect": "sign",
+      "id": "deadline/079"
+    },
+    {
+      "field": "deadline",
+      "value": 1792592000,
+      "expect": "sign",
+      "id": "deadline/080"
+    },
+    {
+      "field": "deadline",
+      "value": 1792592000.0,
+      "expect": "sign",
+      "id": "deadline/081"
+    },
+    {
+      "field": "deadline",
+      "value": 1792592001,
+      "expect": "refuse",
+      "id": "deadline/082"
+    },
+    {
+      "field": "deadline",
+      "value": 1792595600,
+      "expect": "refuse",
+      "id": "deadline/083"
+    },
+    {
+      "field": "deadline",
+      "value": 1790000000.5,
+      "expect": "refuse",
+      "id": "deadline/084"
+    },
+    {
+      "field": "deadline",
+      "value": "1790000000",
+      "expect": "refuse",
+      "id": "deadline/085"
+    },
+    {
+      "field": "deadline",
+      "value": true,
+      "expect": "refuse",
+      "id": "deadline/086"
+    },
+    {
+      "field": "deadline",
+      "value": 9007199254740992,
+      "expect": "refuse",
+      "id": "deadline/087"
+    },
+    {
+      "field": "deadline",
+      "value": -9007199254740992,
+      "expect": "refuse",
+      "id": "deadline/088"
+    }
+  ]
+}

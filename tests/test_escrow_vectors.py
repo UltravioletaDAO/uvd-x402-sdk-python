@@ -573,13 +573,13 @@ def _swap(block: str, a: str, b: str) -> str:
 MUTATIONS = {
     # The 'USD Coin' fallback: right on the chains that call USDC that, wrong elsewhere.
     "domain name hard-coded": (
-        '"name": net["usdc_domain_name"],',
+        '"name": _afirmado[0],',
         '"name": "USD Coin",',
         SDK_NOT_USD_COIN,
         KK_NOT_USD_COIN,
     ),
     "domain version hard-coded": (
-        '"version": net["usdc_domain_version"],',
+        '"version": _afirmado[1],',
         '"version": "1",',
         ALL_SDK,
         ALL_KK,
@@ -603,7 +603,7 @@ MUTATIONS = {
         ALL_KK,
     ),
     "chainId of the domain hard-coded to Base": (
-        '"chainId": int(net["chain_id"]),',
+        '"chainId": _cid,',
         '"chainId": 8453,',
         ALL_SDK - SDK_ON_BASE,
         ALL_KK - {"base"},
@@ -615,7 +615,7 @@ MUTATIONS = {
         ALL_KK - {"base"},
     ),
     "network of the requirements hard-coded to Base": (
-        '"network": f"eip155:{int(net[\'chain_id\'])}",',
+        '"network": f"eip155:{_cid}",',
         '"network": "eip155:8453",',
         ALL_SDK - SDK_ON_BASE,
         ALL_KK - {"base"},

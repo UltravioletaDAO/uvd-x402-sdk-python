@@ -18,7 +18,9 @@ nothing to import). ``advanced_escrow`` imports ``ESCROW_CONTRACTS`` from here
 
 ``escrow_signing.build_escrow_pre_auth`` reads all three: on a chain with a
 row, a payment config that contradicts it is refused before anything is
-signed; a chain without a row is signed with a logged warning.
+signed; a chain without a row in each of them (and in
+``escrow_signing.VERIFIED_USDC_DOMAINS``) is refused too (since 0.97.0;
+until 0.96.0 it was signed with a logged warning).
 """
 
 from __future__ import annotations
@@ -175,7 +177,7 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
 # AdvancedEscrowClient reads its default operator from here
 # (tests/test_escrow_signing_registry.py pins that); on the other chains the
 # client keeps asking for an explicit ``operator_address``. A chain without a
-# row: escrow_signing signs the payment config's operator with a warning.
+# row: escrow_signing refuses to sign (since 0.97.0).
 ESCROW_OPERATORS: dict[int, str] = {
     # Base: Fase 5 PaymentOperator (advanced_escrow.BASE_MAINNET_CONTRACTS),
     # the operator of Execution Market's Base config (tests/fixtures/escrow-preauth.json).
@@ -211,7 +213,7 @@ ESCROW_OPERATORS: dict[int, str] = {
 # f75d4171: the "max_fee_bps" of its payment config (mcp_server/api/h2a.py)
 # and FASE5_MAX_FEE_BPS (mcp_server/integrations/x402/fees.py), the operator's
 # 1300 bps plus room for a protocol fee of up to 500.
-# A chain without a row: signed with a warning, as the other tables.
+# A chain without a row: refused before signing, as with the other tables.
 ESCROW_MAX_FEE_BPS: dict[int, int] = {
     8453: 1800,  # Base
     1187947933: 1800,  # SKALE Base

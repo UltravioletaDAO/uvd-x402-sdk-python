@@ -2409,11 +2409,22 @@ token collector, USDC and operator are checked against the SDK's own tables
 (`VERIFIED_USDC_DOMAINS`, `uvd_x402_sdk.escrow_contracts`), and `maxFeeBps`
 against the chain's ceiling (`ESCROW_MAX_FEE_BPS`, 1800 bps; the SDK's policy,
 not an on-chain limit): a value that
-differs from (or exceeds) the chain's row raises `ValueError`; where the tables have no
-row for the chain, that value is signed with a logged warning. On-chain
+differs from (or exceeds) the chain's row raises `ValueError`. Since 0.97.0 a
+chain without a row in each of those tables raises `ValueError` too, and so does
+a `network` that is neither a name of the SDK's network registry nor
+`eip155:<chain id>` (until 0.96.0 both were signed with a logged warning): the
+chains with every row are Base, Ethereum, Polygon, Arbitrum, Celo, Monad,
+Avalanche, Optimism, SKALE Base, Arc and Arc Testnet. The tier windows are
+bounded as well: each of `pre` / `auth` / `refund` is a whole number of seconds
+within `ESCROW_MAX_TIER_WINDOWS` (1 day / 7 days / 30 days), and the signed
+`authorizationExpiry` is at most `ESCROW_MAX_AUTHORIZATION_SEC` (37 days: a
+30-day deadline plus the 7-day review window) after signing; `deadline` is
+whole epoch seconds. `chain_id`, the fee bounds and the windows are read as the
+TypeScript SDK reads them: a number without a fraction or a string of ASCII
+digits, anything else is `ValueError`. On-chain
 limits enforced client-side: bounty <= $100 (AuthCaptureEscrow deposit
-condition) and the signed `maxFeeBps` must
-cover the operator's 1300 bps static fee. `compute_escrow_nonce()` is the
+condition), the signed `maxFeeBps` must
+cover the operator's 1300 bps static fee, and `minFeeBps` must not exceed it. `compute_escrow_nonce()` is the
 standalone, dict-based equivalent of `AdvancedEscrowClient._compute_nonce`
 (no web3 needed — only `eth-abi`/`eth-utils`, pulled in by `eth-account`).
 The wrapper is byte-tested against golden vectors
