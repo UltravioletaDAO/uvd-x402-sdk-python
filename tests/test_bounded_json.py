@@ -172,9 +172,12 @@ def test_size_is_checked_before_depth_and_before_decoding(monkeypatch):
 
 
 def test_no_size_ceiling_still_has_a_depth_ceiling():
+    # 1_000_000 levels run in a subprocess below; here, few enough that a
+    # missing check is a clean failure, not a crash of the test runner.
     with pytest.raises(JSONBoundsError) as err:
-        loads_bounded("[" * 1_000_000, max_bytes=None)
+        loads_bounded("[" * (MAX_JSON_DEPTH + 1), max_bytes=None)
     assert err.value.reason == "too-deep"
+    assert loads_bounded(json.dumps(nested(MAX_JSON_DEPTH)), max_bytes=None)
 
 
 @pytest.mark.parametrize("kind", [bytes, bytearray, memoryview])
@@ -319,6 +322,24 @@ def test_oversized_body_is_no_terms():
     assert payment_challenge_from({}, body.encode(), max_bytes=len(body) - 1) is None
     assert payment_challenge_from({}, body, max_bytes=len(body)) == json.loads(body)
     assert payment_challenge_from({}, body, max_bytes=None) == json.loads(body)
+
+
+def test_default_ceilings_apply_to_both_transports():
+    big = json.dumps(challenge(description="x" * MAX_CHALLENGE_BYTES))
+    assert payment_challenge_from({}, big) is None
+    assert payment_challenge_from({}, big.encode()) is None
+    assert payment_challenge_from({"payment-required": big}) is None
+    deep = json.dumps(challenge(extra=nested(MAX_JSON_DEPTH)))
+    assert payment_challenge_from({}, deep) is None
+    fits = json.dumps(challenge(extra=nested(MAX_JSON_DEPTH - 3)))
+    assert payment_challenge_from({}, fits) == json.loads(fits)
+
+
+def test_a_bytearray_body_is_read_and_bounded():
+    raw = json.dumps(challenge()).encode("utf-16")
+    assert payment_challenge_from({}, bytearray(raw)) == challenge()
+    deep = json.dumps(challenge(extra=nested(10))).encode()
+    assert payment_challenge_from({}, bytearray(deep), max_depth=5) is None
 
 
 def test_a_parsed_dict_body_is_taken_as_given():
