@@ -30,7 +30,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-from uvd_x402_sdk.bounded_json import MAX_CHALLENGE_BYTES, MAX_JSON_DEPTH, loads_bounded
+from uvd_x402_sdk.bounded_json import (
+    MAX_CHALLENGE_BYTES,
+    MAX_JSON_DEPTH,
+    JSONBoundsError,
+    _check_limits,
+    loads_bounded,
+)
 from uvd_x402_sdk.exceptions import StackKeyRedirectError
 from uvd_x402_sdk.stack_key import refuse_redirect, stack_key_request_kwargs
 
@@ -171,9 +177,18 @@ def parse_evidence_header(value: str) -> AnchoredEvidence:
     than an anchor -- "the seller chose not to anchor" and "the evidence is
     broken" are different situations and a caller has to be able to tell them
     apart.
+
+    The header is written by the seller: it is bounded like ``PAYMENT-REQUIRED``
+    (size before base64 decoding, nesting of the decoded JSON, see
+    :func:`uvd_x402_sdk.bounded_json.loads_bounded`).
     """
     try:
-        payload = json.loads(_b64url_decode(value))
+        size = len(value.strip())
+        if size > MAX_CHALLENGE_BYTES:
+            raise JSONBoundsError(
+                "too-large", f"header of {size} bytes exceeds {MAX_CHALLENGE_BYTES}"
+            )
+        payload = loads_bounded(_b64url_decode(value))
     except Exception as exc:  # noqa: BLE001 - any decode failure is the same to callers
         raise DX402Error(f"malformed {EVIDENCE_HEADER} header: {exc}") from exc
 
@@ -1312,11 +1327,12 @@ def payment_challenge_from(
     terms here" from that transport, the other one is still tried. Each is
     measured on the text that is then parsed (the base64-decoded header, BOM
     and UTF-16/32 decoded as ``json.loads`` decodes them), see
-    :func:`uvd_x402_sdk.bounded_json.loads_bounded`. Without this,
-    ``"[" * 100_000`` killed the process (segfault) instead of returning
-    ``None``. ``max_bytes=None`` lifts the size ceiling; a ``dict`` body was
-    parsed by the caller and is taken as given.
+    :func:`uvd_x402_sdk.bounded_json.loads_bounded`. ``max_bytes=None`` lifts
+    the size ceiling; an invalid limit raises ``TypeError`` / ``ValueError``
+    before anything is read. A ``dict`` body was parsed by the caller and is
+    taken as given.
     """
+    _check_limits(max_bytes, max_depth)
     import base64 as _b64
 
     def _read(name: str):

@@ -34,6 +34,7 @@ from uvd_x402_sdk import (
     loads_bounded,
     payment_challenge_from,
 )
+from uvd_x402_sdk.dx402 import DX402Error, evidence_from_headers, parse_evidence_header
 from uvd_x402_sdk.exceptions import InvalidPayloadError
 
 OFFER = {
@@ -378,6 +379,7 @@ SURVIVES = textwrap.dedent(
     import httpx
     import uvd_x402_sdk  # imports py_ecc, which raises the recursion limit
     from uvd_x402_sdk import X402Client, loads_bounded, payment_challenge_from
+    from uvd_x402_sdk.dx402 import DX402Error, evidence_from_headers
     from uvd_x402_sdk.exceptions import InvalidPayloadError
 
     assert sys.getrecursionlimit() >= 100000, sys.getrecursionlimit()
@@ -394,6 +396,17 @@ SURVIVES = textwrap.dedent(
     elif case == "unbounded-size":
         try:
             loads_bounded("[" * 1_000_000, max_bytes=None)
+        except ValueError as exc:
+            got = type(exc).__name__
+    elif case == "evidence-header":
+        value = base64.urlsafe_b64encode(deep.encode()).decode().rstrip("=")
+        try:
+            evidence_from_headers({"X-Durable-Evidence": value})
+        except DX402Error as exc:
+            got = "DX402Error"
+    elif case == "huge-max-depth":
+        try:
+            loads_bounded(deep, max_depth=10**6)
         except ValueError as exc:
             got = type(exc).__name__
     elif case == "fetch":
@@ -413,14 +426,16 @@ SURVIVES = textwrap.dedent(
 
 
 @pytest.mark.parametrize("case", ["header", "header-raw", "body-bytes", "body-str",
-                                  "unbounded-size", "fetch"])
+                                  "unbounded-size", "evidence-header", "huge-max-depth",
+                                  "fetch"])
 def test_hundred_thousand_brackets_do_not_kill_the_process(case):
     proc = subprocess.run(
         [sys.executable, "-c", SURVIVES, case],
         capture_output=True, text=True, timeout=120,
     )
     assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
-    expected = {"unbounded-size": "JSONBoundsError", "fetch": "InvalidPayloadError"}
+    expected = {"unbounded-size": "JSONBoundsError", "fetch": "InvalidPayloadError",
+                "evidence-header": "DX402Error", "huge-max-depth": "ValueError"}
     assert proc.stdout.strip() == f"survived {expected.get(case, 'None')}"
 
 
@@ -537,3 +552,128 @@ def test_fuzz_challenges_through_both_transports(seed):
         header = {"Payment-Required": base64.b64encode(raw).decode()}
         assert payment_challenge_from(header, max_depth=limit) == expected
         assert payment_challenge_from({}, raw, max_depth=limit) == expected
+
+
+# =============================================================================
+# Limits, decoding and transports pinned against json.loads
+# =============================================================================
+
+
+def test_max_depth_has_a_hard_ceiling():
+    assert loads_bounded("[[]]", max_depth=1000) == [[]]
+    assert json_depth_within("[[]]", 1000)
+    for call in (lambda: loads_bounded("1", max_depth=1001),
+                 lambda: json_depth_within("1", 1001)):
+        with pytest.raises(ValueError) as err:
+            call()
+        assert not isinstance(err.value, JSONBoundsError)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"max_depth": "64"}, {"max_depth": True}, {"max_depth": 1001}, {"max_depth": None},
+     {"max_bytes": -1}, {"max_bytes": 1.5}, {"max_bytes": False}],
+)
+def test_payment_challenge_from_raises_on_invalid_limits(kwargs):
+    header = base64.b64encode(json.dumps(challenge()).encode()).decode()
+    with pytest.raises((TypeError, ValueError)):
+        payment_challenge_from({"payment-required": header}, **kwargs)
+    with pytest.raises((TypeError, ValueError)):
+        payment_challenge_from({}, None, **kwargs)
+
+
+def test_a_memoryview_is_measured_in_bytes_not_items():
+    raw = b'"aaaaaa"'
+    view = memoryview(raw).cast("I")
+    assert len(view) == 2 and view.nbytes == 8
+    assert loads_bounded(view, max_bytes=8) == "aaaaaa"
+    with pytest.raises(JSONBoundsError) as err:
+        loads_bounded(view, max_bytes=7)
+    assert err.value.reason == "too-large"
+
+
+@pytest.mark.parametrize("raw", [b'"\xed\xa0\x80"', b'["\xed\xb0\x80", 1]'])
+def test_lone_surrogates_decode_as_json_loads_decodes_them(raw):
+    assert loads_bounded(raw) == json.loads(raw)
+
+
+@pytest.mark.parametrize("text", ["\ufeff{}", "\ufeff[1]"])
+def test_a_bom_in_a_str_is_refused_like_json_loads(text):
+    with pytest.raises(ValueError):
+        json.loads(text)
+    with pytest.raises(ValueError):
+        loads_bounded(text)
+
+
+@pytest.mark.parametrize("pre,post", [(" ", ""), ("", " "), ("  ", " "), ("\t", "\r\n"),
+                                      (" ", "   ")])
+def test_an_unpadded_header_with_surrounding_whitespace_is_read(pre, post):
+    for extra in range(4):
+        expected = challenge(description="x" * extra)
+        encoded = base64.b64encode(json.dumps(expected).encode()).decode()
+        for header in (encoded, encoded.rstrip("=")):
+            got = payment_challenge_from({"payment-required": pre + header + post})
+            assert got == expected, (pre, post, extra, header[-3:])
+
+
+# =============================================================================
+# Other headers a seller writes: DX402 evidence, payment response, receipts
+# =============================================================================
+
+
+def _b64url(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+
+def test_a_deep_evidence_header_is_a_dx402_error_before_parsing(parsed_texts):
+    value = _b64url(json.dumps({"v": 1, "anchor": nested(DEPTH + 1)}))
+    with pytest.raises(DX402Error):
+        evidence_from_headers({"X-Durable-Evidence": value})
+    with pytest.raises(DX402Error):
+        parse_evidence_header(value)
+    assert parsed_texts == []
+
+
+def test_an_oversized_evidence_header_is_not_even_decoded(monkeypatch):
+    def no_decode(*a, **kw):
+        raise AssertionError("an oversized header must not be decoded")
+
+    monkeypatch.setattr(base64, "urlsafe_b64decode", no_decode)
+    with pytest.raises(DX402Error, match="exceeds"):
+        parse_evidence_header("A" * (MAX_CHALLENGE_BYTES + 1))
+
+
+def test_an_evidence_header_at_the_depth_limit_still_reaches_the_reader():
+    value = _b64url(json.dumps({"v": 1, "skipped": "too_large", "x": nested(DEPTH - 1)}))
+    with pytest.raises(Exception) as err:
+        parse_evidence_header(value)
+    assert type(err.value).__name__ == "EvidenceSkipped"
+
+
+def test_payment_response_and_purchase_context_are_bounded(parsed_texts):
+    from uvd_x402_sdk.receipts import response_receipt, validate_purchase_context
+
+    deep = base64.b64encode(json.dumps({"receipt": nested(DEPTH + 1)}).encode()).decode()
+    with pytest.raises(JSONBoundsError):
+        response_receipt(httpx.Response(200, headers={"PAYMENT-RESPONSE": deep}))
+    with pytest.raises(JSONBoundsError):
+        validate_purchase_context(deep, "GET", "https://seller.example/x", b"")
+    assert parsed_texts == []
+
+
+def test_a_receipt_with_a_deep_protected_header_is_not_parsed(parsed_texts):
+    from pathlib import Path
+
+    from uvd_x402_sdk.receipts import parse_receipt, verify_receipt
+
+    vectors = json.loads(
+        (Path(__file__).parent / "fixtures/facilitator-receipts-v1.json").read_text()
+    )
+    case = next(c for c in vectors["cases"] if (c["receipt"].get("proof") or {}).get("jws"))
+    receipt = parse_receipt(case["receipt"])
+    _, payload, signature = receipt.proof["jws"].split(".")
+    deep = _b64url(json.dumps([nested(DEPTH + 1)]))
+    receipt.proof["jws"] = ".".join((deep, payload, signature))
+    parsed_texts.clear()
+    assert verify_receipt(receipt, vectors["jwks"]) is False
+    assert not any(t.startswith("[[") for t in parsed_texts)

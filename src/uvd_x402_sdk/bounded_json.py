@@ -1,13 +1,10 @@
 """Parse JSON that somebody else wrote, with a ceiling on its size and nesting.
 
 A 402 challenge is written by the seller, and so is anything else a buyer
-reads before it has decided to pay. ``json.loads`` of ``"[" * 100_000`` is
-not a ``ValueError``: CPython's parser recurses once per level, and once
-``py_ecc`` is imported (``eth-account`` imports it, and so does this SDK) the
-recursion limit is 100000, so the C stack runs out first and the process dies
-with a segfault. Measured on Python 3.11 importing ``uvd_x402_sdk``:
-``payment_challenge_from({"payment-required": base64("[" * 100_000)})``
-killed the interpreter (exit 139), header and body alike.
+reads before it has decided to pay. CPython's JSON parser recurses once per
+level of nesting and the SDK runs with a raised recursion limit (``py_ecc``,
+which this SDK imports, raises it), so an unbounded nesting is not reliably a
+``ValueError``. Parsing of third-party documents is bounded here.
 
 :func:`loads_bounded` is ``json.loads`` with two checks made first, on the
 SAME text ``json.loads`` then parses:
@@ -19,6 +16,9 @@ SAME text ``json.loads`` then parses:
   without BOM, UTF-16, UTF-32). A ``charset`` in a ``Content-Type`` header is
   not authoritative for JSON and is never consulted: measuring one decoding
   and parsing another could read an escaped quote as a delimiter.
+
+``max_depth`` itself is capped (:data:`_MAX_DEPTH_CEILING`): a caller cannot
+lift the nesting bound past what the parser handles.
 
 Public API (stable): ``MAX_CHALLENGE_BYTES``, ``MAX_JSON_DEPTH``,
 ``JSONBoundsError``, ``json_depth_within``, ``loads_bounded``. Every
@@ -50,6 +50,10 @@ MAX_CHALLENGE_BYTES = 512 * 1024
 #: bazaar schema nests about a dozen levels.
 MAX_JSON_DEPTH = 64
 
+# Highest ``max_depth`` a caller may ask for. Well under what CPython's parser
+# handles on any supported platform; far above any real challenge.
+_MAX_DEPTH_CEILING = 1000
+
 BytesLike = Union[bytes, bytearray, memoryview]
 
 _STRUCTURAL = re.compile(r'[\[\]{}"\\]')
@@ -68,13 +72,23 @@ class JSONBoundsError(ValueError):
         self.reason = reason
 
 
-def _check_limit(name: str, value: Any, *, optional: bool) -> None:
+def _check_limit(
+    name: str, value: Any, *, optional: bool, ceiling: Optional[int] = None
+) -> None:
     if value is None and optional:
         return
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an int{' or None' if optional else ''}")
     if value < 0:
         raise ValueError(f"{name} must not be negative")
+    if ceiling is not None and value > ceiling:
+        raise ValueError(f"{name} must be at most {ceiling}")
+
+
+def _check_limits(max_bytes: Any, max_depth: Any) -> None:
+    """Validate a ``max_bytes`` / ``max_depth`` pair (``TypeError`` / ``ValueError``)."""
+    _check_limit("max_bytes", max_bytes, optional=True)
+    _check_limit("max_depth", max_depth, optional=False, ceiling=_MAX_DEPTH_CEILING)
 
 
 def _decode(data: Any) -> str:
@@ -139,7 +153,7 @@ def json_depth_within(data: Union[str, BytesLike], max_depth: int = MAX_JSON_DEP
     :class:`UnicodeDecodeError`, a :class:`ValueError`, when it could not).
     Never recurses.
     """
-    _check_limit("max_depth", max_depth, optional=False)
+    _check_limit("max_depth", max_depth, optional=False, ceiling=_MAX_DEPTH_CEILING)
     return not _depth_exceeds(_decode(data), max_depth)
 
 
@@ -156,10 +170,10 @@ def loads_bounded(
     invalid JSON or undecodable bytes; all of them are :class:`ValueError`.
     A :class:`RecursionError` from a caller that is already deep in its own
     stack is reported as ``"too-deep"`` too. ``max_bytes=None`` means no size
-    ceiling; there is always a depth ceiling.
+    ceiling; there is always a depth ceiling, and ``max_depth`` above
+    1000 is a :class:`ValueError`.
     """
-    _check_limit("max_bytes", max_bytes, optional=True)
-    _check_limit("max_depth", max_depth, optional=False)
+    _check_limits(max_bytes, max_depth)
     if not isinstance(data, (str, bytes, bytearray, memoryview)):
         raise TypeError(
             f"the JSON object must be str, bytes or bytearray, not {type(data).__name__}"

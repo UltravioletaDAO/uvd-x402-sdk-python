@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from uvd_x402_sdk.bounded_json import loads_bounded
 from uvd_x402_sdk.stack_key import no_redirect_kwargs, refuse_redirect, stack_key_headers
 
 ISSUER = "https://facilitator.ultravioletadao.xyz"
@@ -112,7 +113,7 @@ def verify_receipt(receipt: FacilitatorReceipt, jwks: Mapping[str, Any], *, issu
         if receipt.issuer != issuer or not receipt.proof or receipt.proof.get("type") != "jws":
             return False
         protected, payload, signature = receipt.proof["jws"].split(".")
-        header = json.loads(_unb64url(protected))
+        header = loads_bounded(_unb64url(protected))
         if header.get("alg") != "EdDSA" or header.get("typ") != "uvd-facilitator-receipt+jws":
             return False
         keys = [key for key in jwks.get("keys", []) if key.get("kid") == header.get("kid")
@@ -178,7 +179,7 @@ def response_receipt(response: httpx.Response) -> Optional[FacilitatorReceipt]:
         return None
     if len(set(present)) != 1 or len(present[0]) > 32768:
         raise ValueError("ambiguous or oversized payment response header")
-    value = json.loads(base64.b64decode(present[0], validate=True))
+    value = loads_bounded(base64.b64decode(present[0], validate=True))
     return parse_receipt(value.get("receipt"))
 
 
@@ -198,7 +199,7 @@ def validate_purchase_context(header: Optional[str], method: str, url: str, body
         return None
     if len(header) > 8192:
         raise ValueError("invalid purchase context")
-    value = json.loads(base64.b64decode(header, validate=True))
+    value = loads_bounded(base64.b64decode(header, validate=True))
     token = value.get("accessToken")
     if (not isinstance(token, str) or len(token) != 64 or any(c not in "0123456789abcdef" for c in token)
         or not isinstance(value.get("purchaseId"), str) or not 1 <= len(value["purchaseId"]) <= 128
