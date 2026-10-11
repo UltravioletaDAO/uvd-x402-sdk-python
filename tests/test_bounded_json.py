@@ -1,15 +1,11 @@
-"""A 402 written by a third party is bounded before it is parsed.
-
-``json.loads("[" * 100_000)`` is not a ValueError once ``py_ecc`` has raised
-the recursion limit to 100000 (importing this SDK does): the C stack runs out
-first and the interpreter segfaults. Measured on the base before this file
-existed: ``payment_challenge_from`` with that payload killed the process with
-exit 139, base64 header, raw header and body alike.
+"""Third-party JSON (402 challenges and the other headers a seller writes) is
+bounded before it is parsed.
 
 The cases come from the reader that carried this guard downstream (the
 header, BOM / UTF-16 / UTF-32 and misleading-charset matrix, the depth
 limit, literal brackets, invalid bytes, a base64 decoder that returns junk),
-plus fuzzing against ``json.loads`` itself.
+plus fuzzing against ``json.loads`` itself. Cases that would end the
+interpreter without the bound run in a subprocess.
 """
 
 from __future__ import annotations
