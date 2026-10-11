@@ -546,7 +546,7 @@ class X402Config:
         else:
             return self.recipient_evm
 
-    def with_discoverable(self, extra: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def with_discoverable(self, extra: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         """``extra`` with ``"discoverable": True`` added when this config opts in.
 
         Off, ``extra`` is returned as given (``None`` stays ``None``). On, a new

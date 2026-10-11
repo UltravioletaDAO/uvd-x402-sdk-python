@@ -132,7 +132,8 @@ class TestThe402:
             networks=["base", "polygon", "solana"],
         )
         networks = {o["network"]: o for o in body["accepts"]}
-        assert set(networks) == {"eip155:8453", "eip155:137", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"}
+        solana = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+        assert set(networks) == {"eip155:8453", "eip155:137", solana}
         for option in body["accepts"]:
             assert option["extra"]["discoverable"] is True
         assert networks["eip155:8453"]["extra"] == {**DOMAIN, "discoverable": True}
@@ -240,7 +241,9 @@ class TestTheRequirementsSentToTheFacilitator:
     def test_a_caller_true_with_the_config_on_is_accepted(self):
         fac = Facilitator()
         p = PaymentPayload.model_validate(payload("base"))
-        fac.client(discoverable=True).settle_payment(p, Decimal("0.01"), extra={"discoverable": True})
+        fac.client(discoverable=True).settle_payment(
+            p, Decimal("0.01"), extra={"discoverable": True}
+        )
         (extra,) = requirements_extras(fac.bodies("/settle")[0])
         assert extra["discoverable"] is True
 
@@ -280,7 +283,9 @@ class TestNonBoolInputsAreRefusedBeforeIO:
         fac = Facilitator()
         p = PaymentPayload.model_validate(payload("base"))
         with pytest.raises(ValueError, match="discoverable must be a bool"):
-            fac.client(discoverable=on).settle_payment(p, Decimal("0.01"), extra={"discoverable": value})
+            fac.client(discoverable=on).settle_payment(
+                p, Decimal("0.01"), extra={"discoverable": value}
+            )
         assert fac.requests == []
 
     def test_a_value_flipped_after_construction_is_refused_before_io(self):
