@@ -361,14 +361,33 @@ Trusted publishing (OIDC), no token (owner's decision 127, 2026-09-29). The flow
 3. `publish` (the only job with `id-token: write`) uploads `dist/` with `pypa/gh-action-pypi-publish` by OIDC, with
    no human approval: the `pypi` environment deploys from `main` only and has no required reviewer (removed
    2026-09-30, owner's decision 136).
+4. `tag` (needs `publish`, so a failed or skipped upload skips it; the only job with `contents: write`) runs
+   `scripts/release_tag.py`: the annotated tag `vX.Y.Z` on `GITHUB_SHA`, the commit the run built. Nobody tags by
+   hand any more: c0der's sweep reads the highest `v*` tag as the published version, and a release left untagged
+   read as missing (0.94.0, 0.95.0 and 0.97.0 were tagged by hand after the fact; 0.98.0 and 0.99.0 had no tag
+   when this job was added, and it only tags the releases it publishes).
 
 What guards a release is `main` only, `workflow_dispatch` only, OIDC with no token, and the road to `main`
 (review, green CI).
 
-The tag `vX.Y.Z` is still created for the release, and it triggers nothing: `publish.yml` has no `push`, tag or
-`release` trigger. `tests/test_publish_workflow.py` fails on any `secrets` reference in the file, another trigger,
-`id-token` outside the job that publishes, a publish job without `environment: pypi`, or no `refs/heads/main` gate
-in the chain; every action is pinned by commit SHA (checked against its tag with `git ls-remote`).
+`release_tag.py` refuses (exit 2, nothing pushed) a `--sha` that is not a full commit id in the checkout, a version
+that is not a normalized PEP 440 public one, and a `pyproject.toml` at that commit that does not declare exactly that
+version (one `version = "..."` line, as `check` reads it). It asks `origin` for the tag with `git ls-remote`, PEELED
+(the `<ref>^{}` pattern is required: under git protocol 0 the peeled line only comes back when asked for; and
+ls-remote matches the TAIL of a ref, so the reply is filtered by exact name). Already on this commit (lightweight,
+annotated, nested) = exit 0, nothing written; on any other object = exit 1, never moved. Otherwise `git mktag` (no
+local ref) + `git push` without force, and the remote is read back whatever the push answered: a tag pushed
+meanwhile on this commit is still 0, on another commit still 1. If only `tag` fails, "Re-run failed jobs" retries
+it alone. `tests/test_release_tag.py` runs it against a bare repository and a `--depth 1` clone (as the runner's
+checkout), under protocol 0 and 2, and `TestGuardMutations` removes each guard from the source.
+
+The tag triggers nothing: `publish.yml` has no `push`, tag or `release` trigger, and a tag pushed with
+`GITHUB_TOKEN` starts no workflow. `tests/test_publish_workflow.py` fails on any `secrets` reference in the file,
+another trigger, `id-token` outside the job that publishes, a publish job without `environment: pypi`, no
+`refs/heads/main` gate in the chain, or a tag job that does not need the upload, runs after it failed, holds more
+than `contents: write` (or shares a write permission with another job), runs another action, installs anything, or
+splices the version into its script; every action is pinned by commit SHA (checked against its tag with
+`git ls-remote`). `ci.yml` lists `scripts/release_tag.py` in its `paths` (the other `scripts/` are left out).
 
 ## Integration with 402milly
 

@@ -22,8 +22,10 @@ on:
     #   interop/**        the interop contract: tests/interop validates its
     #                     schemas, fixtures and vectors, and reads the rules its
     #                     *.md write down
+    #   scripts/release_tag.py  run by publish.yml's tag job, and against a
+    #                     local remote by tests/test_release_tag.py
     # Everything else is left out: docs/, CHANGELOG.md and the other root *.md,
-    # scripts/ (no job runs one), LICENSE. One of them IS read: test_exact_amount
+    # the other scripts/ (no job runs one), LICENSE. One of them IS read: test_exact_amount
     # scans docs/ for the float price form, so a docs-only change that brings it
     # back goes red on the next run, not on its own.
     paths:
@@ -36,6 +38,7 @@ on:
       - 'README.md'
       - 'examples/**'
       - 'interop/**'
+      - 'scripts/release_tag.py'
   pull_request:
     # The same list as `push`, entry for entry.
     paths:
@@ -48,6 +51,7 @@ on:
       - 'README.md'
       - 'examples/**'
       - 'interop/**'
+      - 'scripts/release_tag.py'
 
 # Both jobs only read: this checkout, and the TypeScript SDK, which is public.
 permissions:

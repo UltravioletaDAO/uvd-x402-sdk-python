@@ -1,16 +1,16 @@
 name: Publish to PyPI
 
 # Manual only: it is run from the Actions tab, on main, with the version to publish. It never runs
-# on push, tag, release or merge; the tag v<version> is still created after a release, and it
-# triggers nothing. Trusted publishing (OIDC): PyPI trusts this repository, this file and the
-# `pypi` environment, and hands the upload job a token that lives for minutes. There is no API
-# token in this repository to steal, and none is read here.
+# on push, tag, release or merge. Trusted publishing (OIDC): PyPI trusts this repository, this
+# file and the `pypi` environment, and hands the upload job a token that lives for minutes. There
+# is no API token in this repository to steal, and none is read here.
 #
-# check -> build -> publish. `check` runs only on main, checks the version and runs the tests;
-# `build` makes dist/ without id-token; `publish` is the one job with id-token, and it runs in
-# the `pypi` environment, which deploys from main only and has no required reviewer: nobody
+# check -> build -> publish -> tag. `check` runs only on main, checks the version and runs the
+# tests; `build` makes dist/ without id-token; `publish` is the one job with id-token, and it runs
+# in the `pypi` environment, which deploys from main only and has no required reviewer: nobody
 # approves the upload. What guards it is main only, workflow_dispatch only, OIDC with no token,
-# and the road to main (review, green CI).
+# and the road to main (review, green CI). `tag` runs only after the upload succeeded and creates
+# the tag v<version> on the commit this run published; the tag triggers nothing.
 on:
   workflow_dispatch:
     inputs:
@@ -129,3 +129,26 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist/
+
+  # The tag v<version> on the commit this run built and published (GITHUB_SHA), created only
+  # after the upload succeeded: a failed or skipped publish skips this job. Already there on this
+  # commit is success; on another commit it fails and is never moved (scripts/release_tag.py).
+  # If only this job fails, "Re-run failed jobs" retries it alone, without publishing again.
+  # It is the one job that can write to the repository; it installs nothing and runs only git
+  # and that stdlib script. A tag pushed with GITHUB_TOKEN starts no workflow.
+  tag:
+    name: Tag the published commit
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # pushes the tag; no id-token here
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true # git push authenticates with this job's GITHUB_TOKEN
+
+      - name: Create v<version> on this commit, or check it already names it
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: python3 scripts/release_tag.py --version "$INPUT_VERSION"

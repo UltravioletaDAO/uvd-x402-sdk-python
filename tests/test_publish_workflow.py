@@ -28,6 +28,12 @@ catch it: a rule that stops catching its mutation guards nothing.
 * ``one_publisher`` -- other than one job that uploads, an upload from a
   ``run:`` step (twine and the like), or a password handed to the action.
 * ``pinned`` -- an action not pinned to a full commit SHA with its tag.
+* ``tags_after_publish`` -- other than one job that runs ``scripts/release_tag.py``
+  (the tag ``v<version>`` on the published commit), that job not needing the
+  upload or running when it failed or was skipped, permissions other than
+  ``contents: write`` alone there, a write permission in any other job (the
+  upload's id-token aside), an action other than checkout or a package install
+  in it, or the version spliced into its script instead of passed through env.
 """
 
 from __future__ import annotations
@@ -50,6 +56,9 @@ RUNS_AFTER_A_SKIP = re.compile(r"\b(always|failure|cancelled)\s*\(")
 # Uploading to a package index from a `run:` step, token in hand.
 UPLOADERS = re.compile(r"\b(twine\s+upload|(uv|poetry|flit|hatch|pdm)\s+publish)\b")
 PINNED = re.compile(r"^\s*(-\s+)?uses:\s*[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+(\.\d+)*\s*$")
+TAG_SCRIPT = "scripts/release_tag.py"
+# Fetching and installing code, which the job that can write the repository never does.
+INSTALLS = re.compile(r"\b(pip3?|pipx|uvx?|poetry|npm|npx|curl|wget)\b")
 
 
 def _parse(text: str) -> dict[Any, Any]:
@@ -217,6 +226,57 @@ def pinned(text: str) -> list[str]:
     ]
 
 
+def _taggers(workflow: dict[Any, Any]) -> list[str]:
+    """The jobs that run the script creating the release tag."""
+    return [
+        name
+        for name, job in _jobs(workflow).items()
+        if any(TAG_SCRIPT in str(step.get("run", "")) for step in _steps(job))
+    ]
+
+
+def tags_after_publish(text: str) -> list[str]:
+    workflow = _parse(text)
+    jobs, publishers, taggers = _jobs(workflow), _publishers(workflow), _taggers(workflow)
+    if len(taggers) != 1:
+        return [f"{len(taggers)} jobs run {TAG_SCRIPT} {taggers}, not one"]
+    name = taggers[0]
+    job = jobs[name]
+    problems = []
+    needs = job.get("needs", [])
+    needs = [needs] if isinstance(needs, str) else needs
+    # How many jobs upload, and who gets id-token, are one_publisher's and
+    # id_token_only_where_it_publishes' to say.
+    if not any(publisher in needs for publisher in publishers):
+        problems.append(f"job `{name}` does not need the upload {publishers}: needs {needs}")
+    if RUNS_AFTER_A_SKIP.search(_condition(job)):
+        problems.append(f"job `{name}` runs when the upload failed: if: {_condition(job)}")
+    if job.get("permissions") != {"contents": "write"}:
+        problems.append(f"job `{name}` permissions {job.get('permissions')!r}, not contents: write")
+    for other, other_job in jobs.items():
+        permissions = other_job.get("permissions")
+        if other == name or not isinstance(permissions, dict):
+            continue
+        problems += [
+            f"job `{other}` gets {scope}: write"
+            for scope, level in permissions.items()
+            if level == "write" and scope != "id-token"
+        ]
+    for step in _steps(job):
+        uses, run = str(step.get("uses", "")), str(step.get("run", ""))
+        if uses and not uses.startswith("actions/checkout@"):
+            problems.append(f"job `{name}` runs the action {uses}")
+        if INSTALLS.search(run):
+            problems.append(f"job `{name}` installs or fetches code: {run.strip()}")
+        if TAG_SCRIPT in run:
+            env = step.get("env") if isinstance(step.get("env"), dict) else {}
+            if "${{" in run or '--version "$INPUT_VERSION"' not in run:
+                problems.append(f"job `{name}` does not pass the version through env: {run}")
+            if env.get("INPUT_VERSION") != "${{ inputs.version }}":
+                problems.append(f"job `{name}` sets INPUT_VERSION to {env.get('INPUT_VERSION')!r}")
+    return problems
+
+
 RULES: dict[str, Callable[[str], list[str]]] = {
     rule.__name__: rule
     for rule in (
@@ -227,6 +287,7 @@ RULES: dict[str, Callable[[str], list[str]]] = {
         main_only,
         one_publisher,
         pinned,
+        tags_after_publish,
     )
 }
 
@@ -243,6 +304,11 @@ class TestTheWorkflow:
     def test_the_one_job_that_publishes_is_publish(self) -> None:
         assert _publishers(_parse(WORKFLOW)) == ["publish"]
         assert _chain(_parse(WORKFLOW), "publish") == ["publish", "build", "check"]
+
+    def test_the_tag_comes_last_and_only_after_the_upload(self) -> None:
+        assert _taggers(_parse(WORKFLOW)) == ["tag"]
+        assert _chain(_parse(WORKFLOW), "tag") == ["tag", "publish", "build", "check"]
+        assert _condition(_jobs(_parse(WORKFLOW))["tag"]) == ""
 
     def test_the_gate_checks_the_input_against_the_package_version(self) -> None:
         check = _jobs(_parse(WORKFLOW))["check"]
@@ -268,6 +334,13 @@ PUBLISH_PERMISSIONS = (
 GATE = "    if: github.ref == 'refs/heads/main'\n"
 BUILD_NEEDS = "    name: Build the sdist and the wheel\n    needs: check\n"
 VERSION_ENV = "          INPUT_VERSION: ${{ inputs.version }}\n        run: |\n          pkg="
+TAG_HEAD = "    name: Tag the published commit\n    needs: publish\n"
+TAG_PERMISSIONS = "      contents: write # pushes the tag; no id-token here\n"
+TAG_CHECKOUT = (
+    "          persist-credentials: true # git push authenticates with this job's GITHUB_TOKEN\n"
+)
+TAG_RUN = '        run: python3 scripts/release_tag.py --version "$INPUT_VERSION"\n'
+TAG_ENV = "          INPUT_VERSION: ${{ inputs.version }}\n" + TAG_RUN
 
 MUTATIONS: dict[str, tuple[Callable[[str], str], set[str]]] = {
     # The three the owner's decision names.
@@ -371,7 +444,75 @@ MUTATIONS: dict[str, tuple[Callable[[str], str], set[str]]] = {
         ),
         {"pinned"},
     ),
+    # The tag v<version>: after the upload, from the one job that can write the repository.
+    "nothing creates the tag": (
+        lambda t: _replace(t, TAG_RUN, "        run: echo tagged\n"),
+        {"tags_after_publish"},
+    ),
+    "the tag before the upload": (
+        lambda t: _replace(t, TAG_HEAD, TAG_HEAD.replace("needs: publish", "needs: build")),
+        {"tags_after_publish"},
+    ),
+    "the tag after a failed upload": (
+        lambda t: _replace(t, TAG_HEAD, TAG_HEAD + "    if: ${{ always() }}\n"),
+        {"tags_after_publish"},
+    ),
+    "the tag job only reads": (
+        lambda t: _replace(t, TAG_PERMISSIONS, "      contents: read\n"),
+        {"tags_after_publish"},
+    ),
+    "id-token in the tag job": (
+        lambda t: _replace(t, TAG_PERMISSIONS, TAG_PERMISSIONS + "      id-token: write\n"),
+        {"tags_after_publish", "id_token_only_where_it_publishes"},
+    ),
+    "contents: write in build": (
+        lambda t: _replace(
+            t, BUILD_NEEDS, BUILD_NEEDS + "    permissions:\n      contents: write\n"
+        ),
+        {"tags_after_publish"},
+    ),
+    "contents: write beside the upload's id-token": (
+        lambda t: _replace(t, PUBLISH_PERMISSIONS, PUBLISH_PERMISSIONS + "      contents: write\n"),
+        {"tags_after_publish"},
+    ),
+    "contents: write for every job": (
+        lambda t: _replace(t, TOP_PERMISSIONS, "permissions:\n  contents: write\n"),
+        {"id_token_only_where_it_publishes"},
+    ),
+    "the tag job installs a package": (
+        lambda t: _replace(
+            t, TAG_RUN, TAG_RUN.replace("run: python3", "run: pip install requests && python3")
+        ),
+        {"tags_after_publish"},
+    ),
+    "another action in the tag job": (
+        lambda t: _replace(
+            t,
+            TAG_CHECKOUT,
+            TAG_CHECKOUT + "\n      - uses: actions/setup-python@"
+            "5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n",
+        ),
+        {"tags_after_publish"},
+    ),
+    "the version spliced into the tag script": (
+        lambda t: _replace(
+            t, TAG_RUN, TAG_RUN.replace('"$INPUT_VERSION"', '"${{ inputs.version }}"')
+        ),
+        {"tags_after_publish"},
+    ),
+    "the tag's version from another input": (
+        lambda t: _replace(t, TAG_ENV, TAG_ENV.replace("inputs.version", "github.ref_name")),
+        {"tags_after_publish"},
+    ),
     # Controls: equivalent spellings the rules must not refuse.
+    "control: the tag job needs a list": (
+        lambda t: _replace(t, TAG_HEAD, TAG_HEAD.replace("needs: publish", "needs: [publish]")),
+        set(),
+    ),
+    "control: the tag job runs on success()": (
+        lambda t: _replace(t, TAG_HEAD, TAG_HEAD + "    if: ${{ success() }}\n"),
+        set(),
+    ),
     "control: the environment as a mapping": (
         lambda t: _replace(
             t,

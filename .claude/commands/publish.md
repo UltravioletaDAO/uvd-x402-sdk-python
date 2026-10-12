@@ -24,12 +24,10 @@ Publica el SDK a PyPI. Ejecuta el workflow completo de publicación:
 5. **Push a GitHub:**
    - `git push origin main`
 
-6. **Crear y pushear tag (NO dispara nada):**
-   - Tag: `vX.X.X` (usa versión de pyproject.toml)
-   - Si el tag ya existe localmente, bórralo primero: `git tag -d vX.X.X`
-   - `git tag vX.X.X -m "vX.X.X"`
-   - `git push origin vX.X.X`
-   - El tag es el registro de la release. `publish.yml` ya no escucha tags ni releases.
+6. **El tag NO se crea a mano:** el job `tag` de `publish.yml` crea `vX.X.X` (anotado) sobre el commit publicado,
+   solo después de que la subida a PyPI salió bien (`scripts/release_tag.py`). Si el tag ya existe en ese commit no
+   hace nada; si existe en OTRO commit, el job falla y no lo mueve (no lo borres para "arreglarlo": compara los dos
+   commits). El tag es el registro de la release y no dispara nada.
 
 7. **Disparar la publicación (trusted publishing, OIDC, sin token):**
    - `gh workflow run publish.yml --ref main -f version=X.X.X` (misma versión que pyproject.toml, desde `main`)
@@ -38,7 +36,8 @@ Publica el SDK a PyPI. Ejecuta el workflow completo de publicación:
 
 8. **Publica sin aprobación humana:** el job `publish` corre en el environment `pypi`, que solo admite `main` y no tiene revisor requerido (se quitó el 2026-09-30), y sube `dist/` por OIDC (`pypa/gh-action-pypi-publish`) sin esperar a nadie. Los controles son: solo `main`, solo `workflow_dispatch`, OIDC sin token, y el camino a `main` (revisión, CI verde).
 
-9. **Verificar en PyPI:** `curl -s https://pypi.org/pypi/uvd-x402-sdk/X.X.X/json` devuelve la versión.
+9. **Verificar en PyPI:** `curl -s https://pypi.org/pypi/uvd-x402-sdk/X.X.X/json` devuelve la versión, y
+   `git ls-remote --tags origin 'refs/tags/vX.X.X^{}'` el commit del run (lo dejó el job `tag`).
 
 10. **GitHub Release (opcional, no dispara nada):** `gh release create vX.X.X`, title `vX.X.X`, notas con los últimos 5 commits + comando de instalación.
 
