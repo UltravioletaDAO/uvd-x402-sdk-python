@@ -385,8 +385,8 @@ The tag triggers nothing: `publish.yml` has no `push`, tag or `release` trigger,
 `GITHUB_TOKEN` starts no workflow. `tests/test_publish_workflow.py` fails on any `secrets` reference in the file,
 another trigger, `id-token` outside the job that publishes, a publish job without `environment: pypi`, no
 `refs/heads/main` gate in the chain, or a tag job that does not need the upload, runs after it failed, holds more
-than `contents: write` (or shares a write permission with another job), runs another action, installs anything, or
-splices the version into its script; every action is pinned by commit SHA (checked against its tag with
+than `contents: write` (or shares a write permission with another job), runs another action, installs anything,
+checks out without the token its push needs, or splices the version into its script; every action is pinned by commit SHA (checked against its tag with
 `git ls-remote`). `ci.yml` lists `scripts/release_tag.py` in its `paths` (the other `scripts/` are left out).
 
 ## Integration with 402milly

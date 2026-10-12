@@ -33,7 +33,8 @@ catch it: a rule that stops catching its mutation guards nothing.
   upload or running when it failed or was skipped, permissions other than
   ``contents: write`` alone there, a write permission in any other job (the
   upload's id-token aside), an action other than checkout or a package install
-  in it, or the version spliced into its script instead of passed through env.
+  in it, a checkout that drops the token its ``git push`` needs, or the version
+  spliced into its script instead of passed through env.
 """
 
 from __future__ import annotations
@@ -266,6 +267,9 @@ def tags_after_publish(text: str) -> list[str]:
         uses, run = str(step.get("uses", "")), str(step.get("run", ""))
         if uses and not uses.startswith("actions/checkout@"):
             problems.append(f"job `{name}` runs the action {uses}")
+        given = step.get("with") if isinstance(step.get("with"), dict) else {}
+        if uses and given.get("persist-credentials", True) is not True:
+            problems.append(f"job `{name}` checks out without the token its git push needs")
         if INSTALLS.search(run):
             problems.append(f"job `{name}` installs or fetches code: {run.strip()}")
         if TAG_SCRIPT in run:
@@ -492,6 +496,10 @@ MUTATIONS: dict[str, tuple[Callable[[str], str], set[str]]] = {
             TAG_CHECKOUT + "\n      - uses: actions/setup-python@"
             "5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n",
         ),
+        {"tags_after_publish"},
+    ),
+    "the tag job's checkout drops the token its push needs": (
+        lambda t: _replace(t, TAG_CHECKOUT, "          persist-credentials: false\n"),
         {"tags_after_publish"},
     ),
     "the version spliced into the tag script": (
