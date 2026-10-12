@@ -11,11 +11,15 @@ releases as missing.
 1. ``--sha`` (default ``$GITHUB_SHA``) must be a full commit id present in the
    checkout: a name such as ``HEAD`` or ``main`` is refused, it can move.
    The remote is the checkout's ``origin``.
-2. ``--version`` must be a normalized PEP 440 public version (what PyPI files a
-   release under: no epoch, no local part), and ``pyproject.toml`` at that
-   commit must declare exactly it, read as the ``check`` job reads it (the one
-   line ``version = "..."``).
-3. The remote is asked for ``refs/tags/v<version>``, peeled (``git ls-remote``).
+2. ``--version`` must be in this SDK's release format (a PEP 440 release
+   segment in ASCII digits with optional ``aN`` / ``bN`` / ``rcN``, ``.postN``,
+   ``.devN``; no epoch, no local part), and ``pyproject.toml`` at that commit
+   must declare exactly it, read as the ``check`` job reads it (the one line
+   ``version = "..."``).
+3. The remote is asked for ``refs/tags/v<version>`` and ``refs/tags/v<version>^{}``
+   (``git ls-remote`` prints the peeled line only when that pattern is passed,
+   under protocol 0 and 2, GitHub included), and its answer is read by exact
+   name (ls-remote matches a pattern against the tail of a ref).
    Already there and naming this commit, lightweight or annotated, is success
    with nothing written. Naming anything else is a failure: the tag of a
    published version is never moved, and nothing here forces a push.
@@ -41,7 +45,7 @@ import time
 from collections.abc import Sequence
 
 FULL_SHA = re.compile(r"[0-9a-fA-F]{40}")
-# A normalized PEP 440 public version: ASCII digits, dots and the pre / post / dev markers only
+# This SDK's release versions: ASCII digits, dots and the pre / post / dev markers only
 # (`\d` would also take non-ASCII digits).
 RELEASE_VERSION = re.compile(r"[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?")
 # The line the `check` job of publish.yml reads the package version from (with sed).
@@ -91,7 +95,7 @@ def _message(version: str) -> str:
 
 def tag_release(version: str, sha: str, remote: str) -> int:
     if not RELEASE_VERSION.fullmatch(version):
-        raise CannotRunError(f"{version!r} is not a normalized PEP 440 public version")
+        raise CannotRunError(f"{version!r} is not a release version (no epoch, no local part)")
     if not FULL_SHA.fullmatch(sha):
         raise CannotRunError(f"--sha {sha!r} is not a full commit id")
     commit = git("rev-parse", "--verify", "--end-of-options", sha + "^{commit}")

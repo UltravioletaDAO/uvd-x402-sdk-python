@@ -2,10 +2,10 @@
 
 Real git, no network: a bare repository stands for GitHub, and a ``--depth 1 --no-tags`` clone
 of its ``main`` for what ``actions/checkout`` leaves on the runner (one commit, no tags). Every
-case runs under git protocol 0 and 2: under protocol 0 only an explicit ``<ref>^{}`` pattern
-makes ``ls-remote`` print the peeled line of an annotated tag (GitHub answers the same), and
-``ls-remote`` matches a pattern against the TAIL of a ref, so ``refs/tags/old/refs/tags/v1.2.3``
-answers for ``refs/tags/v1.2.3``.
+case runs under git protocol 0 and 2, the two a server may speak. Under both, ``ls-remote``
+prints the peeled line of an annotated tag only when ``<ref>^{}`` is passed as a pattern too
+(GitHub answers the same), and it matches a pattern against the TAIL of a ref, so
+``refs/tags/old/refs/tags/v1.2.3`` answers for ``refs/tags/v1.2.3``.
 
 ``TestGuardMutations`` removes each guard from the script's SOURCE and asserts that the case it
 guards then ends otherwise: a guard that no case depends on guards nothing.
@@ -288,7 +288,7 @@ class TestRefusals:
         # The manifest declares it too: only the version guard stands in the way.
         origin = make_origin(manifest(version), manifest(version))
         out = self.refused(origin, capsys, "--version", version, "--sha", origin.head)
-        assert "is not a normalized PEP 440 public version" in out
+        assert "is not a release version (no epoch, no local part)" in out
 
     @pytest.mark.parametrize(
         "sha",
@@ -607,7 +607,7 @@ MUTATIONS: dict[str, tuple[str, str, Callable[..., int], int, int]] = {
 class TestGuardMutations:
     @pytest.fixture
     def protocol(self) -> str:
-        # Protocol 0 is where the peeled line needs its own pattern; every mutation shows there.
+        # Every mutation shows under either protocol; one of them is enough here.
         return "0"
 
     @pytest.mark.parametrize("name", sorted(MUTATIONS))

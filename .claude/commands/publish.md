@@ -37,7 +37,8 @@ Publica el SDK a PyPI. Ejecuta el workflow completo de publicación:
 8. **Publica sin aprobación humana:** el job `publish` corre en el environment `pypi`, que solo admite `main` y no tiene revisor requerido (se quitó el 2026-09-30), y sube `dist/` por OIDC (`pypa/gh-action-pypi-publish`) sin esperar a nadie. Los controles son: solo `main`, solo `workflow_dispatch`, OIDC sin token, y el camino a `main` (revisión, CI verde).
 
 9. **Verificar en PyPI:** `curl -s https://pypi.org/pypi/uvd-x402-sdk/X.X.X/json` devuelve la versión, y
-   `git ls-remote --tags origin 'refs/tags/vX.X.X^{}'` el commit del run (lo dejó el job `tag`).
+   `git ls-remote --tags origin refs/tags/vX.X.X 'refs/tags/vX.X.X^{}'` el commit del run (la línea `^{}`, o la
+   única línea si el tag ya existía y era liviano).
 
 10. **GitHub Release (opcional, no dispara nada):** `gh release create vX.X.X`, title `vX.X.X`, notas con los últimos 5 commits + comando de instalación.
 
