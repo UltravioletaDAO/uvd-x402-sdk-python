@@ -137,6 +137,54 @@ def test_the_payload_envelope_and_header():
     assert json.loads(base64.b64decode(p.header()))["payload"]["type"] == "deposit"
 
 
+SMA = "0x69007702764179f14f51cdce752f4f775d74e139"   # Alchemy SemiModularAccount7702: the target that needs the wrap
+
+
+def _deposit_signature(resolver):
+    dep = bs.build_deposit_payload(
+        WALLET, requirements(), CONFIG, 30000, 3000, deposit_salt=SALT, now=1_800_000_000, delegation_resolver=resolver
+    )
+    return dep["deposit"]["authorization"]["erc3009Authorization"]["signature"]
+
+
+def test_a_delegated_payer_gets_the_erc1271_wrapped_authorization():
+    from uvd_x402_sdk.erc7702 import eip712_digest, sign_eip3009_for_delegated
+
+    domain = {"name": "USD Coin", "version": "2", "chainId": 8453, "verifyingContract": ASSET}
+    message = {
+        "from": ACCOUNT.address, "to": bs.ERC3009_DEPOSIT_COLLECTOR_ADDRESS, "value": 30000, "validAfter": 0,
+        "validBefore": 1_800_000_000 + 15,
+        "nonce": bytes.fromhex(bs.erc3009_deposit_nonce(GOLDEN_CHANNEL_ID, SALT)[2:]),
+    }
+    digest = eip712_digest(domain, bs.RECEIVE_AUTHORIZATION_TYPES, message)
+    expected = sign_eip3009_for_delegated(wallet=WALLET, inner_digest=digest, chain_id=8453, account=ACCOUNT.address)
+    got = _deposit_signature(lambda address, network: SMA)
+    assert got == expected and got != GOLDEN_DEPOSIT_SIG, "a wrapped signature is NOT the plain one"
+
+
+def test_a_plain_or_non_wrapping_delegate_signs_plain():
+    assert _deposit_signature(lambda a, n: False) == GOLDEN_DEPOSIT_SIG
+    # a plain-ECDSA 1271 delegate (Execution Market's FeedbackDelegate style) takes the ordinary signature
+    assert _deposit_signature(lambda a, n: "0x" + "11" * 20) == GOLDEN_DEPOSIT_SIG
+
+
+def test_an_unreadable_chain_is_not_plain_and_refuses():
+    with pytest.raises(bs.BatchSettlementError):
+        _deposit_signature(lambda a, n: None)
+    def boom(a, n):
+        raise OSError("rpc down")
+    with pytest.raises(bs.BatchSettlementError):
+        _deposit_signature(boom)
+
+
+def test_the_client_passes_its_resolver_to_the_deposit():
+    client = bs.BatchSettlementClient(WALLET, delegation_resolver=lambda a, n: SMA)
+    wrapped = client.create_payment(requirements(), now=1_800_000_000)
+    plain = bs.BatchSettlementClient(WALLET).create_payment(requirements(), now=1_800_000_000)
+    sig = lambda p: p.payload["payload"]["deposit"]["authorization"]["erc3009Authorization"]["signature"]  # noqa: E731
+    assert len(sig(wrapped)) > len(sig(plain)), "the ERC-1271 envelope is longer than a 65-byte ECDSA signature"
+
+
 def test_file_storage_survives_a_new_process(tmp_path):
     path = tmp_path / "channels.json"
     a = bs.BatchSettlementClient(WALLET, storage=bs.FileChannelStorage(path))
