@@ -231,6 +231,48 @@ def sign_voucher(wallet: Any, channel_id: str, max_claimable_amount: int, networ
     }
 
 
+def _sign_deposit_authorization(
+    wallet: Any,
+    domain: Mapping[str, Any],
+    message: Mapping[str, Any],
+    network: str,
+    payer: str,
+    delegation_resolver: Any,
+) -> str:
+    """Sign the ERC-3009 ``ReceiveWithAuthorization``, wrapping it for a delegated (EIP-7702) payer.
+
+    The token contract verifies this signature against the PAYER. A payer whose EOA carries EIP-7702 code
+    (every Paybox wallet after its first money operation) is checked through ERC-1271, so a raw ECDSA
+    signature from it is unsettleable. With a ``delegation_resolver`` (the SDK's ``DelegationResolver``:
+    ``(address, network) -> target | True | False | None``) the signature goes through the same wrap the SDK
+    already uses for ``TransferWithAuthorization`` (:func:`uvd_x402_sdk.erc7702.sign_eip3009_for_delegated`),
+    and only for the delegate targets that need it. ``None`` (the chain could not be read) is NOT "plain":
+    it refuses. Without a resolver the payer is taken as a plain EOA, as before; a caller whose wallet may
+    be delegated must pass one.
+    """
+    if delegation_resolver is None:
+        return _sign(wallet, domain, RECEIVE_AUTHORIZATION_TYPES, "ReceiveWithAuthorization", message)
+    from .erc7702 import (
+        eip712_digest,
+        needs_account_wrap,
+        resolve_delegation,
+        sign_eip3009_for_delegated,
+    )
+
+    delegated, target = resolve_delegation(payer, network, delegation_resolver)
+    if delegated is None:
+        raise BatchSettlementError(
+            "cannot tell whether the payer is EIP-7702 delegated (the chain could not be read): "
+            "refusing to sign a deposit authorization that may be unsettleable"
+        )
+    if delegated and (target is None or needs_account_wrap(target)):
+        digest = eip712_digest(dict(domain), RECEIVE_AUTHORIZATION_TYPES, dict(message))
+        return sign_eip3009_for_delegated(
+            wallet=wallet, inner_digest=digest, chain_id=_chain_id(network), account=payer
+        )
+    return _sign(wallet, domain, RECEIVE_AUTHORIZATION_TYPES, "ReceiveWithAuthorization", message)
+
+
 def build_deposit_payload(
     wallet: Any,
     requirements: Mapping[str, Any],
@@ -241,6 +283,7 @@ def build_deposit_payload(
     voucher_wallet: Any = None,
     deposit_salt: Optional[str] = None,
     now: Optional[int] = None,
+    delegation_resolver: Any = None,
 ) -> Dict[str, Any]:
     """The inner ``payload`` of a ``deposit``: an ERC-3009 authorization to the collector plus the first voucher."""
     _, _, _, checksum = _crypto()
@@ -266,7 +309,9 @@ def build_deposit_payload(
         "validBefore": valid_before,
         "nonce": _bytes32(erc3009_deposit_nonce(channel_id, salt), "nonce"),
     }
-    auth_signature = _sign(wallet, domain, RECEIVE_AUTHORIZATION_TYPES, "ReceiveWithAuthorization", message)
+    auth_signature = _sign_deposit_authorization(
+        wallet, domain, message, network, config.payer, delegation_resolver
+    )
     voucher = sign_voucher(voucher_wallet or wallet, channel_id, max_claimable_amount, network)
     return {
         "type": "deposit",
@@ -397,6 +442,9 @@ class BatchSettlementClient:
     voucher_wallet: Any = None
     max_deposit: int = DEFAULT_MAX_DEPOSIT
     deposit_multiplier: int = DEFAULT_DEPOSIT_MULTIPLIER
+    #: ``(address, network) -> target | True | False | None``: pass it when the payer may be an EIP-7702
+    #: delegated account (a Paybox wallet), so the deposit authorization is wrapped for ERC-1271 when needed.
+    delegation_resolver: Any = None
 
     def _address(self, wallet: Any) -> str:
         return wallet.get_address() if hasattr(wallet, "get_address") else wallet.address
@@ -467,7 +515,8 @@ class BatchSettlementClient:
         if balance == 0 or max_claimable > balance:
             deposit = self._deposit_amount(requirements, max_claimable - balance, request_amount)
             inner = build_deposit_payload(
-                self.wallet, requirements, config, deposit, max_claimable, voucher_wallet=self.voucher_wallet, now=now
+                self.wallet, requirements, config, deposit, max_claimable, voucher_wallet=self.voucher_wallet, now=now,
+                delegation_resolver=self.delegation_resolver,
             )
         else:
             inner = build_voucher_payload(self.voucher_wallet or self.wallet, config, network, max_claimable)
