@@ -24,6 +24,7 @@ src/uvd_x402_sdk/
 ├── solana_signing.py        # Solana rater-authored feedback: sign the prepared tx (ed25519)
 ├── erc8128.py               # ERC-8128 Signed HTTP Requests (RFC 9421) — sign_request() + fetch_nonce()
 ├── policy.py                # PurchasePolicy - what this buyer may sign, decided BEFORE signing
+├── batch_settlement.py      # x402 batch-settlement BUYER side (EVM): BatchSettlementClient signs deposit + cumulative vouchers via a WalletAdapter
 ├── bounded_json.py          # loads_bounded() - size and nesting ceiling BEFORE json.loads of a third party's JSON
 ├── bindings.py              # BindingStore - a seller's per-payment key, persisted BEFORE the facilitator is called
 ├── escrow.py                # Escrow & Refund support + get_escrow_state()

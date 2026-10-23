@@ -235,6 +235,29 @@ pip install uvd-x402-sdk[all]
 
 ---
 
+## Paying a `batch-settlement` seller (buyer side)
+
+A seller that answers 402 with `scheme: "batch-settlement"` asks for a payment channel instead of one transfer per
+request. `BatchSettlementClient` signs the deposit (first request) and then one cumulative voucher per request:
+
+```python
+from uvd_x402_sdk.batch_settlement import BatchSettlementClient, FileChannelStorage
+from uvd_x402_sdk.wallet import EnvKeyAdapter
+
+client = BatchSettlementClient(EnvKeyAdapter(), storage=FileChannelStorage("channels.json"), max_deposit=100_000)
+prepared = client.create_payment(accepts[0])          # accepts[0] is the 402's batch-settlement offer
+resp = httpx.post(url, json=body, headers={"PAYMENT-SIGNATURE": prepared.header()})
+if resp.status_code == 200:
+    client.confirm(prepared, settle_extra_from(resp))  # PAYMENT-RESPONSE.extra: chargedAmount, channelState
+```
+
+The deposit is capped by `max_deposit` (a seller's `minDeposit` is a target, never an order), the cumulative lives in
+the storage you give it (persist it: a process that forgets it signs vouchers the seller rejects), and only USDC-style
+ERC-3009 deposits on `eip155` networks are signed. Permit2, cooperative refund and corrective-402 resync are not
+implemented.
+
+---
+
 ## Framework Examples
 
 ### Flask
