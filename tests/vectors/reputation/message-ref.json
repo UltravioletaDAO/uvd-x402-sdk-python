@@ -1,0 +1,108 @@
+{
+  "description": "message_ref(namespace, *parts) = sha256(utf8('|'.join([namespace, *parts]))) as 64 lowercase hex. Ints are written in decimal. Refused (ValueError): a '|' in any part or the namespace, an empty or blank part, no parts, a part that is not a string or an int (booleans included).",
+  "cases": [
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "stream-1",
+        "msg-1"
+      ],
+      "ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+      "note": "Credits Roll moment_ref"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "40912334",
+        "c6a1b1f2-6f3b-4c1e-9a52-2b8a3b2c1d0e"
+      ],
+      "ref": "eeb387304d75fa014166c977ab6b86bcd8907e4e5d22c645133f0575d437664b",
+      "note": "Twitch ids"
+    },
+    {
+      "namespace": "base",
+      "parts": [
+        "0x1212121212121212121212121212121212121212",
+        "log-123"
+      ],
+      "ref": "e72cdf4b8a6fd762dba332d8012f4bda33845ba5ea62e23f83d507038c3f0a4a",
+      "note": "= Karma Hello operation_id (live.py initial_feedback)"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        42,
+        "m"
+      ],
+      "ref": "48826b3c97d4806bb5602b64ce3edea15efebb9a3cb65caaeefaa80e7d17630e",
+      "note": "an int part is written in decimal"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "momento-ñ",
+        "🎬"
+      ],
+      "ref": "231c71d7cf3eb6bc8c9e68c17dc87db607789fbc8edb218002c22d08fbc04ec1",
+      "note": "non-ASCII parts hash their UTF-8"
+    }
+  ],
+  "rejected": [
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "a|b",
+        "c"
+      ],
+      "reason": "separator"
+    },
+    {
+      "namespace": "credits-roll|v1",
+      "parts": [
+        "a"
+      ],
+      "reason": "separator"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "",
+        "c"
+      ],
+      "reason": "empty"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        "   "
+      ],
+      "reason": "empty"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [],
+      "reason": "no_parts"
+    },
+    {
+      "namespace": "",
+      "parts": [
+        "a"
+      ],
+      "reason": "empty"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        true
+      ],
+      "reason": "type"
+    },
+    {
+      "namespace": "credits-roll:v1",
+      "parts": [
+        null
+      ],
+      "reason": "type"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "description": "paymentHash = keccak(txHash32 || u64be(blockNumber) || utf8(EIP-55 payer) || utf8(EIP-55 payee) || u256be(amount)), as x402-rs types.rs::compute_payment_hash (the first case IS the facilitator's). transferCalldata is the anchor transfer the rater signs (to = the network's USDC, value 0).",
+  "paymentHash": [
+    {
+      "name": "facilitator-2.40.0",
+      "transactionHash": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+      "blockNumber": 1048576,
+      "payer": "0x774A351d1AA8cd221a1B87da639EFcc5A56cd9ce",
+      "payee": "0x2222222222222222222222222222222222222222",
+      "amount": "1000000",
+      "paymentHash": "0xd8937deee9a7053e6755cb6ac315a876e59301edd19fe8571a341f02523cb563"
+    },
+    {
+      "name": "anchor-0.001-usdc",
+      "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "blockNumber": 53125001,
+      "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "payee": "0x2222222222222222222222222222222222222222",
+      "amount": "1000",
+      "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+    },
+    {
+      "name": "addresses-lowercase",
+      "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+      "blockNumber": 53125001,
+      "payer": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a",
+      "payee": "0x2222222222222222222222222222222222222222",
+      "amount": "1000",
+      "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+    }
+  ],
+  "transferCalldata": [
+    {
+      "payee": "0x2222222222222222222222222222222222222222",
+      "amount": "1000",
+      "data": "0xa9059cbb000000000000000000000000222222222222222222222222222222222222222200000000000000000000000000000000000000000000000000000000000003e8"
+    }
+  ],
+  "proof": {
+    "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "blockNumber": 53125001,
+    "network": "base",
+    "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+    "payee": "0x2222222222222222222222222222222222222222",
+    "amount": "1000",
+    "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "timestamp": 1790000002,
+    "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+  }
+}

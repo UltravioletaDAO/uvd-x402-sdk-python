@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uvd-x402-sdk"
-version = "0.100.0"
+version = "0.101.0"
 description = "Python SDK for x402 payments - gasless crypto payments across 29 networks (including native Hedera mainnet/testnet, Circle Arc mainnet/testnet, Robinhood Chain, XRPL, Scroll, SKALE). Features: ERC-8004 Trustless Agents, Escrow/Refunds, multi-stablecoin (USDC, EURC, AUSD, PYUSD, USDT, USDG)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -88,6 +88,14 @@ web3 = [
 escrow = [
     "web3>=6.0.0",
     "eth-account>=0.11.0",
+]
+# uvd_x402_sdk.reputation: the rater-signed, payment-anchored ERC-8004 rating
+# rail (signing, EIP-7702 authorization, anchor payment, outbox, governor,
+# evidence). 0.13.0 is the first eth-account with `unsafe_sign_hash` and
+# `sign_authorization` (EIP-7702), which the module and its tests rely on; it
+# also brings eth-abi, eth-utils, eth-keys, hexbytes and rlp.
+reputation = [
+    "eth-account>=0.13.0",
 ]
 # Signing a Solana feedback transaction as the rater: ed25519 only, no RPC
 # client and no web3. The decode/encode half of solana_signing works on a base
