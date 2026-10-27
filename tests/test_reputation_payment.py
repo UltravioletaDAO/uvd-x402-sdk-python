@@ -306,6 +306,7 @@ async def test_a_payment_another_node_shows_mined_is_never_consumed(world):
         1000,
         chain,
         max_amount=10_000,
+        on_signed=lambda signed: None,
         wait_seconds=120,
         sleep=clock.sleep,
         clock=clock,

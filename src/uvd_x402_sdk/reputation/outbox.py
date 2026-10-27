@@ -1,14 +1,17 @@
 """The rating outbox: one row per rated thing, persisted BEFORE anything moves.
 
-The state machine is Karma Hello's (``services/reputation/live_worker.py``,
-``process`` / ``reconcile``), written down once::
+Karma Hello's ``submitting -> submitted -> confirmed`` with its reconcile
+(``services/reputation/live_worker.py``, ``process`` / ``reconcile``), plus
+what Karma Hello does not have: the anchor payment (``paying``, ``paid``) and,
+opt-in, a second prepare once a signature provably expired::
 
     queued -> paying(tx) -> paid -> submitting(nonce, deadline) -> submitted(tx) -> confirmed
        |         |           |            |                            |
-       |         +-> failed  +-> failed   +-> paid  (only once the     +-> failed
-       +-> local_only                     |          deadline provably
-       +-> paid (no anchor payment)       |          passed unrelayed)
-       +-> failed                         +-> failed
+       |         +-> failed  +-> failed   +-> failed (by default once  +-> failed
+       +-> local_only                     |   the deadline provably
+       +-> paid (no anchor payment)       |   passed unrelayed)
+       +-> failed                         +-> paid (the same, only with
+                                              max_relay_rounds > 1)
 
 * ``ref`` is the UNIQUE key (:func:`~uvd_x402_sdk.reputation.ref.message_ref`):
   the same moment enqueued twice, or again after a restart, is one row.
@@ -18,8 +21,11 @@ The state machine is Karma Hello's (``services/reputation/live_worker.py``,
   field is still empty", which is how the signed payment is saved at most once.
 * ``submitting`` is written BEFORE the submit is sent, and nothing goes back
   from it to ``paid`` except the proven-expired path in
-  :mod:`~uvd_x402_sdk.reputation.submit`: two nonces are two identical ratings
-  on-chain.
+  :mod:`~uvd_x402_sdk.reputation.submit`, and only when the consumer opts in:
+  two nonces are two identical ratings on-chain.
+* ``rater`` is written when the row starts (by the worker) or, at the latest,
+  with ``submitting``: the row is moved only by that key
+  (:class:`~uvd_x402_sdk.reputation.RaterMismatch`).
 * :meth:`RatingOutbox.forget` is ``!forgetme``: what has not started is
   deleted; what has started keeps a tombstone without the viewer (the caps must
   keep counting what is already on-chain, and the subject's wallet is public
@@ -123,6 +129,9 @@ class OutboxEntry:
     relay_rounds: int = 0
     #: The anchor payment's transaction hash, lowercased: one proof, one row.
     anchor_tx: Optional[str] = None
+    #: The rater (EIP-55) that paid and signs for this row. Every state read
+    #: of the row is at this address, never at whatever key signs today.
+    rater: Optional[str] = None
     #: Bumped by every write. A compare-and-set on the status alone is open to
     #: ABA (``submitting(n1) -> paid -> submitting(n2)`` looks unchanged to a
     #: worker that read ``n1``); on the version it is not.
@@ -155,6 +164,10 @@ class OutboxEntry:
             raise ValueError("OutboxEntry.value must be an int within 0..100")
         if not isinstance(self.subject, str) or not ADDRESS_RE.fullmatch(self.subject):
             raise ValueError("OutboxEntry.subject must be the subject's 0x address")
+        if self.rater is not None and (
+            not isinstance(self.rater, str) or not ADDRESS_RE.fullmatch(self.rater)
+        ):
+            raise ValueError("OutboxEntry.rater must be the rater's 0x address")
         if not isinstance(self.stream_id, str) or not isinstance(self.network, str):
             raise ValueError("OutboxEntry.stream_id and network are strings")
 
@@ -435,6 +448,7 @@ _COLUMNS = {
     "updated_at": "REAL NOT NULL",
     "relay_rounds": "INTEGER NOT NULL",
     "anchor_tx": "TEXT",
+    "rater": "TEXT",
     "version": "INTEGER NOT NULL",
 }
 #: uint256 values do not fit SQLite's INTEGER: stored as decimal text.

@@ -50,5 +50,15 @@ class OutboxConflict(ReputationError):
     """A compare-and-set on the outbox failed: someone else moved the row."""
 
 
+class RaterMismatch(ReputationError):
+    """The signer is not the rater the row was started with.
+
+    A row is moved only by the key that paid and signed for it: its state is
+    read at that address, and another key would read another account (no
+    delegation, nonce 0) and take a landed rating for an absent one. Nothing
+    was signed or written. Bring back the row's key, or settle it by hand.
+    """
+
+
 class EvidenceRejected(ReputationError, ValueError):
     """The public evidence would carry something it must not."""

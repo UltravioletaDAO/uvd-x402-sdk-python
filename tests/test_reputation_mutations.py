@@ -33,13 +33,31 @@ from tests.reputation_doubles import (  # noqa: E402
     generous_caps,
     make_entry,
 )
+from tests.test_reputation_payment import CountingSigner  # noqa: E402
+from tests.test_reputation_round3 import (  # noqa: E402
+    TAMPERS,
+    Tampering,
+    absent_for_a_rotated_signer,
+    another_chain_at_prepare,
+    another_chain_at_start,
+    deep_rpc_answer,
+    forget_before_signing,
+    ipfs_evidence,
+    orphaned_safe_block,
+    proven_expired,
+    ref_window_in_a_tag,
+    removed_log_payment,
+    rotate_mid_flight,
+)
 from tests.test_reputation_signing import Lying, high_s, verified_for  # noqa: E402
 from uvd_x402_sdk.reputation import (  # noqa: E402
     AccountSigner,
     EvidenceRejected,
     InMemoryRatingOutbox,
+    PaymentPending,
     PaymentRejected,
     PreparationRejected,
+    RpcError,
     SignatureRejected,
     validate_preparation,
 )
@@ -178,6 +196,7 @@ async def test_m5_without_the_expiry_proof_a_live_signature_is_prepared_again(mo
     async def prepares_with(module) -> int:
         env = Env(InMemoryRatingOutbox())
         env.own()
+        env.worker.submit_options["max_relay_rounds"] = 3  # the opt-in path
         env.facilitator.submit_modes = ["400", "400"]
         entry = make_entry()
         env.outbox.enqueue(entry)
@@ -205,6 +224,7 @@ async def test_m5b_trusting_empty_logs_instead_of_the_spent_nonce_rates_twice(mo
 
         env = Env(InMemoryRatingOutbox())
         env.own()
+        env.worker.submit_options["max_relay_rounds"] = 3  # the opt-in path
         env.facilitator.submit_modes = ["lost"]
         env.chain.logs_lag, env.chain.logs_lag_calls = 1000, 10**6
         monkeypatch.setattr(
@@ -308,9 +328,8 @@ async def test_m9_broadcasting_before_persisting_is_caught():
     assert await broadcasts_seen_at_persist(payment) == [0]
     broken = mutant(
         "payment",
-        "        if on_signed is not None:\n            await _maybe_await(on_signed(payment))\n",
-        "        await broadcast(rpc, payment)\n"
-        "        if on_signed is not None:\n            await _maybe_await(on_signed(payment))\n",
+        "        await _maybe_await(on_signed(payment))\n",
+        "        await broadcast(rpc, payment)\n        await _maybe_await(on_signed(payment))\n",
     )
     assert await broadcasts_seen_at_persist(broken) == [1]
 
@@ -429,3 +448,274 @@ async def test_m15_without_the_code_check_a_contract_is_paid():
     assert await broken.sign_payment(
         AccountSigner(fixed_account()), SUBJECT, 1000, chain, max_amount=10_000
     )
+
+
+# -- The third review's guards (tests/test_reputation_round3.py runs the same scenarios) --
+def _env() -> Env:
+    env = Env(InMemoryRatingOutbox())
+    env.own()
+    return env
+
+
+def _patch_submit(monkeypatch, module) -> None:
+    """Make the worker use a mutant ``submit`` module."""
+    monkeypatch.setattr("uvd_x402_sdk.reputation.worker.row_rater", module.row_rater)
+    monkeypatch.setattr(
+        "uvd_x402_sdk.reputation.worker.submit_with_reconcile", module.submit_with_reconcile
+    )
+
+
+# M16 a row is moved only by its rater
+async def test_m16_without_the_rater_guard_a_rotated_key_moves_the_row(monkeypatch):
+    codes, _, _, _ = await rotate_mid_flight(_env())
+    assert codes == ["rater_mismatch"] * 12
+    broken = mutant("submit", "    if entry.rater.lower() != address.lower():\n", "    if False:\n")
+    _patch_submit(monkeypatch, broken)
+    codes, before, after, _ = await rotate_mid_flight(_env())
+    assert "rater_mismatch" not in codes and after.version != before.version
+
+
+async def test_m16b_reading_the_signers_state_proves_a_landed_rating_absent():
+    assert await absent_for_a_rotated_signer(_env()) is False
+    broken = mutant(
+        "submit",
+        "        rater = str(entry.rater)\n        delegate = RELAY_DELEGATES",
+        "        rater = signer_address(self.signer)\n        delegate = RELAY_DELEGATES",
+    )
+    assert await absent_for_a_rotated_signer(_env(), broken._Run) is True
+
+
+# M17 a payee's code that is not hex
+async def test_m17_a_null_code_read_taken_for_no_code_pays_a_contract():
+    def contract_behind_a_null_read() -> FakeChain:
+        chain = FakeChain(Clock())
+        chain.code[SUBJECT.lower()] = "0x6080604052"
+        chain.null_code_reads = 1
+        return chain
+
+    payment = importlib.import_module("uvd_x402_sdk.reputation.payment")
+    with pytest.raises(PaymentPending):
+        await payment.sign_payment(
+            AccountSigner(fixed_account()),
+            SUBJECT,
+            1000,
+            contract_behind_a_null_read(),
+            max_amount=10_000,
+        )
+    broken = mutant(
+        "payment",
+        "    if not isinstance(code, str) or not _CODE_RE.fullmatch(code):\n"
+        '        # A null (one node of a balanced RPC) is no answer, never "no code".\n'
+        '        raise PaymentPending("rpc_unreadable", "eth_getCode is not hex")\n'
+        "    code = code.lower()\n",
+        '    code = str(code or "0x").lower()\n',
+    )
+    assert await broken.sign_payment(
+        AccountSigner(fixed_account()),
+        SUBJECT,
+        1000,
+        contract_behind_a_null_read(),
+        max_amount=10_000,
+    )
+
+
+# M18 a new transfer needs somewhere to persist it
+async def test_m18_without_the_on_signed_guard_a_transfer_is_signed_with_nowhere_to_keep_it():
+    async def transfers_signed(module) -> int:
+        clock = Clock()
+        signer = CountingSigner(fixed_account())
+        with pytest.raises(TypeError):
+            await module.pay_and_prove(
+                signer,
+                SUBJECT,
+                1000,
+                FakeChain(clock),
+                max_amount=10_000,
+                sleep=clock.sleep,
+                clock=clock,
+            )
+        return signer.transactions
+
+    assert await transfers_signed(importlib.import_module("uvd_x402_sdk.reputation.payment")) == 0
+    broken = mutant(
+        "payment",
+        "        if on_signed is None:\n"
+        '            raise TypeError("pay_and_prove: on_signed is required to sign a new '
+        'transfer")\n',
+        "",
+    )
+    assert await transfers_signed(broken) == 1  # signed, then lost: nothing kept the bytes
+
+
+# M19 / M20 !forgetme before the transfer is signed, and after it is paid
+async def test_m19_without_the_forget_check_an_unsigned_row_pays_after_a_forgetme():
+    env = _env()
+    await forget_before_signing(env)
+    assert env.chain.broadcasts == []
+    broken = mutant(
+        "worker",
+        "            if entry.forget_requested:\n"
+        '                return self._fail(entry, "forgotten")\n'
+        "            ready = ",
+        "            ready = ",
+    )
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    await forget_before_signing(env)
+    assert len(set(env.chain.broadcasts)) == 1
+
+
+async def test_m20_without_the_forget_check_after_paying_the_evidence_is_published():
+    async def published(env: Env) -> dict:
+        env.chain.auto_mine = False
+        entry = make_entry()
+        env.outbox.enqueue(entry)
+        await env.worker.tick()
+        assert env.outbox.get(entry.ref).payment is not None
+        env.outbox.forget("viewer-1")
+        env.chain.auto_mine, env.chain.mempool = True, set()
+        await env.drive(entry.ref)
+        return env.served
+
+    assert await published(_env()) == {}
+    broken = mutant(
+        "worker",
+        "        if entry.forget_requested:\n"
+        '            return self._fail(entry, "forgotten")\n'
+        "        published = await self._publish(entry, proof)",
+        "        published = await self._publish(entry, proof)",
+    )
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    assert await published(env) != {}
+
+
+# M21 Karma Hello's ipfs:// evidence
+async def test_m21_an_http_only_uri_check_strands_a_paid_ipfs_row():
+    assert (await ipfs_evidence(_env())).status == "confirmed"
+    broken = mutant(
+        "worker",
+        r'_URI_RE = re.compile(r"^(?:https?|ipfs)://\S+$")',
+        r'_URI_RE = re.compile(r"^https?://\S+$")',
+    )
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    row = await ipfs_evidence(env)
+    assert row.status == "paying" and row.error == "evidence_unpublished"
+
+
+# M22 each field of the transaction the signer returns
+SIGNED_TX_SITES = {
+    "chainId": 'int(decoded.get("chainId", -1)) != tx["chainId"]',
+    "nonce": 'int(decoded.get("nonce", -1)) != tx["nonce"]',
+    "data": 'data_hex.lower() != tx["data"].lower()',
+    "value": 'int(decoded.get("value", -1)) != 0',
+    "gas": 'int(decoded.get("gas", -1)) != tx["gas"]',
+    "maxFeePerGas": 'int(decoded.get("maxFeePerGas", -1)) != tx["maxFeePerGas"]',
+    "maxPriorityFeePerGas": (
+        'int(decoded.get("maxPriorityFeePerGas", -1)) != tx["maxPriorityFeePerGas"]'
+    ),
+    "accessList": 'tuple(decoded.get("accessList") or ()) != ()',
+}
+
+
+@pytest.mark.parametrize("field", sorted(SIGNED_TX_SITES))
+async def test_m22_each_field_of_the_signers_transaction_is_what_refuses_it(field):
+    assert set(SIGNED_TX_SITES) == set(TAMPERS)
+    payment = importlib.import_module("uvd_x402_sdk.reputation.payment")
+    tampering = Tampering(fixed_account(), TAMPERS[field])
+    with pytest.raises(PaymentRejected):
+        await payment.sign_payment(tampering, SUBJECT, 1000, FakeChain(Clock()), max_amount=10_000)
+    broken = mutant("payment", SIGNED_TX_SITES[field], "False")
+    signed = await broken.sign_payment(
+        tampering, SUBJECT, 1000, FakeChain(Clock()), max_amount=10_000
+    )
+    assert signed.raw  # e.g. the amount times 1000, signed by a custodian and accepted
+
+
+# M23 a removed log
+async def test_m23_a_removed_transfer_log_proves_a_payment_without_its_guard():
+    with pytest.raises(PaymentRejected):
+        await removed_log_payment()
+    broken = mutant("payment", 'if not log.get("removed")\n', "if True\n")
+    assert (await removed_log_payment(broken.pay_and_prove)).amount == "1000"
+
+
+# M24 requireCanonical
+async def test_m24_state_read_at_an_orphaned_block_proves_a_landed_rating_absent(monkeypatch):
+    row = await orphaned_safe_block(_env())
+    assert row.status == "submitting" and row.error == "relay_state_unknown"
+    broken = mutant("submit", '"requireCanonical": True', '"requireCanonical": False')
+    _patch_submit(monkeypatch, broken)
+    row = await orphaned_safe_block(_env())
+    assert row.status == "failed" and row.error == "relay_expired_unrelayed"  # it had landed
+
+
+# M25 a proven expiry is a human's decision
+async def test_m25_without_the_rounds_check_a_proven_expiry_is_prepared_again(monkeypatch):
+    env = _env()
+    await proven_expired(env)
+    assert len(env.facilitator.prepares) == 1
+    broken = mutant(
+        "submit",
+        "                if entry.relay_rounds >= self.max_relay_rounds:\n",
+        "                if False:\n",
+    )
+    _patch_submit(monkeypatch, broken)
+    env = _env()
+    await proven_expired(env)
+    assert len(env.facilitator.prepares) > 1
+
+
+# M26 the RPC's JSON
+async def test_m26_an_unbounded_parse_takes_any_nesting_from_the_rpc():
+    with pytest.raises(RpcError):
+        await deep_rpc_answer()
+    broken = mutant(
+        "payment",
+        "payload = loads_bounded(response.content, max_bytes=MAX_RPC_RESPONSE_BYTES)",
+        "payload = response.json()",
+    )
+    assert isinstance(await deep_rpc_answer(broken.HttpJsonRpc), list)
+
+
+# M27 / M28 the RPC's chain id, when a row starts and before a rating is signed
+async def test_m27_without_the_chain_check_at_start_a_row_prepares_on_another_chain():
+    env = _env()
+    await another_chain_at_start(env)
+    assert env.facilitator.prepares == []
+    broken = mutant(
+        "worker", "            await _check_chain(self.rpc, entry.network)\n", "            pass\n"
+    )
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    await another_chain_at_start(env)
+    assert len(env.facilitator.prepares) == 1 and env.facilitator.submits == []
+
+
+async def test_m28_without_the_chain_check_at_prepare_a_rating_is_signed_on_another_chain(
+    monkeypatch,
+):
+    env = _env()
+    await another_chain_at_prepare(env)
+    assert env.facilitator.submits == []
+    broken = mutant(
+        "submit", "        if _int(chain_id) != verified.chain_id:\n", "        if False:\n"
+    )
+    _patch_submit(monkeypatch, broken)
+    env = _env()
+    await another_chain_at_prepare(env)
+    assert len(env.facilitator.submits) == 1
+
+
+# M29 any 16 hex of the ref
+async def test_m29_a_prefix_only_check_lets_the_middle_of_the_ref_on_chain():
+    assert (await ref_window_in_a_tag(_env())).status == "local_only"
+    broken = mutant(
+        "worker",
+        "for start in range(max(1, len(ref) - _REF_WINDOW + 1))",
+        "for start in range(1)",
+    )
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    assert (await ref_window_in_a_tag(env)).status != "local_only"

@@ -127,6 +127,7 @@ async def test_r2_p1_c_a_stale_worker_cannot_overwrite_a_newer_submitting(kind, 
     )
     env = Env(outbox)
     env.own()
+    env.worker.submit_options["max_relay_rounds"] = 3  # n2 exists only when opted in
     env.facilitator.submit_modes = ["400"]
     entry = make_entry()
     env.outbox.enqueue(entry)
@@ -199,14 +200,17 @@ def test_r2_p1_c_the_sql_update_compares_the_version_not_only_the_status(tmp_pat
 
 
 # -- R2-P2-A -------------------------------------------------------------------------
-async def test_r2_p2_a_a_submit_refused_for_good_fails_the_row_and_frees_the_rail(env):
+@pytest.mark.parametrize("rounds", [None, 3])
+async def test_r2_p2_a_a_submit_refused_for_good_fails_the_row_and_frees_the_rail(env, rounds):
+    if rounds is not None:
+        env.worker.submit_options["max_relay_rounds"] = rounds  # opted in
     env.facilitator.refuse_all_submits = True
     poison, good = make_entry(("s", "poison")), make_entry(("s", "good"))
     env.outbox.enqueue(poison)
     env.outbox.enqueue(good)
     row = await env.drive(poison.ref, ticks=200, step=600)
-    assert row.status == "failed" and row.error == "relay_refused_repeatedly"
-    assert len(env.facilitator.prepares) == 3  # DEFAULT_MAX_RELAY_ROUNDS
+    assert row.status == "failed" and row.error == "relay_expired_unrelayed"
+    assert len(env.facilitator.prepares) == (rounds or 1)  # max_relay_rounds, 1 by default
     env.facilitator.refuse_all_submits = False
     env.breaker._open_until = 0.0
     assert (await env.drive(good.ref, step=600)).status == "confirmed"
@@ -271,6 +275,7 @@ async def test_r2_p2_b_an_undelegated_claim_for_a_delegated_rater_is_not_signed(
 
 # -- R2-P2-C -------------------------------------------------------------------------
 async def test_r2_p2_c_a_failing_get_logs_does_not_block_the_expiry(env):
+    env.worker.submit_options["max_relay_rounds"] = 3  # opted in: the expiry leads to paid
     env.facilitator.refuse_all_submits = True
     entry = make_entry()
     env.outbox.enqueue(entry)
@@ -298,7 +303,9 @@ async def test_r2_p2_c_inside_the_expiry_margin_nothing_is_prepared_again(env):
     assert row.status == "submitting" and row.error != "relay_expired_unrelayed"
     assert len(env.facilitator.prepares) == 1
     env.facilitator.submit_modes.clear()
-    assert (await env.drive(entry.ref, step=300)).status == "confirmed"
+    row = await env.drive(entry.ref, step=300)
+    assert row.status == "failed" and row.error == "relay_expired_unrelayed"  # once proven
+    assert len(env.facilitator.prepares) == 1
 
 
 # -- R2-P2-D -------------------------------------------------------------------------
@@ -309,7 +316,9 @@ async def test_r2_p2_d_no_transfer_is_signed_while_a_rating_is_in_flight(env):
     await env.drive(first.ref, until=("submitting",), ticks=5, step=1)
     env.outbox.transition(first.ref, "submitting", next_attempt=10**12)
     env.outbox.enqueue(second)
-    env.outbox.transition(second.ref, "queued", "paying", started_at=env.clock.now)
+    env.outbox.transition(
+        second.ref, "queued", "paying", started_at=env.clock.now, rater=env.account.address
+    )
     broadcasts = len(env.chain.broadcasts)
     await env.worker.tick()
     row = env.outbox.get(second.ref)
@@ -327,7 +336,12 @@ async def test_r2_p2_d_no_first_authorization_is_signed_while_a_transfer_is_in_f
     second = make_entry(("s", "2"))
     env.outbox.enqueue(second)
     env.outbox.transition(
-        second.ref, "queued", "paying", started_at=env.clock.now, next_attempt=10**12
+        second.ref,
+        "queued",
+        "paying",
+        started_at=env.clock.now,
+        next_attempt=10**12,
+        rater=env.account.address,
     )
     env.breaker._open_until = 0.0
     env.outbox.transition(first.ref, "paid", next_attempt=0.0)

@@ -44,6 +44,7 @@ from uvd_x402_sdk.reputation._errors import (
     PaymentPending,
     PaymentRejected,
     PreparationRejected,
+    RaterMismatch,
     ReputationError,
     SignatureRejected,
 )
@@ -127,6 +128,7 @@ __all__ = [
     "PaymentPending",
     "PaymentRejected",
     "PreparationRejected",
+    "RaterMismatch",
     "RaterSigner",
     "RatingOutbox",
     "RatingParams",

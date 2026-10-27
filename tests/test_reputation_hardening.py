@@ -387,7 +387,10 @@ async def test_p2_4_nothing_is_resent_after_the_deadline(env):
     await env.worker.tick()
     assert len(env.facilitator.submits) == 1  # the refused one; nothing after the deadline
     env.facilitator.submit_modes.clear()
-    assert (await env.drive(entry.ref, step=300)).status == "confirmed"
+    row = await env.drive(entry.ref, step=300)
+    # Proven expired: failed for a human (the default), never prepared again.
+    assert row.status == "failed" and row.error == "relay_expired_unrelayed"
+    assert len(env.facilitator.prepares) == 1 and len(env.facilitator.submits) == 1
 
 
 async def test_p1_1_a_rater_undelegated_after_the_relay_is_no_verdict_not_a_re_prepare(env):

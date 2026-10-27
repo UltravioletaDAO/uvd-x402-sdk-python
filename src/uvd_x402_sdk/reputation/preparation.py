@@ -9,7 +9,8 @@ by hand, independent of eth-account) instead of trusting the prepare's.
 
 Ported from the three implementations it replaces, keeping the strictest of
 each: Karma Hello (``services/reputation/live.py::validate_preparation``:
-every message field bound to the request, the deadline window), Karma Kadabra
+every message field bound to the request; ``live_worker.py``, right after
+the call: the deadline window, 15 s to 3600 s ahead), Karma Kadabra
 (``agents_sdk/rating_rail.py::_mensaje_atado`` / ``firmar_rating``: exact
 types, exact domain, the registry pinned per chain, the prepare's digest must
 be ours) and Execution Market (``shared/relayed-rating.ts::

@@ -4,11 +4,12 @@
 ``confirmed`` (or a ``failed`` with a reason):
 
 ``paid``
-    (breaker closed) prepare -> :func:`validate_preparation` -> for a first
-    rating, the account nonce and delegation read from the chain -> sign ->
-    **persist ``submitting`` with the nonce, deadline and signature** ->
-    submit. The write must succeed before anything is sent: from then on the
-    row holds the one signed rating it may ever produce.
+    (breaker closed) prepare -> :func:`validate_preparation` -> the RPC's
+    chain id, and for a first rating the account nonce and delegation, read
+    from the chain -> sign -> **persist ``submitting`` with the rater, nonce,
+    deadline and signature** -> submit. The write must succeed before anything
+    is sent: from then on the row holds the one signed rating it may ever
+    produce.
 ``submitting``
     The submit's answer was lost, uncertain or refused. Reconcile: scan the
     registry's ``NewFeedback`` logs, always from the block read before the
@@ -19,10 +20,13 @@
     deadline`` reverts), IF it has not landed already; that is decided on
     STATE read at that block (:meth:`_Run.relay_absent`: the rater's
     delegation and ``nonceUsed(nonce)``), never on an empty log answer, which
-    a lagging node gives for blocks it does not have. Only then does the row go
-    back to ``paid``. A spent nonce with no event found yet is a rating that
-    landed: the row keeps looking. Never a second prepare while the first
-    signature may still land, or may have: two nonces are two ratings.
+    a lagging node gives for blocks it does not have. A spent nonce with no
+    event found yet is a rating that landed: the row keeps looking. A
+    signature proven never to land is ``failed(relay_expired_unrelayed)`` for
+    a human, as in Karma Hello; only a consumer that passes
+    ``max_relay_rounds > 1`` gets it prepared again (``paid``). Never a second
+    prepare while the first signature may still land, or may have: two nonces
+    are two ratings.
 ``submitted``
     Read the receipt: reverted -> ``failed(relay_reverted)``; no event that is
     exactly this rating -> ``failed(feedback_event_mismatch)``; enough
@@ -30,8 +34,13 @@
 
 The facilitator's 429 and 503 open the breaker (with ``Retry-After``); every
 other failed prepare or submit counts towards its threshold; a prepare this
-module refuses to sign opens it at once, since that is a systemic problem, not
-this row's.
+module refuses to sign, or an RPC serving another chain, opens it at once,
+since that is a systemic problem, not this row's.
+
+A row is moved only by its rater (``OutboxEntry.rater``): every state read is
+at that address, and a signer with another address is refused
+(:class:`~uvd_x402_sdk.reputation.RaterMismatch`) before anything is signed or
+written.
 
 Ported from Karma Hello's ``live_worker.Worker.process`` / ``reconcile`` /
 ``matching_feedback``.
@@ -50,7 +59,11 @@ except ImportError:  # pragma: no cover
 
 from uvd_x402_sdk.erc8004 import ProofOfPayment, RelayAuthorizationParams
 from uvd_x402_sdk.reputation._chains import RELAY_DELEGATES, relay_chain_id, reputation_registry
-from uvd_x402_sdk.reputation._errors import PreparationRejected, SignatureRejected
+from uvd_x402_sdk.reputation._errors import (
+    PreparationRejected,
+    RaterMismatch,
+    SignatureRejected,
+)
 from uvd_x402_sdk.reputation._redact import log_event
 from uvd_x402_sdk.reputation.governor import CircuitBreaker
 from uvd_x402_sdk.reputation.outbox import (
@@ -174,10 +187,14 @@ def _int(value: Any) -> int:
     raise ValueError("not a hex quantity")
 
 
-#: Prepare-and-sign rounds a row gets. Each expired, unrelayed signature is a
-#: round; a submit the facilitator keeps refusing would otherwise cycle
-#: (prepare, sign, expire) for ever and hold the semaphore against every row.
-DEFAULT_MAX_RELAY_ROUNDS = 3
+#: Prepare-and-sign rounds a row gets. One: a signature proven never to land
+#: is failed for a human, never prepared again (Karma Hello's
+#: ``signed_feedback_requires_reconciliation``). Preparing again after that
+#: proof is the consumer's decision to make (``max_relay_rounds > 1``), and the
+#: proof is only as good as the state it reads, which is the row's rater's.
+#: Bounded either way: a submit the facilitator keeps refusing would otherwise
+#: cycle (prepare, sign, expire) for ever and hold the semaphore.
+DEFAULT_MAX_RELAY_ROUNDS = 1
 #: Tries a ``paid`` row gets when the prepare is refused definitely (a 4xx
 #: other than 408/409/425/429): nothing was signed, and retrying the same
 #: request does not change the answer.
@@ -196,6 +213,28 @@ _TRANSIENT_4XX = frozenset({408, 409, 425, 429})
 
 def _is_hex(value: Any) -> bool:
     return isinstance(value, str) and value[:2].lower() == "0x"
+
+
+#: Statuses whose row must already say who its rater is.
+_RATER_REQUIRED = frozenset({PAYING, SUBMITTING, SUBMITTED})
+
+
+def row_rater(entry: OutboxEntry, signer: Any) -> str:
+    """The address that moves ``entry``; :class:`RaterMismatch` if ``signer`` is not it.
+
+    A row that has not recorded a rater yet (``queued``, or ``paid`` without
+    the worker) takes the signer's, and records it with ``submitting``.
+    """
+    address = signer_address(signer)
+    if entry.rater is None:
+        if entry.status in _RATER_REQUIRED:
+            raise RaterMismatch("rater_unknown", "the row does not record its rater")
+        return address
+    if entry.rater.lower() != address.lower():
+        raise RaterMismatch(
+            "rater_mismatch", "the signer is not the rater this row was started with"
+        )
+    return checksum(entry.rater)
 
 
 class _Run:
@@ -291,10 +330,10 @@ class _Run:
                 error=f"breaker_open:{self.breaker.reason}",
                 next_attempt=self.breaker.open_until,
             )
-        if entry.relay_rounds >= self.max_relay_rounds:
-            return self.fail(entry, "relay_refused_repeatedly")
         params = rating_params(entry)
-        rater = signer_address(self.signer)
+        # The row's rater, or (a row that never recorded one) the signer, which
+        # submit_with_reconcile already checked and the SUBMITTING write records.
+        rater = entry.rater or signer_address(self.signer)
         try:
             prep = await self.relay.prepare_relayed_feedback(
                 entry.network,
@@ -328,8 +367,10 @@ class _Run:
         # the chain before anything is signed. A rating "for a delegated rater"
         # that is not delegated cannot land; an EIP-7702 authorization never
         # expires and is valid while the account nonce it names is the
-        # account's, so that nonce is the chain's.
+        # account's, so that nonce is the chain's. And it must be THE chain:
+        # every read below, and every later proof of absence, is the RPC's.
         try:
+            chain_id = await self.call("eth_chainId", [])
             code = await self.call("eth_getCode", [rater, "latest"])
             pending = None
             if not verified.delegated:
@@ -337,8 +378,16 @@ class _Run:
         except Exception as exc:  # noqa: BLE001 - nothing signed yet: wait
             return self.wait(entry, f"rpc_unavailable:{type(exc).__name__}")
         designator = _DELEGATION_PREFIX + verified.delegate.lower()[2:]
-        if not _is_hex(code) or (pending is not None and not _is_hex(pending)):
+        if (
+            not _is_hex(chain_id)
+            or not _is_hex(code)
+            or (pending is not None and not _is_hex(pending))
+        ):
             return self.wait(entry, "rpc_unreadable")
+        if _int(chain_id) != verified.chain_id:
+            # Systemic: the configuration points at another chain's RPC.
+            self.breaker.trip("refused:chain_mismatch")
+            return self.wait(entry, "chain_mismatch")
         if verified.delegated and str(code).lower() != designator:
             return self.wait(entry, "delegation_state_changed")
         if not verified.delegated:
@@ -366,6 +415,7 @@ class _Run:
         entry = self.move(
             entry,
             SUBMITTING,
+            rater=rater,
             nonce=verified.nonce,
             deadline=verified.deadline,
             signature=signature,
@@ -389,7 +439,7 @@ class _Run:
             result = await self.relay.submit_relayed_feedback(
                 entry.network,
                 entry.agent_id,
-                signer_address(self.signer),
+                str(entry.rater),
                 entry.value,
                 deadline=entry.deadline,
                 nonce=entry.nonce,
@@ -418,7 +468,7 @@ class _Run:
         """The ``NewFeedback`` that is exactly this rating, scanning from the
         block read before the submit (never a cursor an empty answer moved)."""
         registry = checksum(str(reputation_registry(entry.network)))
-        rater = signer_address(self.signer)
+        rater = str(entry.rater)
         params = rating_params(entry)
         topics = [NEW_FEEDBACK_TOPIC, _topic_uint(params.agent_id), _topic_address(rater)]
         cursor, windows = int(entry.scan_from_block or 0), 0
@@ -460,8 +510,11 @@ class _Run:
           authorization bumps it, so does an undelegation). Anything else (the
           rater was delegated before, the nonce moved) is ``None``.
         - foreign code, an unreadable or malformed answer: ``None``.
+
+        Read at the row's rater: a rotated key is another account, with no
+        delegation and nonce 0, which "proves" any rating absent.
         """
-        rater = signer_address(self.signer)
+        rater = str(entry.rater)
         delegate = RELAY_DELEGATES.get(relay_chain_id(entry.network) or -1)
         block_hash = header.get("hash") if isinstance(header, dict) else None
         if delegate is None or not _is_hex(block_hash):
@@ -494,7 +547,7 @@ class _Run:
     # -- submitted: the receipt ---------------------------------------------------------
     async def confirm(self, entry: OutboxEntry) -> OutboxEntry:
         registry = checksum(str(reputation_registry(entry.network)))
-        rater = signer_address(self.signer)
+        rater = str(entry.rater)
         params = rating_params(entry)
         try:
             receipt = await self.call("eth_getTransactionReceipt", [entry.rating_tx])
@@ -564,6 +617,10 @@ class _Run:
             absent = await self.relay_absent(entry, header)
             if absent is True:
                 log_event(30, "reputation.relay_expired", ref=entry.ref, deadline=deadline)
+                if entry.relay_rounds >= self.max_relay_rounds:
+                    # Proven never to land. By default (one round) a human
+                    # decides; nothing is signed again for this moment.
+                    return self.fail(entry, "relay_expired_unrelayed")
                 return self.move(
                     entry,
                     PAID,
@@ -614,11 +671,16 @@ async def submit_with_reconcile(
 
     Returns the row as persisted. Safe to call again on any of the three
     statuses, after any crash: a ``submitting`` row is only ever reconciled and
-    re-sent, never prepared again until its signature provably expired. Every
-    write is a compare-and-set on the row's version: if another worker wrote
-    the row meanwhile, :class:`~uvd_x402_sdk.reputation.OutboxConflict` is
-    raised and nothing of this call's is persisted after that point.
+    re-sent, never prepared again (unless ``max_relay_rounds > 1`` and its
+    signature provably expired). Every write is a compare-and-set on the row's
+    version: if another worker wrote the row meanwhile,
+    :class:`~uvd_x402_sdk.reputation.OutboxConflict` is raised and nothing of
+    this call's is persisted after that point. A ``signer`` that is not the
+    row's rater raises :class:`~uvd_x402_sdk.reputation.RaterMismatch` before
+    anything is read, signed or written.
     """
+    current = outbox.get(entry.ref) or entry
+    row_rater(current, signer)
     run = _Run(
         outbox,
         relay,
@@ -636,7 +698,6 @@ async def submit_with_reconcile(
         max_relay_rounds=max_relay_rounds,
         max_prepare_refusals=max_prepare_refusals,
     )
-    current = outbox.get(entry.ref) or entry
     if current.status == PAID:
         return await run.prepare_and_submit(current)
     if current.status in (SUBMITTING, SUBMITTED):

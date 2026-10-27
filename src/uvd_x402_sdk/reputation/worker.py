@@ -5,15 +5,24 @@ as far as it can go:
 
 ``queued``
     :meth:`Governor.admit` (caps, health, breaker, excluded subjects) ->
-    the subject must OWN the agent (``ownerOf``, read from the chain: paying
-    and rating an agent someone else owns would be a rating about the wrong
-    person) -> ``paying`` (the row now counts against the caps).
+    the RPC serves the row's chain -> the subject must OWN the agent
+    (``ownerOf``, read from the chain: paying and rating an agent someone else
+    owns would be a rating about the wrong person) -> ``paying`` with the
+    signer's address as the row's ``rater`` (the row now counts against the
+    caps).
 ``paying``
     :func:`pay_and_prove` with the persisted signed transfer, if any; the
     transfer is persisted (``require_unset``: at most once) before it is
-    broadcast -> the consumer publishes the evidence -> ``paid``.
+    broadcast -> the consumer publishes the evidence -> ``paid``. A
+    ``!forgetme`` that arrives before the transfer is signed fails the row
+    instead.
 ``paid`` / ``submitting`` / ``submitted``
     :func:`submit_with_reconcile`.
+
+A row that started is moved only by its rater: ``tick`` raises
+:class:`~uvd_x402_sdk.reputation.RaterMismatch` (nothing signed, nothing
+written) when the signer is another key. Rotating the rater's key means
+letting its rows settle first, or settling them by hand.
 
 A semaphore of one: while a row is ``paying`` or ``submitting``, no new row
 starts (two transfers signed from one "pending" nonce replace each other, and
@@ -32,7 +41,9 @@ The consumer brings what is product-specific: the outbox, the governor's caps
 and health, the signer, the facilitator client, the RPC, and
 ``publish_evidence(entry, proof) -> (uri, content_hash)``, which builds the
 document with :func:`~uvd_x402_sdk.reputation.evidence.evidence_document` and
-serves its ``body`` at ``uri``.
+serves its ``body`` at ``uri`` (``https://``, ``http://`` or ``ipfs://``: the
+facilitator puts any of them in the typed data and refuses none, x402-rs
+``erc8004/proof.rs::fetch_and_hash_document``).
 """
 
 from __future__ import annotations
@@ -59,7 +70,7 @@ from uvd_x402_sdk.reputation.outbox import (
     SUBMITTING,
     OutboxEntry,
 )
-from uvd_x402_sdk.reputation.payment import GasPolicy, pay_and_prove, prove_payment
+from uvd_x402_sdk.reputation.payment import GasPolicy, _check_chain, pay_and_prove, prove_payment
 from uvd_x402_sdk.reputation.preparation import BYTES32_RE
 from uvd_x402_sdk.reputation.signing import signer_address
 from uvd_x402_sdk.reputation.submit import (
@@ -68,6 +79,7 @@ from uvd_x402_sdk.reputation.submit import (
     DEFAULT_MAX_RELAY_ROUNDS,
     DEFAULT_RETRY_DELAYS,
     DEFAULT_UNKNOWN_AFTER,
+    row_rater,
     submit_with_reconcile,
 )
 
@@ -77,7 +89,13 @@ _OWNER_OF = "0x6352211e"  # ownerOf(uint256)
 _SYSTEMIC_PAYMENT = frozenset(
     {"chain_mismatch", "unknown_network", "payment_signature", "payment_unavailable", "gas_ceiling"}
 )
-_URI_RE = re.compile(r"^https?://\S+$")
+#: What the evidence may be served at. ``ipfs://`` is Karma Hello's
+#: (``ipfs_store.py``); the facilitator fetches only http(s) to audit the
+#: anchor and reports any other scheme as unreachable, never as a refusal.
+_URI_RE = re.compile(r"^(?:https?|ipfs)://\S+$")
+#: Hex characters of the ref that, found anywhere in a public field, link the
+#: rating back to the message.
+_REF_WINDOW = 16
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -87,6 +105,7 @@ async def _maybe_await(value: Any) -> Any:
 class ReputationWorker:
     """One outbox, one rater, one network.
 
+    The rater is enforced per row (``OutboxEntry.rater``, :class:`RaterMismatch`).
     Every write is a compare-and-set on the row's version: a second worker on
     the same outbox gets an :class:`OutboxConflict` (logged, the row re-read)
     instead of overwriting the first one's state.
@@ -163,6 +182,9 @@ class ReputationWorker:
         if not rows:
             return None
         entry = rows[0]
+        if entry.status in (PAYING, PAID, SUBMITTING, SUBMITTED):
+            # Before anything is read, signed or written: RaterMismatch.
+            row_rater(entry, self.signer)
         try:
             if entry.status == QUEUED:
                 if self.outbox.count([PAYING, SUBMITTING]):
@@ -207,6 +229,19 @@ class ReputationWorker:
         if self._identifies(entry, entry.tag1, entry.tag2, entry.endpoint):
             # Tags and endpoint go on-chain for ever too.
             return self._move(entry, LOCAL_ONLY, error="public_field_identifies")
+        try:
+            # Every read that follows (the owner, the proof, the rater's state)
+            # means something only on the row's chain.
+            await _check_chain(self.rpc, entry.network)
+        except PaymentPending as pending:
+            return self._wait(entry, pending.code)
+        except PaymentRejected as rejected:
+            if rejected.code != "chain_mismatch":  # a network with no chain: never on-chain
+                return self._move(entry, LOCAL_ONLY, error=rejected.code)
+            # Systemic: the configuration points at another chain's RPC.
+            self.governor.breaker.trip(f"payment:{rejected.code}")
+            return self._wait(entry, rejected.code)
+        rater = signer_address(self.signer)
         owner = await self._owner_matches(entry)
         if owner is None:
             return self._wait(entry, "rpc_unavailable")
@@ -242,6 +277,7 @@ class ReputationWorker:
                 entry,
                 PAID,
                 started_at=now,
+                rater=rater,
                 feedback_uri=uri,
                 feedback_hash=digest,
                 proof=proof.model_dump(by_alias=True) if proof else None,
@@ -249,7 +285,7 @@ class ReputationWorker:
                 error=None,
             )
             return await self._submit(entry)
-        entry = self._move(entry, PAYING, started_at=now, error=None)
+        entry = self._move(entry, PAYING, started_at=now, rater=rater, error=None)
         return await self._pay(entry)
 
     async def _reprove(self, entry: OutboxEntry) -> ProofOfPayment:
@@ -275,14 +311,19 @@ class ReputationWorker:
 
     @staticmethod
     def _identifies(entry: OutboxEntry, *public: str) -> bool:
-        """Does a public string carry the ref (or 16+ hex of it) or the viewer?
+        """Does a public string carry 16 consecutive hex of the ref, or the viewer?
 
         The ref is sha256 of ids anyone in the chat can see; on-chain it links
-        the rating back to the message and its author, salt or no salt.
+        the rating back to the message and its author, salt or no salt. Any 16
+        of its characters do, not only the first 16.
         """
         text = " ".join(public).lower()
+        ref = entry.ref.lower()
         viewer = (entry.viewer_id or "").lower()
-        return entry.ref.lower()[:16] in text or (len(viewer) >= 6 and viewer in text)
+        return any(
+            ref[start : start + _REF_WINDOW] in text
+            for start in range(max(1, len(ref) - _REF_WINDOW + 1))
+        ) or (len(viewer) >= 6 and viewer in text)
 
     async def _publish(
         self, entry: OutboxEntry, proof: Optional[ProofOfPayment]
@@ -309,9 +350,13 @@ class ReputationWorker:
 
     async def _pay(self, entry: OutboxEntry) -> OutboxEntry:
         if entry.payment is None:
-            # Started but nothing signed yet (it waited, e.g. on gas): an open
-            # breaker or a failing health stops it like any new rating, and a
-            # rating in flight keeps the account nonce its authorization names.
+            # Started but nothing signed yet (it waited, e.g. on gas): a
+            # !forgetme ends it here, before a transfer to the viewer's wallet
+            # makes a new public record; an open breaker or a failing health
+            # stops it like any new rating, and a rating in flight keeps the
+            # account nonce its authorization names.
+            if entry.forget_requested:
+                return self._fail(entry, "forgotten")
             ready = self.governor.ready(self._clock())
             if not ready.allowed:
                 return self._wait(entry, ready.reason or "not_ready", ready.defer_until)

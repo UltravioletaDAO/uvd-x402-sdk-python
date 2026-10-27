@@ -65,11 +65,11 @@ chain; `tick()` runs in its own loop, one at a time.
 | `RatingParams`, `validate_preparation(prep, params, rater, *, network)` | Refuses to sign anything but the v4 `RelayedGiveFeedback` of this rater, on the chain asked for, with exactly these fields; delegate allowlist per chain id; digest rebuilt here (EIP-712 by hand) and compared | KH `live.py`, KK `rating_rail._mensaje_atado`, EM `verifyRelayedRatingPrepare` |
 | `sign_relayed_feedback(verified, signer)` | Signs the REBUILT typed data (or its digest); low-s; recovers to the rater before it leaves | KK `firmar_rating`, EM `signRelayedRating` |
 | `build_relay_authorization(verified, signer)` | EIP-7702 authorization over the allowlist row (never a hash from the network), `keccak(0x05 ‖ rlp([chain, delegate, nonce]))`, byte-identical to eth-account; `None` once delegated | KK `armar_authorization` |
-| `pay_and_prove(signer, payee, amount, rpc, *, max_amount)` | USDC transfer rater → subject, persisted (`on_signed`) BEFORE it is broadcast, retried with the SAME bytes; proof built from the chain (block timestamp, `paymentHash` recomputed as the facilitator does); never to a contract | KH `verify_payment` |
+| `pay_and_prove(signer, payee, amount, rpc, *, max_amount, on_signed)` | USDC transfer rater → subject, persisted (`on_signed`, required for a new transfer: `TypeError` before signing without it) BEFORE it is broadcast, retried with the SAME bytes (`signed=`); proof built from the chain (block timestamp, `paymentHash` recomputed as the facilitator does); never to a contract, and a code read that is not hex is no answer | KH `verify_payment` |
 | `RatingOutbox`, `InMemoryRatingOutbox`, `SQLiteRatingOutbox` | One row per ref; every write a compare-and-set; a signed payment saved at most once | KH Mongo outbox |
 | `Governor(caps, health)`, `Caps`, `CircuitBreaker` | Caps are parameters (no defaults); health, breaker, unreadable state: no new rating | design G3/G4 |
 | `evidence_document(...)` | Canonical JSON, `content_hash` = `feedbackHash`; the person enters only as salted commitments | KH `evidence.py` **minus** `message`/`author` |
-| `submit_with_reconcile(entry, ...)` | Persists `submitting` before the submit; never prepares again until the old signature provably expired | KH `process` / `reconcile` |
+| `submit_with_reconcile(entry, ...)` | Persists `submitting` (with the row's rater) before the submit; never prepares again: a signature proven expired is `failed` for a human unless the consumer passes `max_relay_rounds > 1` | KH `process` / `reconcile` |
 | `ReputationWorker` | All of the above in one `tick()` | KH `live_worker.Worker` |
 
 ## The state machine
@@ -77,9 +77,9 @@ chain; `tick()` runs in its own loop, one at a time.
 ```
 queued -> paying(tx) -> paid -> submitting(nonce, deadline) -> submitted(tx) -> confirmed
   |          |           |           |                              |
-  |          +-> failed  +-> failed  +-> paid (deadline provably     +-> failed
+  |          +-> failed  +-> failed  +-> failed (deadline provably   +-> failed
   +-> local_only (a cap)             |    passed, nothing on-chain)
-  +-> paid (amount 0)                +-> failed
+  +-> paid (amount 0)                +-> paid (the same, only with max_relay_rounds > 1)
 ```
 
 - `submitting` is written **before** the submit is sent. From then on the row is only reconciled
@@ -89,9 +89,16 @@ queued -> paying(tx) -> paid -> submitting(nonce, deadline) -> submitted(tx) -> 
   deadline` reverts) unless it already did, and that is decided on **state read AT that block, by its
   hash** (EIP-1898), not on an empty log answer or a `null` (a load-balanced RPC answers from nodes
   behind): the rater's code, `nonceUsed(nonce)`, and for a first rating the account nonce (an applied
-  authorization bumps it). Spent: it landed, keep looking for its event. Provably unspent: back to
-  `paid`. Cannot tell: wait, and after `unknown_after` (24 h) `failed` for a human. Two nonces would be
-  two ratings.
+  authorization bumps it). Spent: it landed, keep looking for its event. Provably unspent:
+  `failed(relay_expired_unrelayed)` for a human, as Karma Hello does; preparing it again is the
+  consumer's decision (`max_relay_rounds > 1`, the row back to `paid`). Cannot tell: wait, and after
+  `unknown_after` (24 h) `failed` for a human. Two nonces would be two ratings.
+- A row records its `rater` when it starts, and every state read of it is at that address. A signer
+  that is another key gets `RaterMismatch` (nothing read, signed or written): a rotated key is another
+  account, with no delegation and nonce 0, that would "prove" a landed rating absent. Rotate the
+  rater's key once its rows have settled, or settle them by hand.
+- The RPC's chain id is read when a row starts and before a rating is signed: an RPC serving another
+  chain opens the breaker and signs nothing.
 - Every outbox write is a compare-and-set on the row's `version`: a worker that read `submitting(n1)`
   cannot overwrite `submitting(n2)` another one wrote meanwhile.
 - A semaphore of one: no new row starts while one is `paying` or `submitting`; no transfer is signed
@@ -107,8 +114,8 @@ queued -> paying(tx) -> paid -> submitting(nonce, deadline) -> submitted(tx) -> 
   but a facilitator that reports the undelegated rater as not delegated would get, on the next rating,
   a new authorization that delegates the account again.
 - A row the facilitator keeps refusing does not hold the rail: a definite 4xx on its prepare
-  `max_prepare_refusals` times, or `max_relay_rounds` (3) signatures that expired unrelayed, make it
-  `failed`.
+  `max_prepare_refusals` times, or `max_relay_rounds` (1 by default) signatures that expired
+  unrelayed, make it `failed`.
 - A payment is declared unminable (`payment_nonce_consumed`) only after five consecutive reads show its
   nonce used three blocks deep by something else and the payment nowhere: one read from a node ahead
   and one from a node behind is not a verdict.
@@ -135,7 +142,8 @@ write cap answers 429 until 00:00 UTC), on a 503, and on a prepare this module r
 `outbox.forget(viewer_id)`: rows that never started are deleted; rows that started keep a tombstone
 without the viewer (the caps keep counting what is on-chain; the wallet is public there anyway); a `paid`
 row never submitted becomes `failed(forgotten)`; rows in flight are flagged and stripped once they settle
-(an on-chain rating cannot be recalled). The rest is yours: destroy the viewer's salt (the commitments
+(an on-chain rating cannot be recalled). A flagged `paying` row that has not signed its transfer yet is
+`failed(forgotten)` before anything is paid, and a paid one never publishes its evidence. The rest is yours: destroy the viewer's salt (the commitments
 become unlinkable) and stop serving the evidence (the anchor becomes unreachable). Say before consent that
 what is anchored stays.
 
@@ -148,10 +156,11 @@ and come out as `HMAC-SHA256(salt, label|value)`. A key that names them (`messag
 private value found, in any case, inside a tag, the endpoint, the issuer or `context` (values of 8+
 characters as a substring, shorter ones down to 4 as a whole word in the issuer and `context`).
 
-The `feedbackURI`, the tags and the endpoint are on-chain for ever: name the document by its content
-hash or something random, never by `entry.ref` (sha256 of ids anyone in the chat sees) or the viewer;
-the worker refuses any of them carrying the ref (16 hex characters of it are enough) or a viewer id of
-6+ characters.
+The `feedbackURI` (`https://`, `http://` or `ipfs://`: the facilitator relays any of them and fetches
+only http(s) to audit the anchor), the tags and the endpoint are on-chain for ever: name the document by
+its content hash or something random, never by `entry.ref` (sha256 of ids anyone in the chat sees) or
+the viewer; the worker refuses any of them carrying 16 consecutive hex characters of the ref, from
+anywhere in it, or a viewer id of 6+ characters.
 
 ## Signers
 
@@ -182,8 +191,10 @@ consumes them as they are.
 ## Error codes
 
 `PreparationRejected` (a `ValueError`: permanent), `SignatureRejected`, `PaymentRejected` (definite),
-`PaymentPending` (no verdict: retry with the same transaction), `EvidenceRejected`, `OutboxConflict`. Each
+`PaymentPending` (no verdict: retry with the same transaction), `EvidenceRejected`, `OutboxConflict`,
+`RaterMismatch` (`rater_mismatch` / `rater_unknown`: the signer is not the row's rater). Each
 carries `.code`; branch on it, never on the message. Messages and logs redact addresses, hashes,
 signatures, proofs and URLs, and `HttpJsonRpc` / `ReputationWorker` install the same redaction on the
-`httpx` / `httpcore` loggers (httpx writes the full request URL at INFO, API key included). The `repr`
+`httpx` / `httpcore` loggers (httpx writes the full request URL at INFO, API key included).
+`HttpJsonRpc` parses each answer with `loads_bounded` (16 MiB, the SDK's nesting ceiling). The `repr`
 of an outbox row or a signed payment names the row, never its signature, payment or viewer.

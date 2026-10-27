@@ -4,15 +4,19 @@ The facilitator accepts a rating's ``proof`` only when (x402-rs
 ``src/erc8004/proof.rs::verify_proof_of_payment``): the payer IS the rater,
 the payee owns the agent, the transaction succeeded in the declared block with
 an exact ``Transfer`` of a known token, it is at most 7 days old, and its
-``paymentHash`` recomputes. And one payment proves one rating per agent. So
-each rating carries its own micro-transfer from the rater to the subject.
+``paymentHash`` recomputes. It refuses a proof already used for the agent only
+while it enforces proofs (``ERC8004_REQUIRE_PROOF``, off by default:
+``proof.rs::is_proof_required``); the worker refuses it itself (one anchor
+transaction, one row per agent). So each rating carries its own
+micro-transfer from the rater to the subject.
 
 :func:`pay_and_prove` makes that transfer and returns the
 :class:`~uvd_x402_sdk.erc8004.ProofOfPayment` built from the CHAIN (the
 timestamp of the block, not a wall clock; the ``paymentHash`` recomputed here
 exactly as the facilitator does). The signed transaction is handed to
-``on_signed`` (persist it there) BEFORE it is broadcast, and a retry passes it
-back as ``signed=``: the same bytes are re-sent, never a new transaction. The
+``on_signed`` (required: persist it there) BEFORE it is broadcast, and a retry
+passes it back as ``signed=``: the same bytes are re-sent, never a new
+transaction. The
 only way that same payment is ever replaced is a nonce the chain has already
 consumed with something else, and then it is refused, not re-signed.
 
@@ -30,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import math
+import re
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
@@ -40,6 +45,7 @@ try:
 except ImportError:  # pragma: no cover
     from typing_extensions import Protocol, runtime_checkable  # type: ignore[assignment]
 
+from uvd_x402_sdk.bounded_json import loads_bounded
 from uvd_x402_sdk.erc8004 import ProofOfPayment, _wire
 from uvd_x402_sdk.reputation._errors import PaymentPending, PaymentRejected
 from uvd_x402_sdk.reputation._redact import log_event, redact, redact_http_client_logs
@@ -50,6 +56,7 @@ _TRANSFER_SELECTOR = "a9059cbb"  # transfer(address,uint256)
 _ZERO_ADDRESS = "0x" + "0" * 40
 #: EIP-7702 delegation designator: an EOA with this code is still an EOA.
 _DELEGATION_PREFIX = "0xef0100"
+_CODE_RE = re.compile(r"0x[0-9a-fA-F]*")
 
 READ_METHODS = frozenset(
     {
@@ -69,6 +76,9 @@ READ_METHODS = frozenset(
     }
 )
 WRITE_METHODS = frozenset({"eth_sendRawTransaction"})
+#: Ceiling on one JSON-RPC answer (an ``eth_getLogs`` window included). The
+#: depth is bounded too (:func:`~uvd_x402_sdk.bounded_json.loads_bounded`).
+MAX_RPC_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 class RpcError(RuntimeError):
@@ -133,7 +143,8 @@ class HttpJsonRpc:
             if response.status_code >= 400:
                 raise RpcError(f"rpc_http_{response.status_code}")
             try:
-                payload = response.json()
+                # A third party's JSON: size and nesting bounded before parsing.
+                payload = loads_bounded(response.content, max_bytes=MAX_RPC_RESPONSE_BYTES)
             except ValueError:
                 raise RpcError("rpc_unreadable") from None
         finally:
@@ -424,7 +435,10 @@ async def sign_payment(
     token = _usdc(network)
     chain_id = await _check_chain(rpc, network)
     code = await _rpc(rpc, "eth_getCode", [payee, "latest"])
-    code = str(code or "0x").lower()
+    if not isinstance(code, str) or not _CODE_RE.fullmatch(code):
+        # A null (one node of a balanced RPC) is no answer, never "no code".
+        raise PaymentPending("rpc_unreadable", "eth_getCode is not hex")
+    code = code.lower()
     if code not in ("0x", "0x0") and not (code.startswith(_DELEGATION_PREFIX) and len(code) == 48):
         raise PaymentRejected("payee_is_contract", "funds are never sent to a contract")
     data = _transfer_calldata(payee, amount)
@@ -527,7 +541,9 @@ async def pay_and_prove(
 
     Without ``signed`` a new transfer is signed, handed to ``on_signed`` (which
     must persist it, and may raise to stop: then nothing is sent) and only then
-    broadcast. With ``signed`` (what ``on_signed`` persisted) the SAME bytes are
+    broadcast. ``on_signed`` is REQUIRED then (``TypeError`` before anything is
+    signed): without the persisted bytes a retry could only sign a second
+    transfer. With ``signed`` (what ``on_signed`` persisted) the SAME bytes are
     re-sent: a retry never signs a second payment.
 
     Returns the proof once confirmed. Raises :class:`PaymentPending` when the
@@ -537,11 +553,12 @@ async def pay_and_prove(
     something else, so this transfer can never be mined.
     """
     if signed is None:
+        if on_signed is None:
+            raise TypeError("pay_and_prove: on_signed is required to sign a new transfer")
         payment = await sign_payment(
             signer, payee, amount, rpc, network=network, max_amount=max_amount, gas=gas
         )
-        if on_signed is not None:
-            await _maybe_await(on_signed(payment))
+        await _maybe_await(on_signed(payment))
         log_event(20, "reputation.payment_signed", tx=payment.transaction_hash, payee=payment.payee)
     else:
         payment = signed if isinstance(signed, SignedPayment) else SignedPayment.from_dict(signed)

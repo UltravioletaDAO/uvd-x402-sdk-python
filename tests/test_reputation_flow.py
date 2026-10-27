@@ -219,6 +219,7 @@ async def test_a_503_on_prepare_opens_the_breaker_and_no_new_rating_starts(env):
 
 
 async def test_an_unrelayed_signature_is_prepared_again_only_once_its_deadline_passed(env):
+    env.worker.submit_options["max_relay_rounds"] = 3  # the consumer opted in
     # Every submit refused until the deadline is behind the chain.
     env.facilitator.submit_modes = ["400"] * 3
     entry = make_entry()
@@ -264,6 +265,7 @@ async def test_a_lagging_logs_node_past_the_deadline_never_causes_a_second_ratin
 
 
 async def test_a_delegated_raters_unrelayed_rating_is_prepared_again_after_its_deadline(env):
+    env.worker.submit_options["max_relay_rounds"] = 3  # the consumer opted in
     first, second = make_entry(("s", "1")), make_entry(("s", "2"))
     env.outbox.enqueue(first)
     assert (await env.drive(first.ref)).status == "confirmed"
@@ -499,3 +501,4 @@ class TestForget:
         row = await env.drive(entry.ref)
         assert row.status == "failed" and row.error == "forgotten"
         assert env.facilitator.prepares == [] and ratings_on_chain(env) == []
+        assert env.served == {}  # paid, but its evidence is never published

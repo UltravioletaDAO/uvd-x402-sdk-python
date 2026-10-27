@@ -129,6 +129,16 @@ class FakeChain:
         self.state_lag = 0
         #: The node answering eth_getCode answers null (a load-balanced RPC).
         self.null_code_reads = 0
+        #: tx -> its receipt's logs come back flagged ``removed`` (a reorg the
+        #: node is still unwinding).
+        self.removed_logs: set = set()
+        #: An orphaned block hash -> the canonical block whose state it shows.
+        #: A node answers state at it only when ``requireCanonical`` is false.
+        self.orphans: dict[str, int] = {}
+        #: When set, ``safe`` is answered by a node on a fork that a reorg then
+        #: dropped: the header carries an orphan hash whose state is the
+        #: canonical state at this block (before whatever landed after it).
+        self.orphan_safe_from: Optional[int] = None
 
     #: ``safe`` trails the head by this many blocks (an OP-stack chain).
     SAFE_LAG = 5
@@ -137,6 +147,10 @@ class FakeChain:
         """A block tag (number, ``latest``/``safe``, EIP-1898 ``{"blockHash"}``)
         as a number, for a node ``lag`` blocks behind; one it lacks errors."""
         head = self.latest() - lag
+        if isinstance(tag, dict) and tag["blockHash"] in self.orphans:
+            if tag.get("requireCanonical"):
+                raise RpcError("rpc_error", "hash is not currently canonical")
+            return self.orphans[tag["blockHash"]]
         if isinstance(tag, dict):
             number = next(
                 (
@@ -266,6 +280,11 @@ class FakeChain:
         return _hex(self.latest())
 
     def _eth_getBlockByNumber(self, number: str, full: bool) -> Optional[dict]:
+        if number == "safe" and self.orphan_safe_from is not None:
+            header = self.header(self._block(number))
+            header["hash"] = "0x" + "0f" * 31 + format(len(self.orphans) % 256, "02x")
+            self.orphans[header["hash"]] = self.orphan_safe_from
+            return header
         if number in ("latest", "safe"):
             return self.header(self._block(number))
         n = int(number, 16)
@@ -405,7 +424,10 @@ class FakeChain:
             "status": _hex(tx.status),
             "blockNumber": _hex(tx.block),
             "blockHash": self.block_hash(tx.block),
-            "logs": [dict(log) for log in tx.logs],
+            "logs": [
+                dict(log, removed=True) if tx.hash in self.removed_logs else dict(log)
+                for log in tx.logs
+            ],
             "gasUsed": _hex(60_000),
             "effectiveGasPrice": _hex(self.base_fee),
         }
