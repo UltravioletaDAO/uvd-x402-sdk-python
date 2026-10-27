@@ -1,0 +1,1446 @@
+{
+  "description": "ensure_solana_identity: the verdicts the TypeScript twin must reproduce. 'addresses': validate_solana_address (32-44 base58 characters taken as given, 32 bytes, not zero). 'lookup': GET /identity/<network>/owner/<recipient> for recipient = 'recipient' on 'solana'; only 'absent' lets a mint out; body null = an answer that is not a JSON object; only the STRING balance '0' is a verdict. 'register': POST /register for that recipient, answers as x402-rs 2.51.2 can give them; releasesSlot = the answer proves nothing reached the chain (the slot is given back), retryInCall = it may be sent again in the same call; a facilitator code that is not lower_snake becomes 'facilitator_error'. 'transport': no HTTP answer, by meaning. 'reserve': what a MintBudget refusal makes of the call. 'budget': the rules of InMemoryMintBudget, step by step on a fresh one (reserve answers 'expect'; keep / release name their request by reservedAt; usedToday counts one network). 'policy': dailyMintCap is the owner's decision of 2026-10-27 (per UTC day and network); maxMintAttemptsPerAddressPerDay (in any 24 hours) and mintHoldSeconds are Execution Market's claim-table values.",
+  "recipient": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+  "policy": {
+    "dailyMintCap": 25,
+    "maxMintAttemptsPerAddressPerDay": 3,
+    "mintHoldSeconds": 1800,
+    "networks": [
+      "solana",
+      "solana-devnet"
+    ]
+  },
+  "addresses": {
+    "valid": [
+      "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+      "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+      "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+      "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
+      "11111111111111111111111111111112",
+      "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+    ],
+    "rejected": [
+      {
+        "value": "11111111111111111111111111111111",
+        "reason": "zero address"
+      },
+      {
+        "value": " 6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "reason": "leading space"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv\n",
+        "reason": "trailing newline"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSR0",
+        "reason": "0 is not base58"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRO",
+        "reason": "O is not base58"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRI",
+        "reason": "I is not base58"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRl",
+        "reason": "l is not base58"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc",
+        "reason": "31 characters"
+      },
+      {
+        "value": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv1",
+        "reason": "45 characters"
+      },
+      {
+        "value": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "reason": "44 characters, 33 bytes"
+      },
+      {
+        "value": "22222222222222222222222222222222",
+        "reason": "32 characters, 24 bytes"
+      },
+      {
+        "value": "0xabababababababababababababababababababab",
+        "reason": "an EVM address"
+      },
+      {
+        "value": "",
+        "reason": "empty"
+      }
+    ]
+  },
+  "lookup": [
+    {
+      "name": "owns-one",
+      "statusCode": 200,
+      "body": {
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "agentUri": "https://a.example/x",
+        "network": "solana",
+        "balance": "1"
+      },
+      "expected": {
+        "state": "registered",
+        "reason": "owner_lookup",
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "owns-none",
+      "statusCode": 404,
+      "body": {
+        "error": "does not own any agent",
+        "balance": "0"
+      },
+      "expected": {
+        "state": "absent",
+        "reason": "owner_not_found",
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-number-balance",
+      "statusCode": 404,
+      "body": {
+        "error": "none",
+        "balance": 0
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-float-balance",
+      "statusCode": 404,
+      "body": {
+        "error": "none",
+        "balance": 0.0
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "route-not-found",
+      "statusCode": 404,
+      "body": {
+        "error": "Not Found",
+        "code": "not_found"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-not-json",
+      "statusCode": 404,
+      "body": null,
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-bool-balance",
+      "statusCode": 404,
+      "body": {
+        "balance": false
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-balance-1",
+      "statusCode": 404,
+      "body": {
+        "balance": "1"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_not_a_verdict",
+        "agentId": null
+      }
+    },
+    {
+      "name": "inconclusive",
+      "statusCode": 503,
+      "body": {
+        "error": "getProgramAccounts failed",
+        "retryable": true
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_inconclusive",
+        "agentId": null
+      }
+    },
+    {
+      "name": "rate-limited",
+      "statusCode": 429,
+      "body": {
+        "code": "rate_limited"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_rate_limited",
+        "agentId": null
+      }
+    },
+    {
+      "name": "another-owner",
+      "statusCode": 200,
+      "body": {
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "owner": "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+        "network": "solana"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_owner_mismatch",
+        "agentId": null
+      }
+    },
+    {
+      "name": "another-network",
+      "statusCode": 200,
+      "body": {
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "base"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_network_mismatch",
+        "agentId": null
+      }
+    },
+    {
+      "name": "bad-agent-id",
+      "statusCode": 200,
+      "body": {
+        "agentId": "x",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_unreadable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "200-not-json",
+      "statusCode": 200,
+      "body": null,
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_unreadable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "bad-address",
+      "statusCode": 400,
+      "body": {
+        "error": "Invalid Solana address"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_http_400",
+        "agentId": null
+      }
+    },
+    {
+      "name": "server-error",
+      "statusCode": 500,
+      "body": {
+        "error": "No Solana provider"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_http_500",
+        "agentId": null
+      }
+    }
+  ],
+  "register": [
+    {
+      "name": "complete",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "created",
+        "reason": "minted",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "complete-for-another-owner",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "owner_mismatch",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "complete-without-agent-id",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": null,
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "unreadable_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "success-not-complete",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana",
+        "mint": {
+          "status": "pending_transfer",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "pending_transfer",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "success-without-mint-report",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana"
+      },
+      "expected": {
+        "status": "created",
+        "reason": "minted",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "200-not-success",
+      "statusCode": 200,
+      "body": {
+        "success": false,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "pending-transfer",
+      "statusCode": 500,
+      "body": {
+        "success": false,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "owner": "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
+        "network": "solana",
+        "mint": {
+          "status": "pending_transfer",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "errorCode": "transfer_failed"
+        }
+      },
+      "expected": {
+        "status": "pending",
+        "reason": "pending_transfer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "pending_transfer",
+        "errorCode": "transfer_failed",
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "pending-stats",
+      "statusCode": 500,
+      "body": {
+        "success": false,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "network": "solana",
+        "mint": {
+          "status": "pending_stats",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "errorCode": "initialize_stats_failed"
+        }
+      },
+      "expected": {
+        "status": "pending",
+        "reason": "pending_stats",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "pending_stats",
+        "errorCode": "initialize_stats_failed",
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "500-not-minted",
+      "statusCode": 500,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "mint_transaction_failed"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "mint_transaction_failed",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "mint_transaction_failed",
+        "agentId": null
+      }
+    },
+    {
+      "name": "502-forward-unconfirmed",
+      "statusCode": 502,
+      "body": {
+        "reason": "forward_unconfirmed",
+        "retryable": false
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "forward_unconfirmed",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "504",
+      "statusCode": 504,
+      "body": {
+        "error": "gateway timeout"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "http_504",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "201-complete",
+      "statusCode": 201,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "http_201",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "202",
+      "statusCode": 202,
+      "body": {
+        "jobId": "x",
+        "status": "pending"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "http_202",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "404-on-post",
+      "statusCode": 404,
+      "body": {
+        "error": "Not Found",
+        "code": "not_found"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "http_404",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "400-code-that-is-not-a-code",
+      "statusCode": 400,
+      "body": {
+        "success": false,
+        "errorCode": "bad 6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv"
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "facilitator_error",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": "facilitator_error",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-stats-lookup",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "stats_lookup_inconclusive"
+        }
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "stats_lookup_inconclusive",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": "not_minted",
+        "errorCode": "stats_lookup_inconclusive",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-overloaded",
+      "statusCode": 503,
+      "body": {
+        "error": "at its ceiling",
+        "code": "overloaded"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "overloaded",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "429-too-many-concurrent",
+      "statusCode": 429,
+      "body": {
+        "error": "in flight",
+        "code": "too_many_concurrent_requests"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "too_many_concurrent_requests",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "408-body-timeout",
+      "statusCode": 408,
+      "body": {
+        "error": "body did not arrive",
+        "code": "request_timeout"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "request_timeout",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "409-held",
+      "statusCode": 409,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "held_identity_not_resumable"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "held_identity_not_resumable",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "held_identity_not_resumable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "400-agent-uri",
+      "statusCode": 400,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "agent_uri_tunnel"
+        },
+        "errorCode": "agent_uri_tunnel"
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "agent_uri_tunnel",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "agent_uri_tunnel",
+        "agentId": null
+      }
+    },
+    {
+      "name": "400-parse",
+      "statusCode": 400,
+      "body": {
+        "success": false,
+        "error": "Invalid request format",
+        "network": "ethereum"
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "http_400",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "403-blocked",
+      "statusCode": 403,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "recipient_blocked"
+        },
+        "errorCode": "recipient_blocked"
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "recipient_blocked",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "recipient_blocked",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-fee-payer",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "fee_payer_insufficient_balance"
+        }
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "fee_payer_insufficient_balance",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "fee_payer_insufficient_balance",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-registry",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "registry_unavailable"
+        }
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "registry_unavailable",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": "not_minted",
+        "errorCode": "registry_unavailable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-owner-lookup",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "owner_lookup_inconclusive"
+        }
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "owner_lookup_inconclusive",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": "not_minted",
+        "errorCode": "owner_lookup_inconclusive",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-screening",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "recipient_screening_unavailable"
+        },
+        "errorCode": "recipient_screening_unavailable"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "recipient_screening_unavailable",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": "not_minted",
+        "errorCode": "recipient_screening_unavailable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-writer-lease",
+      "statusCode": 503,
+      "body": {
+        "error": "no writer lease",
+        "reason": "forward_failed"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "writer_lease_unavailable",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-with-mint-in-progress",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "mint": {
+          "status": "pending_transfer",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "pending_transfer",
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-not-json",
+      "statusCode": 503,
+      "body": null,
+      "expected": {
+        "status": "uncertain",
+        "reason": "unreadable_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "429-rate-limited",
+      "statusCode": 429,
+      "body": {
+        "error": "Too Many Requests",
+        "code": "rate_limited"
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "rate_limited",
+        "releasesSlot": true,
+        "retryInCall": true,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "429-daily-cap",
+      "statusCode": 429,
+      "body": {
+        "success": false,
+        "code": "erc8004_daily_write_limit",
+        "network": "solana"
+      },
+      "expected": {
+        "status": "quota_exceeded",
+        "reason": "facilitator_daily_cap",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    }
+  ],
+  "transport": [
+    {
+      "failure": "connection_refused",
+      "meaning": "the TCP/TLS connection was never established",
+      "expected": {
+        "status": "unavailable",
+        "reason": "no_connection",
+        "releasesSlot": true,
+        "retryInCall": true
+      }
+    },
+    {
+      "failure": "connect_timeout",
+      "meaning": "timed out establishing the connection",
+      "expected": {
+        "status": "unavailable",
+        "reason": "no_connection",
+        "releasesSlot": true,
+        "retryInCall": true
+      }
+    },
+    {
+      "failure": "pool_timeout",
+      "meaning": "timed out waiting for a free connection of the client's pool",
+      "expected": {
+        "status": "unavailable",
+        "reason": "no_connection",
+        "releasesSlot": true,
+        "retryInCall": true
+      }
+    },
+    {
+      "failure": "read_timeout",
+      "meaning": "the request went out and no answer came in time",
+      "expected": {
+        "status": "uncertain",
+        "reason": "no_answer",
+        "releasesSlot": false,
+        "retryInCall": false
+      }
+    },
+    {
+      "failure": "write_timeout",
+      "meaning": "timed out while sending the request (part of it may be out)",
+      "expected": {
+        "status": "uncertain",
+        "reason": "no_answer",
+        "releasesSlot": false,
+        "retryInCall": false
+      }
+    },
+    {
+      "failure": "disconnected",
+      "meaning": "the server closed the connection without an answer",
+      "expected": {
+        "status": "uncertain",
+        "reason": "no_answer",
+        "releasesSlot": false,
+        "retryInCall": false
+      }
+    },
+    {
+      "failure": "proxy_error",
+      "meaning": "a proxy in between failed (the request may have gone through it)",
+      "expected": {
+        "status": "uncertain",
+        "reason": "no_answer",
+        "releasesSlot": false,
+        "retryInCall": false
+      }
+    }
+  ],
+  "reserve": [
+    {
+      "verdict": "quota_exceeded",
+      "expected": {
+        "status": "quota_exceeded",
+        "reason": "client_daily_cap"
+      }
+    },
+    {
+      "verdict": "address_exhausted",
+      "expected": {
+        "status": "quota_exceeded",
+        "reason": "address_daily_cap"
+      }
+    },
+    {
+      "verdict": "in_flight",
+      "expected": {
+        "status": "pending",
+        "reason": "in_flight"
+      }
+    },
+    {
+      "verdict": "held",
+      "expected": {
+        "status": "uncertain",
+        "reason": "recent_request"
+      }
+    }
+  ],
+  "budget": [
+    {
+      "name": "in-flight-then-held-then-free",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031610,
+          "expect": "in_flight"
+        },
+        {
+          "op": "keep",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790031600,
+          "now": 1790031620
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031630,
+          "expect": "held"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033420,
+          "expect": "granted"
+        }
+      ]
+    },
+    {
+      "name": "a-release-frees-at-once",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "release",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790031600,
+          "now": 1790031601
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031602,
+          "expect": "granted"
+        },
+        {
+          "op": "usedToday",
+          "now": 1790031602,
+          "network": "solana",
+          "expect": 1
+        }
+      ]
+    },
+    {
+      "name": "an-orphan-expires-after-the-hold-counted-as-spent",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033399,
+          "expect": "in_flight"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033400,
+          "expect": "granted"
+        },
+        {
+          "op": "usedToday",
+          "now": 1790033400,
+          "network": "solana",
+          "expect": 2
+        }
+      ]
+    },
+    {
+      "name": "a-late-release-names-its-request",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033400,
+          "expect": "granted"
+        },
+        {
+          "op": "release",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790031600,
+          "now": 1790033401
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033402,
+          "expect": "in_flight"
+        }
+      ]
+    },
+    {
+      "name": "a-late-keep-holds-again",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033400,
+          "expect": "granted"
+        },
+        {
+          "op": "release",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790033400,
+          "now": 1790033400
+        },
+        {
+          "op": "keep",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790031600,
+          "now": 1790033401
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033402,
+          "expect": "held"
+        }
+      ]
+    },
+    {
+      "name": "three-per-address-in-any-24-hours",
+      "policy": {
+        "dailyCap": 25,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "keep",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790031600,
+          "now": 1790031600
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790033401,
+          "expect": "granted"
+        },
+        {
+          "op": "keep",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790033401,
+          "now": 1790033401
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790035202,
+          "expect": "granted"
+        },
+        {
+          "op": "keep",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "reservedAt": 1790035202,
+          "now": 1790035202
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790037003,
+          "expect": "address_exhausted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790118000,
+          "expect": "granted"
+        }
+      ]
+    },
+    {
+      "name": "the-daily-cap-is-per-network",
+      "policy": {
+        "dailyCap": 2,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+          "now": 1790031600,
+          "expect": "quota_exceeded"
+        },
+        {
+          "op": "reserve",
+          "key": "solana-devnet:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "usedToday",
+          "now": 1790031600,
+          "network": "solana",
+          "expect": 2
+        },
+        {
+          "op": "usedToday",
+          "now": 1790031600,
+          "network": "solana-devnet",
+          "expect": 1
+        }
+      ]
+    },
+    {
+      "name": "the-daily-cap-starts-over-at-00-utc",
+      "policy": {
+        "dailyCap": 1,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790031600,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+          "now": 1790031601,
+          "expect": "quota_exceeded"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+          "now": 1790035200,
+          "expect": "granted"
+        }
+      ]
+    }
+  ]
+}

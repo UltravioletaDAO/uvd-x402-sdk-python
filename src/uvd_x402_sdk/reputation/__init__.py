@@ -25,7 +25,10 @@ The pieces, each usable alone (see ``README.md`` next to this file):
 - :func:`evidence_document` - the public evidence, without the chat text or
   its author;
 - :func:`submit_with_reconcile` - submit, and never prepare twice;
-- :class:`ReputationWorker` - all of the above in one ``tick()``.
+- :class:`ReputationWorker` - all of the above in one ``tick()``;
+- :func:`ensure_solana_identity` - the 8004-solana identity of a party to be
+  rated on Solana, read on Solana and minted once, under a daily cap (no
+  extra needed).
 
 This module never reads a key from the environment, never logs one, and
 redacts addresses, hashes, signatures, proofs and URLs in every log line.
@@ -101,14 +104,33 @@ from uvd_x402_sdk.reputation.signing import (
     build_relay_authorization,
     sign_relayed_feedback,
 )
+from uvd_x402_sdk.reputation.solana_identity import (
+    MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY,
+    MINT_HOLD_SECONDS,
+    SOLANA_IDENTITY_DAILY_MINT_CAP,
+    SOLANA_IDENTITY_NETWORKS,
+    InMemoryMintBudget,
+    MintBudget,
+    ReserveVerdict,
+    SolanaIdentityCheck,
+    SolanaIdentityResult,
+    SolanaIdentityStatus,
+    check_solana_identity,
+    ensure_solana_identity,
+    validate_solana_address,
+)
 from uvd_x402_sdk.reputation.submit import RelayClient, matching_feedback, submit_with_reconcile
 from uvd_x402_sdk.reputation.worker import ReputationWorker
 
 __all__ = [
     "EVIDENCE_SCHEMA",
     "GIVE_FEEDBACK_TYPEHASH",
+    "MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY",
+    "MINT_HOLD_SECONDS",
     "RELAY_CHAIN_IDS",
     "RELAY_DELEGATES",
+    "SOLANA_IDENTITY_DAILY_MINT_CAP",
+    "SOLANA_IDENTITY_NETWORKS",
     "AccountSigner",
     "Caps",
     "CircuitBreaker",
@@ -121,8 +143,10 @@ __all__ = [
     "Governor",
     "HealthReport",
     "HttpJsonRpc",
+    "InMemoryMintBudget",
     "InMemoryRatingOutbox",
     "JsonRpc",
+    "MintBudget",
     "OutboxConflict",
     "OutboxEntry",
     "PaymentPending",
@@ -135,17 +159,23 @@ __all__ = [
     "RelayClient",
     "ReputationError",
     "ReputationWorker",
+    "ReserveVerdict",
     "RpcError",
     "SQLiteRatingOutbox",
     "SignatureRejected",
     "SignedPayment",
+    "SolanaIdentityCheck",
+    "SolanaIdentityResult",
+    "SolanaIdentityStatus",
     "Usage",
     "VerifiedPreparation",
     "authorization_digest",
     "build_relay_authorization",
     "canonical_json",
+    "check_solana_identity",
     "commitment",
     "content_hash",
+    "ensure_solana_identity",
     "evidence_document",
     "matching_feedback",
     "message_ref",
@@ -163,4 +193,5 @@ __all__ = [
     "sign_relayed_feedback",
     "submit_with_reconcile",
     "validate_preparation",
+    "validate_solana_address",
 ]

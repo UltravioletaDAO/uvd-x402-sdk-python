@@ -2023,6 +2023,42 @@ author. See
 [`src/uvd_x402_sdk/reputation/README.md`](src/uvd_x402_sdk/reputation/README.md)
 for a program wired in fifteen lines.
 
+### The rated party's Solana identity, minted once: `ensure_solana_identity` (0.102.0)
+
+A rating on Solana needs the rated party to own an 8004-solana identity. The
+facilitator mints it, pays its rent (about 0.0134 SOL) and hands it to a base58
+recipient; `uvd_x402_sdk.reputation.ensure_solana_identity` is the one client
+of that, for every product (no extra needed):
+
+```python
+from uvd_x402_sdk.erc8004 import Erc8004Client
+from uvd_x402_sdk.reputation import InMemoryMintBudget, ensure_solana_identity
+
+BUDGET = InMemoryMintBudget()  # one long-lived process; several processes: a shared, persistent store
+
+async with Erc8004Client() as client:
+    result = await ensure_solana_identity(
+        owner_base58,                                  # an address the owner PROVED they hold
+        client=client,
+        budget=BUDGET,
+        agent_uri=f"https://my-app.example/agents/{owner_base58}",  # the same URI every time
+    )
+    if result.has_identity:                            # "created" or "already_exists"
+        agent_id = result.agent_id
+```
+
+It reads the identity on Solana first (`check_solana_identity`, the
+facilitator's owner lookup) and never mints over an answer that is not a
+verdict; mints at most 25 identities a UTC day per network
+(`SOLANA_IDENTITY_DAILY_MINT_CAP`; a caller may ask for less, never more), 3
+requests per address in 24 hours, one per address at a time, and none for 30
+minutes after a request whose outcome is unknown; and gives back a slot only
+when the facilitator's answer proves nothing reached the chain. The budget is
+the caller's and has no default: an implicit per-process counter would make the
+cap per worker and forget its holds on a restart. The result is one of
+`created`, `already_exists`, `pending`, `quota_exceeded`, `unavailable`,
+`uncertain`, `refused`, with a stable `reason`. Details in the module README.
+
 ### The same thing on Solana, and it needs no delegate
 
 Solana has the identical defect and a shorter fix. Account 0 of the program's
