@@ -1,5 +1,5 @@
 {
-  "description": "ensure_solana_identity: the verdicts the TypeScript twin must reproduce. 'addresses': validate_solana_address (32-44 base58 characters taken as given, 32 bytes, not zero). 'lookup': GET /identity/<network>/owner/<recipient> for recipient = 'recipient' on 'solana'; only 'absent' lets a mint out; body null = an answer that is not a JSON object; only the STRING balance '0' is a verdict. 'register': POST /register for that recipient, answers as x402-rs 2.51.2 can give them; releasesSlot = the answer proves nothing reached the chain (the slot is given back), retryInCall = it may be sent again in the same call; a facilitator code that is not lower_snake becomes 'facilitator_error'. 'transport': no HTTP answer, by meaning. 'reserve': what a MintBudget refusal makes of the call. 'budget': the rules of InMemoryMintBudget, step by step on a fresh one (reserve answers 'expect'; keep / release name their request by reservedAt; usedToday counts one network). 'policy': dailyMintCap is the owner's decision of 2026-10-27 (per UTC day and network); maxMintAttemptsPerAddressPerDay (in any 24 hours) and mintHoldSeconds are Execution Market's claim-table values.",
+  "description": "ensure_solana_identity: the verdicts the TypeScript twin must reproduce. 'addresses': validate_solana_address (32-44 base58 characters taken as given, 32 bytes, not zero). 'lookup': GET /identity/<network>/owner/<recipient> for recipient = 'recipient' on 'solana'; only 'absent' lets a mint out; body null = an answer that is not a JSON object; only the STRING balance '0' is a verdict. 'register': POST /register for that recipient, answers as x402-rs 2.51.2 can give them; releasesSlot = the answer proves nothing reached the chain (the slot is given back), retryInCall = it may be sent again in the same call; a facilitator code that is not lower_snake becomes 'facilitator_error'; a 408 / 429 / 503 releases only with the facilitator's mark (a lower_snake errorCode, mint.errorCode, code or reason, or mint.status 'not_minted'); owners compare exactly (base58 is case-sensitive). 'transport': no HTTP answer, by meaning. 'reserve': what a MintBudget refusal makes of the call. 'budget': the rules of InMemoryMintBudget, step by step on a fresh one (reserve answers 'expect'; keep / release name their request by reservedAt; usedToday counts one network). 'policy': dailyMintCap is the owner's decision of 2026-10-27 (per UTC day and network); maxMintAttemptsPerAddressPerDay (in any 24 hours) and mintHoldSeconds are Execution Market's claim-table values.",
   "recipient": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
   "policy": {
     "dailyMintCap": 25,
@@ -16,6 +16,7 @@
       "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
       "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
       "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq",
+      "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRV",
       "11111111111111111111111111111112",
       "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
     ],
@@ -217,6 +218,20 @@
       }
     },
     {
+      "name": "owner-differs-only-in-case",
+      "statusCode": 200,
+      "body": {
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRV",
+        "network": "solana"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "lookup_owner_mismatch",
+        "agentId": null
+      }
+    },
+    {
       "name": "another-network",
       "statusCode": 200,
       "body": {
@@ -317,6 +332,34 @@
         "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
         "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
         "owner": "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+        "network": "solana",
+        "mint": {
+          "status": "complete",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false,
+          "statsTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "owner_mismatch",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "complete",
+        "errorCode": null,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+      }
+    },
+    {
+      "name": "complete-owner-differs-only-in-case",
+      "statusCode": 200,
+      "body": {
+        "success": true,
+        "agentId": "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+        "transaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "transferTransaction": "5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
+        "owner": "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRV",
         "network": "solana",
         "mint": {
           "status": "complete",
@@ -976,6 +1019,29 @@
       }
     },
     {
+      "name": "503-marked-with-mint-in-progress",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "errorCode": "fee_payer_insufficient_balance",
+        "mint": {
+          "status": "pending_transfer",
+          "resumed": false,
+          "atomic": true,
+          "metadataSkipped": false
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "pending_transfer",
+        "errorCode": "fee_payer_insufficient_balance",
+        "agentId": null
+      }
+    },
+    {
       "name": "503-not-json",
       "statusCode": 503,
       "body": null,
@@ -986,6 +1052,147 @@
         "retryInCall": false,
         "mintStatus": null,
         "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-unmarked",
+      "statusCode": 503,
+      "body": {
+        "message": "Service Unavailable"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "unmarked_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "429-unmarked",
+      "statusCode": 429,
+      "body": {
+        "message": "Too Many Requests"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "unmarked_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "408-unmarked",
+      "statusCode": 408,
+      "body": {
+        "message": "Request Timeout"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "unmarked_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-code-that-is-not-a-code",
+      "statusCode": 503,
+      "body": {
+        "code": "ServiceUnavailable"
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "unmarked_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": null,
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-marked-by-not-minted-alone",
+      "statusCode": 503,
+      "body": {
+        "success": false,
+        "mint": {
+          "status": "not_minted"
+        }
+      },
+      "expected": {
+        "status": "unavailable",
+        "reason": "service_unavailable",
+        "releasesSlot": true,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": null,
+        "agentId": null
+      }
+    },
+    {
+      "name": "503-success-true",
+      "statusCode": 503,
+      "body": {
+        "success": true,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "registry_unavailable"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "registry_unavailable",
+        "agentId": null
+      }
+    },
+    {
+      "name": "409-success-true",
+      "statusCode": 409,
+      "body": {
+        "success": true,
+        "agentId": null,
+        "transaction": null,
+        "transferTransaction": null,
+        "owner": null,
+        "error": "refused",
+        "network": "solana",
+        "mint": {
+          "status": "not_minted",
+          "resumed": false,
+          "atomic": false,
+          "metadataSkipped": false,
+          "errorCode": "held_identity_not_resumable"
+        }
+      },
+      "expected": {
+        "status": "uncertain",
+        "reason": "inconsistent_answer",
+        "releasesSlot": false,
+        "retryInCall": false,
+        "mintStatus": "not_minted",
+        "errorCode": "held_identity_not_resumable",
         "agentId": null
       }
     },
@@ -1439,6 +1646,58 @@
           "key": "solana:247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
           "now": 1790035200,
           "expect": "granted"
+        }
+      ]
+    },
+    {
+      "name": "the-daily-cap-is-the-utc-day",
+      "policy": {
+        "dailyCap": 2,
+        "perAddressCap": 3,
+        "holdSeconds": 1800
+      },
+      "steps": [
+        {
+          "op": "reserve",
+          "key": "solana:6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv",
+          "now": 1790037000,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q",
+          "now": 1790037000,
+          "expect": "granted"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+          "now": 1790040600,
+          "expect": "quota_exceeded"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+          "now": 1790119800,
+          "expect": "quota_exceeded"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+          "now": 1790121599,
+          "expect": "quota_exceeded"
+        },
+        {
+          "op": "reserve",
+          "key": "solana:8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ",
+          "now": 1790121600,
+          "expect": "granted"
+        },
+        {
+          "op": "usedToday",
+          "now": 1790121600,
+          "network": "solana",
+          "expect": 1
         }
       ]
     }

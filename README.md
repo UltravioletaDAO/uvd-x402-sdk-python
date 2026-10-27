@@ -2047,9 +2047,9 @@ async with Erc8004Client() as client:
         agent_id = result.agent_id
 ```
 
-It reads the identity on Solana first (`check_solana_identity`, the
-facilitator's owner lookup) and never mints over an answer that is not a
-verdict; mints at most 25 identities a UTC day per network
+It reads the identity on Solana before every mint request, a retry's too
+(`check_solana_identity`, the facilitator's owner lookup), and never mints over
+an answer that is not a verdict; mints at most 25 identities a UTC day per network
 (`SOLANA_IDENTITY_DAILY_MINT_CAP`; a caller may ask for less, never more), 3
 requests per address in 24 hours, one per address at a time, and none for 30
 minutes after a request whose outcome is unknown; and gives back a slot only

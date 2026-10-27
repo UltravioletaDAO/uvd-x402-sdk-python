@@ -22,10 +22,11 @@ What it does, in this order, and why each step is there:
    another loop (another thread) is not joined; the budget keeps it to one.
 3. **Reads the identity on Solana** (:func:`check_solana_identity`, the
    facilitator's ``GET /identity/<network>/owner/<address>``, a
-   ``getProgramAccounts`` scan). Never with an EVM read. Owned -> nothing is
-   minted. Only the owner lookup's own 404 (its body carries ``balance: "0"``)
-   is "owns nothing"; a 503, a 429, a timeout, a 404 from anything else, or a
-   200 naming another owner is NO VERDICT, and nothing is spent on it.
+   ``getProgramAccounts`` scan) before EVERY reservation, the first and each
+   retry. Never with an EVM read. Owned -> nothing is minted. Only the owner
+   lookup's own 404 (its body carries ``balance: "0"``) is "owns nothing"; a
+   503, a 429, a timeout, a 404 from anything else, or a 200 naming another
+   owner is NO VERDICT, and nothing is spent on it.
 4. **Takes a slot of the caller's budget** (:class:`MintBudget`): at most
    :data:`SOLANA_IDENTITY_DAILY_MINT_CAP` mint requests per UTC day and
    network, at most :data:`MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY` per address
@@ -37,8 +38,9 @@ What it does, in this order, and why each step is there:
    and classifies the answer from ``mint.status``, the HTTP status and the
    facilitator's error codes (:data:`SolanaIdentityStatus`).
 6. **Gives the slot back only when the answer proves nothing reached the
-   chain** (a refusal the facilitator makes before it signs: 400, 403, 408,
-   409, 429, 503 with a JSON body and no ``mint.status`` other than
+   chain** (a refusal the facilitator makes before it signs: 400, 403, 409
+   with a JSON body, or 408, 429, 503 with a JSON body that carries the
+   facilitator's mark, and in both cases no ``mint.status`` other than
    ``not_minted``; or no connection at all). Anything else keeps it.
 7. **Reads the identity again** after a mint the facilitator calls complete.
 
@@ -66,7 +68,12 @@ Accepted on purpose: the lookup runs before the reservation, so a call for an
 address that already owns one never touches the budget (and never reads
 ``quota_exceeded`` for it); the price is that a call stalled for longer than
 the hold between the two acts on that lookup. The hold runs on the caller's
-``clock`` (wall time, so a shared store can compare it across processes).
+``clock`` (wall time, so a shared store can compare it across processes). An
+owner lookup that keeps answering "owns nothing" after a mint of ours landed
+(a ``getProgramAccounts`` that answers empty instead of failing) mints again
+after each hold, at most :data:`MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY` times
+in 24 hours: the caps bound it, nothing else here can tell that lookup from a
+true one.
 """
 
 from __future__ import annotations
@@ -144,7 +151,10 @@ _SECONDS_PER_DAY = 86_400
 _DEFAULT_BACKOFF = 0.5
 # Longest a request may take, start to end (a total deadline, not httpx's
 # per-phase timeouts): a third of the hold, so a mint request still in flight
-# can never outlive the reservation that covers it.
+# can never outlive the reservation that covers it. Also the longest wait
+# between two requests of one call (``max_backoff``): shorter than the hold, so
+# a mint another caller sent while this one waited still holds the address
+# when this one asks again.
 _MAX_TIMEOUT = MINT_HOLD_SECONDS / 3
 
 SolanaIdentityStatus = Literal[
@@ -522,16 +532,17 @@ async def check_solana_identity(
     ``getProgramAccounts`` scan of the registry by owner): never an EVM read,
     which cannot answer for Solana. Retried up to ``attempts`` times on an
     answer with no verdict that may pass (429, 5xx, no answer), waiting the
-    ``Retry-After`` when it is at most ``max_backoff`` seconds and giving up
-    when it is longer. Never raises for what the network does; the arguments
-    are checked first (``TypeError`` / ``ValueError``).
+    ``Retry-After`` when it is at most ``max_backoff`` seconds (0 to a third
+    of :data:`MINT_HOLD_SECONDS`) and giving up when it is longer. Never
+    raises for what the network does; the arguments are checked first
+    (``TypeError`` / ``ValueError``).
     """
     validate_solana_address(recipient)
     network = _check_network(network)
     _check_client(client)
     timeout = _timeout("timeout", timeout)
     attempts = _attempts("attempts", attempts)
-    max_backoff = _non_negative("max_backoff", max_backoff)
+    max_backoff = _backoff_limit("max_backoff", max_backoff)
     redact_http_client_logs()
     url = f"{client.base_url}/identity/{network}/owner/{recipient}"
     asked = 0
@@ -608,7 +619,23 @@ _TRANSIENT_REFUSALS = frozenset(
 # Statuses the /register route answers only before it reaches the chain; the
 # 408 is the admission layer's "the body did not arrive; nothing was done".
 _PRE_CHAIN_STATUSES = frozenset({400, 403, 408, 409, 429, 503})
+# Of those, the ones a gateway in front of the facilitator answers too, maybe
+# after it forwarded the request. x402-rs marks every refusal of its own in
+# them (``errorCode`` from ``register_refusal``, ``code`` from the limiter, the
+# daily cap and the admission layer, ``reason`` from the writer lease); a body
+# without a mark (an API gateway's ``{"message": "Service Unavailable"}``)
+# proves nothing. Not 400 / 403 / 409: two 400s of x402-rs carry no code (an
+# unreadable body, an unsupported network).
+_MARKED_STATUSES = frozenset({408, 429, 503})
 _PENDING_MINT = frozenset({"pending_stats", "pending_transfer"})
+
+
+def _marked(body: dict, mint: dict) -> bool:
+    """Whether a refusal carries the facilitator's own mark."""
+    if mint.get("status") == "not_minted":
+        return True
+    marks = (mint.get("errorCode"), body.get("errorCode"), body.get("code"), body.get("reason"))
+    return any(isinstance(m, str) and _CODE.fullmatch(m) is not None for m in marks)
 
 
 def register_verdict(status_code: int, body: Optional[dict], recipient: str) -> _RegisterVerdict:
@@ -638,6 +665,8 @@ def register_verdict(status_code: int, body: Optional[dict], recipient: str) -> 
         pre_chain = body.get("success") is not True and mint_status in (None, "not_minted")
         if not pre_chain:
             return _RegisterVerdict("uncertain", "inconsistent_answer", **common)
+        if status_code in _MARKED_STATUSES and not _marked(body, mint):
+            return _RegisterVerdict("uncertain", "unmarked_answer", **common)
         code = _code(body.get("code"))
         if status_code == 429:
             if code == "erc8004_daily_write_limit":
@@ -751,11 +780,11 @@ def _timeout(name: str, value: Any) -> float:
     return float(value)
 
 
-def _non_negative(name: str, value: Any) -> float:
+def _backoff_limit(name: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name} must be a number")
-    if not (math.isfinite(value) and value >= 0):
-        raise ValueError(f"{name} must be a finite number >= 0")
+    if not (math.isfinite(value) and 0 <= value <= _MAX_TIMEOUT):
+        raise ValueError(f"{name} must be 0 to {_MAX_TIMEOUT:g} seconds")
     return float(value)
 
 
@@ -813,8 +842,10 @@ async def ensure_solana_identity(
         lookup_attempts, register_attempts: Requests per call, 1 to 5. A mint
             request is repeated only after an answer that proves nothing was
             sent and that may pass (a 503 the facilitator gives before signing,
-            a 429 rate limit, no connection).
-        max_backoff: Longest wait between two requests of one call; an answer
+            a 429 rate limit, no connection), and only after the owner lookup,
+            read again, still says the address owns nothing.
+        max_backoff: Longest wait between two requests of one call, 0 to a
+            third of :data:`MINT_HOLD_SECONDS` (more is refused); an answer
             asking for longer ends the call with its ``retry_after``.
         clock, sleep: Injected by tests.
 
@@ -837,7 +868,7 @@ async def ensure_solana_identity(
         "register_timeout": _timeout("register_timeout", register_timeout),
         "lookup_attempts": _attempts("lookup_attempts", lookup_attempts),
         "register_attempts": _attempts("register_attempts", register_attempts),
-        "max_backoff": _non_negative("max_backoff", max_backoff),
+        "max_backoff": _backoff_limit("max_backoff", max_backoff),
     }
     redact_http_client_logs()
     key = f"{network}:{recipient}"
@@ -906,23 +937,28 @@ async def _ensure_once(
             sleep=sleep,
         )
 
-    check = await read()
-    if check.state == "registered":
-        return result("already_exists", check.reason, agent_id=check.agent_id)
-    if check.state != "absent":
-        return result(
-            "uncertain",
-            check.reason,
-            status_code=check.status_code,
-            retry_after=check.retry_after,
-        )
-
     payload = {"x402Version": 1, "network": network, "agentUri": agent_uri, "recipient": recipient}
     url = f"{client.base_url}/register"
     sent = False
     asked = 0
     while True:
         asked += 1
+        # Every reservation acts on a lookup read just before it, a retry's
+        # too: a call that waited (or froze) past the hold of a mint another
+        # caller sent meanwhile must see that identity, not its first lookup.
+        check = await read()
+        if check.state == "registered":
+            return result(
+                "already_exists", check.reason, agent_id=check.agent_id, request_sent=sent
+            )
+        if check.state != "absent":
+            return result(
+                "uncertain",
+                check.reason,
+                status_code=check.status_code,
+                retry_after=check.retry_after,
+                request_sent=sent,
+            )
         reserved_at = clock()
         try:
             verdict = await budget.reserve(
@@ -933,6 +969,9 @@ async def _ensure_once(
                 hold_seconds=MINT_HOLD_SECONDS,
             )
         except Exception:  # noqa: BLE001 - an unreadable budget is no licence to spend
+            return result("unavailable", "budget_unavailable", request_sent=sent)
+        if not isinstance(verdict, str):
+            # A list, a dict, an array: a broken budget, whatever it compares equal to.
             return result("unavailable", "budget_unavailable", request_sent=sent)
         if verdict != "granted":
             status, reason = _RESERVE_REFUSALS.get(verdict, ("unavailable", "budget_unavailable"))
@@ -959,14 +998,16 @@ async def _ensure_once(
                 delivered = True
             sent = sent or delivered
             if answer.releases:
-                await _resolve(budget.release(key, reserved_at=reserved_at, now=clock()))
+                await _resolve(budget.release, key, reserved_at=reserved_at, now=clock())
                 released = True
         finally:
             if not released:
                 await _resolve(
-                    budget.keep(
-                        key, reserved_at=reserved_at, now=clock(), hold_seconds=MINT_HOLD_SECONDS
-                    )
+                    budget.keep,
+                    key,
+                    reserved_at=reserved_at,
+                    now=clock(),
+                    hold_seconds=MINT_HOLD_SECONDS,
                 )
 
         if not answer.retry or asked >= register_attempts:
@@ -997,11 +1038,13 @@ async def _ensure_once(
     return result("uncertain", "success_without_mint_report", **fields)
 
 
-async def _resolve(step: Awaitable[Any]) -> None:
-    """Keep or release a slot. A budget that fails here is left as it is: a
-    reserved slot it still holds blocks the address, the safe direction."""
+async def _resolve(step: Callable[..., Awaitable[Any]], key: str, **kwargs: Any) -> None:
+    """Keep or release a slot. A budget that fails here (when called or when
+    awaited: a synchronous one raises before there is anything to await) is
+    left as it is: a reserved slot it still holds blocks the address, the safe
+    direction."""
     try:
-        await step
+        await step(key, **kwargs)
     except Exception:  # noqa: BLE001
         log_event(40, "solana_identity.budget_write_failed")
 

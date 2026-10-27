@@ -7,9 +7,10 @@
 ``httpx.MockTransport`` plugged into a real ``Erc8004Client``. It keeps what is
 ON CHAIN (who owns which asset, what the facilitator holds) apart from what the
 owner lookup SHOWS (``hidden``: an RPC lagging behind a mint), counts the
-identities it mints, and plays scripted answers: a scripted mode may land a mint
-and still answer a timeout or a 500, which is the case a client must not mint
-again over.
+identities it mints, resumes an identity it holds only as ``decide_mint`` does
+(same agentUri and recipient), and plays scripted answers: a scripted mode may
+land a mint and still answer a timeout or a 500, which is the case a client
+must not mint again over.
 """
 
 from __future__ import annotations
@@ -61,7 +62,8 @@ class FakeRegistry:
     def __init__(self, network: str = "solana") -> None:
         self.network = network
         self.owned: dict[str, list[str]] = {}  # owner -> assets, on chain
-        self.held: dict[str, str] = {}  # asset held by the fee payer -> its recipient
+        # asset held by the fee payer -> (its recipient, its agentUri)
+        self.held: dict[str, tuple[str, str]] = {}
         self.hidden: set[str] = set()  # owners the lookup does not show yet
         self.lookup_script: list[Any] = []
         self.register_script: list[Any] = []
@@ -164,9 +166,31 @@ def _refusal(fake: FakeRegistry, status: int, code: str, *, top_level: bool = Fa
     return httpx.Response(status, json=body, headers=headers)
 
 
+def _decide_mint(fake: FakeRegistry, body: dict) -> tuple[Optional[str], bool]:
+    """x402-rs ``solana_mint.rs::decide_mint``: (asset to resume, refuse).
+
+    A held identity is resumed only for the same agentUri AND the recipient it
+    was minted for; the same agentUri for another recipient is a 409; another
+    agentUri (or none) is a fresh mint, paid again.
+    """
+    uri = body.get("agentUri") or ""
+    if not uri:
+        return None, False
+    not_resumable = False
+    for asset, (recipient, held_uri) in fake.held.items():
+        if held_uri != uri:
+            continue
+        if recipient == body["recipient"]:
+            return asset, False
+        not_resumable = True
+    return None, not_resumable
+
+
 def complete(fake: FakeRegistry, body: dict) -> httpx.Response:
     recipient = body["recipient"]
-    resumed = next((a for a, r in fake.held.items() if r == recipient), None)
+    resumed, refuse = _decide_mint(fake, body)
+    if refuse:
+        return held_not_resumable(fake, body)
     if resumed is not None:
         del fake.held[resumed]
         asset = fake.give(recipient, resumed)
@@ -188,8 +212,11 @@ def complete(fake: FakeRegistry, body: dict) -> httpx.Response:
 
 
 def pending_transfer(fake: FakeRegistry, body: dict) -> httpx.Response:
-    asset = fake.new_asset()
-    fake.held[asset] = body["recipient"]
+    resumed, refuse = _decide_mint(fake, body)
+    if refuse:
+        return held_not_resumable(fake, body)
+    asset = resumed or fake.new_asset()
+    fake.held[asset] = (body["recipient"], body.get("agentUri") or "")
     return httpx.Response(
         500,
         json={

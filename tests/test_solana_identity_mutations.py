@@ -20,6 +20,7 @@ import logging
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Optional
 
 import httpx
 import pytest
@@ -198,8 +199,10 @@ async def a_spent_slot_is_given_back(r: Run) -> bool:
 
 
 async def a_refusal_with_a_mint_in_progress_is_given_back(r: Run) -> bool:
-    def contradiction(f, b):
-        return httpx.Response(503, json={"success": False, "mint": {"status": "pending_transfer"}})
+    def contradiction(f, b):  # marked, so only the mint.status guard stands in the way
+        return httpx.Response(503, json={"success": False,
+                                         "errorCode": "fee_payer_insufficient_balance",
+                                         "mint": {"status": "pending_transfer"}})
 
     r.fake.register_script = [contradiction]
     await r.ensure()
@@ -207,12 +210,14 @@ async def a_refusal_with_a_mint_in_progress_is_given_back(r: Run) -> bool:
 
 
 async def a_500_not_minted_is_sent_again(r: Run) -> bool:
+    r.fake.hidden.add(OWNER)  # the lookup read before the retry does not show it yet
     r.fake.register_script = [landed_but_not_minted, complete]
     await r.ensure()
     return r.fake.minted > 1
 
 
 async def a_read_timeout_is_sent_again(r: Run) -> bool:
+    r.fake.hidden.add(OWNER)
     r.fake.register_script = [lands_then(httpx.ReadTimeout("read")), complete]
     await r.ensure()
     return r.fake.minted > 1
@@ -422,6 +427,85 @@ async def says_sent_with_no_connection(r: Run) -> bool:
     return (await r.ensure()).request_sent
 
 
+def _another_process_mints(r: Run, wakes_after: Optional[float] = None):
+    """``sleep`` double: while the call waits, another process with the same
+    budget mints and keeps; the call wakes ``wakes_after`` (or what it asked
+    for) seconds later."""
+
+    async def sleep(seconds: float) -> None:
+        key, at = f"solana:{OWNER}", r.clock()
+        await r.budget.reserve(key, now=at, **_POLICY)
+        r.fake.give(OWNER)
+        await r.budget.keep(key, reserved_at=at, now=r.clock(), hold_seconds=1800)
+        r.clock.t += seconds if wakes_after is None else wakes_after
+
+    return sleep
+
+
+async def a_long_backoff_mints_twice(r: Run) -> bool:
+    # A lookup lagging behind the whole wait: past the other mint's hold, the
+    # ceiling on the wait is what stands between this call and a second identity.
+    r.fake.hidden.add(OWNER)
+    r.fake.register_script = [writer_lease("3600"), complete]
+    try:
+        await r.ensure(max_backoff=3600, sleep=_another_process_mints(r))
+    except ValueError:
+        return False
+    return len(r.fake.owned.get(OWNER, [])) > 1
+
+
+async def a_retry_acts_on_the_first_lookup(r: Run) -> bool:
+    r.fake.register_script = [writer_lease("5"), complete]
+    await r.ensure(sleep=_another_process_mints(r, wakes_after=1801))
+    return len(r.fake.owned.get(OWNER, [])) > 1
+
+
+async def the_daily_cap_is_an_hour(r: Run) -> bool:
+    r.clock.t = 1_790_035_200.0 + 1_800  # 00:30 UTC
+    for n in (1, 2):
+        await r.ensure(address(n), daily_cap=2)
+    r.clock.t += 3_600  # 01:30 UTC, the same day
+    await r.ensure(address(3), daily_cap=2)
+    return r.fake.minted > 2
+
+
+async def a_gateway_503_gives_the_slot_back(r: Run) -> bool:
+    def gateway(f, b):  # it had forwarded the request, and the mint landed
+        f.give(b["recipient"])
+        return httpx.Response(503, json={"message": "Service Unavailable"})
+
+    r.fake.hidden.add(OWNER)
+    r.fake.register_script = [gateway, complete]
+    await r.ensure()
+    r.clock.t += 5
+    await r.ensure()
+    return r.fake.minted > 1
+
+
+async def a_synchronous_budget_failure_escapes(r: Run) -> bool:
+    class SyncKeepRaises(r.m.InMemoryMintBudget):
+        def keep(self, key, **kw):
+            raise RuntimeError("store down")
+
+    try:
+        await r.ensure(budget=SyncKeepRaises())
+    except RuntimeError:
+        return True
+    return False
+
+
+async def an_unhashable_verdict_raises(r: Run) -> bool:
+    class Odd(r.m.InMemoryMintBudget):
+        async def reserve(self, key, **kw):
+            return ["granted"]
+
+    try:
+        await r.ensure(budget=Odd())
+    except TypeError:
+        return True
+    return False
+
+
 CASES = [
     ("M1-mint-on-inconclusive-lookup", '    if check.state != "absent":\n',
      "    if False:\n", mints_on_an_inconclusive_lookup),
@@ -527,6 +611,20 @@ CASES = [
     ("M40-request-sent-needs-a-connection",
      "                delivered = not answer.releases  # only a connection never made releases\n",
      "                delivered = True\n", says_sent_with_no_connection),
+    ("M45-max-backoff-cap", "    if not (math.isfinite(value) and 0 <= value <= _MAX_TIMEOUT):\n",
+     "    if not (math.isfinite(value) and 0 <= value):\n", a_long_backoff_mints_twice),
+    ("M46-read-before-every-reservation", "        check = await read()\n",
+     "        check = check if asked > 1 else await read()\n", a_retry_acts_on_the_first_lookup),
+    ("M47-daily-cap-is-the-utc-day", "    return int(now // _SECONDS_PER_DAY)\n",
+     "    return int(now // 3600)\n", the_daily_cap_is_an_hour),
+    ("M48-gateway-refusal-needs-the-mark",
+     "        if status_code in _MARKED_STATUSES and not _marked(body, mint):\n",
+     "        if False:\n", a_gateway_503_gives_the_slot_back),
+    ("M49-resolve-wraps-the-call", "    try:\n        await step(key, **kwargs)\n",
+     "    pending = step(key, **kwargs)\n    try:\n        await pending\n",
+     a_synchronous_budget_failure_escapes),
+    ("M50-reserve-verdict-is-a-string", "        if not isinstance(verdict, str):\n",
+     "        if False:\n", an_unhashable_verdict_raises),
 ]
 
 

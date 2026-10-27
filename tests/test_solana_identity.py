@@ -49,6 +49,10 @@ from uvd_x402_sdk.erc8004 import Erc8004Network
 from uvd_x402_sdk.reputation import solana_identity as si
 from uvd_x402_sdk.solana_signing import _b58encode
 
+# OWNER with its last letter upper-cased: another valid address (base58 is
+# case-sensitive), which an owner compared without case would take for OWNER.
+OWNER_OTHER_CASE = OWNER[:-1] + OWNER[-1].upper()
+
 
 @pytest.fixture
 def fake() -> FakeRegistry:
@@ -179,6 +183,35 @@ async def test_attempts_are_bounded(ensure, name, value):
 async def test_timeouts_are_positive_and_finite(ensure, value):
     with pytest.raises(ValueError):
         await ensure(register_timeout=value)
+
+
+@pytest.mark.parametrize(
+    "value", [-1, float("inf"), float("nan"), rep.MINT_HOLD_SECONDS / 3 + 1, 3600]
+)
+async def test_max_backoff_is_at_most_a_third_of_the_hold(ensure, fake, value):
+    with pytest.raises(ValueError):
+        await ensure(max_backoff=value)
+    with pytest.raises(ValueError):
+        await rep.check_solana_identity(OWNER, client=fake.client(), max_backoff=value)
+    assert fake.lookups == 0 and fake.posts == []
+
+
+@pytest.mark.parametrize("value", [True, "5"])
+async def test_max_backoff_is_a_number(ensure, value):
+    with pytest.raises(TypeError):
+        await ensure(max_backoff=value)
+
+
+async def test_a_backoff_of_a_third_of_the_hold_is_accepted(ensure, fake, sleeps):
+    longest = rep.MINT_HOLD_SECONDS / 3
+    fake.register_script = [writer_lease(str(int(longest))), complete]
+    result = await ensure(max_backoff=longest)
+    assert result.status == "created" and sleeps.waits == [longest]
+
+
+def test_the_owner_in_another_case_is_another_valid_address():
+    assert rep.validate_solana_address(OWNER_OTHER_CASE) == OWNER_OTHER_CASE != OWNER
+    assert si._b58decode(OWNER_OTHER_CASE) != si._b58decode(OWNER)
 
 
 async def test_the_client_must_be_an_erc8004_client(ensure):
@@ -326,6 +359,46 @@ async def test_a_retry_after_longer_than_max_backoff_ends_the_call(ensure, fake,
     assert result.retry_after == 5 and sleeps.waits == [] and len(fake.posts) == 1
 
 
+def _another_process_mints(fake, budget, clock, *, wakes_after):
+    """``sleep`` double: while this call waits, another process with the same
+    budget reserves, mints and keeps; this one wakes ``wakes_after`` seconds
+    later, whatever it asked for (a VM paused, an event loop frozen)."""
+
+    async def sleep(seconds: float) -> None:
+        key, at = f"solana:{OWNER}", clock()
+        assert await budget.reserve(
+            key, now=at, daily_cap=25, per_address_cap=3, hold_seconds=rep.MINT_HOLD_SECONDS
+        ) == "granted"
+        fake.give(OWNER)
+        await budget.keep(key, reserved_at=at, now=clock(), hold_seconds=rep.MINT_HOLD_SECONDS)
+        clock.t += wakes_after
+
+    return sleep
+
+
+async def test_a_retry_reads_the_owner_again_before_it_reserves(ensure, fake, budget, clock):
+    # Woken past the other mint's hold: only a fresh lookup can see that identity.
+    fake.register_script = [writer_lease("5"), complete]
+    sleep = _another_process_mints(fake, budget, clock, wakes_after=rep.MINT_HOLD_SECONDS + 1)
+    result = await ensure(sleep=sleep)
+    assert (result.status, result.reason) == ("already_exists", "owner_lookup")
+    assert result.request_sent  # the first POST went out, refused before the chain
+    assert len(fake.posts) == 1 and len(fake.owned[OWNER]) == 1
+
+
+async def test_a_wait_within_the_cap_stays_inside_another_callers_hold(
+    ensure, fake, budget, clock
+):
+    # The lookup lags behind the other mint: the hold is what stops this call.
+    longest = rep.MINT_HOLD_SECONDS / 3
+    fake.hidden.add(OWNER)
+    fake.register_script = [writer_lease(str(int(longest))), complete]
+    sleep = _another_process_mints(fake, budget, clock, wakes_after=longest)
+    result = await ensure(sleep=sleep, max_backoff=longest)
+    assert (result.status, result.reason) == ("uncertain", "recent_request")
+    assert len(fake.posts) == 1 and len(fake.owned[OWNER]) == 1
+
+
 async def test_429_rate_limited_is_unavailable_and_retried(ensure, fake, sleeps):
     fake.register_script = [rate_limited("1"), complete]
     result = await ensure()
@@ -421,10 +494,57 @@ async def test_an_unknown_outcome_is_uncertain_and_never_sent_again(
     assert (await ensure()).status == "already_exists"
 
 
-async def test_a_success_naming_another_owner_is_uncertain(ensure, fake):
-    fake.register_script = [success_for(OTHER)]
+@pytest.mark.parametrize("owner", [OTHER, OWNER_OTHER_CASE], ids=["other", "other-case"])
+async def test_a_success_naming_another_owner_is_uncertain(ensure, fake, owner):
+    fake.register_script = [success_for(owner)]
     result = await ensure()
     assert (result.status, result.reason) == ("uncertain", "owner_mismatch")
+
+
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (503, {"message": "Service Unavailable"}),
+        (429, {"message": "Too Many Requests"}),
+        (408, {"message": "Request Timeout"}),
+        (503, {"code": "ServiceUnavailable"}),
+        (503, {"success": False, "reason": "upstream timed out"}),
+    ],
+    ids=["503", "429", "408", "503-code-not-a-code", "503-reason-in-prose"],
+)
+async def test_a_gateway_refusal_without_the_facilitators_mark_keeps_the_slot(
+    ensure, fake, budget, clock, status, body
+):
+    def gateway(f, b):  # it had forwarded the request, and the mint landed
+        f.give(b["recipient"])
+        return httpx.Response(status, json=body)
+
+    fake.hidden.add(OWNER)
+    fake.register_script = [gateway, complete]
+    result = await ensure()
+    assert (result.status, result.reason) == ("uncertain", "unmarked_answer")
+    assert result.request_sent and budget.used_today(clock()) == 1
+    again = await ensure()
+    assert (again.status, again.reason) == ("uncertain", "recent_request")
+    assert len(fake.posts) == 1 and fake.minted == 1
+
+
+@pytest.mark.parametrize(
+    "status, code",
+    [(503, "registry_unavailable"), (429, "erc8004_daily_write_limit"),
+     (409, "held_identity_not_resumable"), (400, "agent_uri_tunnel")],
+)
+async def test_a_refusal_status_that_says_success_is_kept(
+    ensure, fake, budget, clock, status, code
+):
+    def contradiction(f, b):
+        return httpx.Response(status, json={"success": True, "errorCode": code, "code": code,
+                                            "mint": {"status": "not_minted", "errorCode": code}})
+
+    fake.register_script = [contradiction]
+    result = await ensure()
+    assert (result.status, result.reason) == ("uncertain", "inconsistent_answer")
+    assert budget.used_today(clock()) == 1
 
 
 async def test_a_success_whose_mint_is_not_complete_is_uncertain(ensure, fake):
@@ -464,9 +584,10 @@ async def test_an_unreadable_answer_is_uncertain(ensure, fake, budget, clock):
 
 
 async def test_a_refusal_status_with_a_mint_in_progress_is_kept(ensure, fake, budget, clock):
-    def contradiction(f, b):
+    def contradiction(f, b):  # marked by the facilitator, and still not a refusal
         return httpx.Response(
-            503, json={"success": False, "mint": {"status": "pending_transfer"}}
+            503, json={"success": False, "errorCode": "fee_payer_insufficient_balance",
+                       "mint": {"status": "pending_transfer"}}
         )
 
     fake.register_script = [contradiction]
@@ -488,6 +609,25 @@ async def test_pending_transfer_then_the_same_request_resumes_it(ensure, fake, c
     assert fake.minted == 1 and fake.posts[0] == fake.posts[1]
 
 
+async def test_a_held_identity_is_resumed_only_with_the_same_agent_uri(ensure, fake, clock):
+    fake.register_script = [pending_transfer]
+    first = await ensure()
+    assert first.status == "pending" and fake.minted == 1
+    clock.t += rep.MINT_HOLD_SECONDS + 1
+    # Another URI is another identity to x402-rs (decide_mint): minted, and paid, again.
+    second = await ensure(agent_uri=AGENT_URI + "-v2")
+    assert second.status == "created" and second.agent_id != first.agent_id
+    assert fake.minted == 2 and first.agent_id in fake.held
+
+
+async def test_a_held_identity_for_another_recipient_with_the_same_uri_is_refused(ensure, fake):
+    fake.register_script = [pending_transfer]
+    assert (await ensure()).status == "pending"
+    result = await ensure(OTHER)  # same agent_uri, another recipient
+    assert (result.status, result.reason) == ("refused", "held_identity_not_resumable")
+    assert fake.minted == 1
+
+
 # -- the lookup gives no verdict: nothing is spent -----------------------------------
 @pytest.mark.parametrize(
     "lookup, reason",
@@ -500,6 +640,7 @@ async def test_pending_transfer_then_the_same_request_resumes_it(ensure, fake, c
         (lookup_status(404, {"error": "x", "balance": False}), "lookup_not_a_verdict"),
         (lookup_status(404, {"error": "x", "balance": "1"}), "lookup_not_a_verdict"),
         (lookup_owned_by(OTHER), "lookup_owner_mismatch"),
+        (lookup_owned_by(OWNER_OTHER_CASE), "lookup_owner_mismatch"),
         (lookup_status(200, {"agentId": "nope", "owner": OWNER, "network": "solana"}),
          "lookup_unreadable"),
         (lookup_status(200, {"agentId": address(9), "owner": OWNER, "network": "base"}),
@@ -509,8 +650,8 @@ async def test_pending_transfer_then_the_same_request_resumes_it(ensure, fake, c
         (lookup_status(500, {"error": "No Solana provider"}), "lookup_http_500"),
     ],
     ids=["503", "timeout", "connect", "route-404", "html-404", "bool-balance",
-         "balance-1", "other-owner", "bad-agent-id", "other-network", "200-not-json",
-         "400", "500"],
+         "balance-1", "other-owner", "other-case-owner", "bad-agent-id", "other-network",
+         "200-not-json", "400", "500"],
 )
 async def test_a_lookup_without_a_verdict_mints_nothing(
     ensure, fake, budget, clock, lookup, reason
@@ -580,6 +721,21 @@ async def test_the_client_daily_cap_counts_every_address(ensure, fake, budget, c
     assert len(fake.posts) == 2 and fake.minted == 2 and not third.request_sent
     clock.t += 86_400  # the next UTC day
     assert (await ensure(address(3), daily_cap=2)).status == "created"
+
+
+async def test_the_daily_cap_is_the_utc_day_not_an_hour_nor_24_hours(ensure, fake, clock):
+    midnight = 1_790_035_200.0
+    assert midnight % 86_400 == 0  # 00:00 UTC
+    clock.t = midnight + 1_800  # 00:30 UTC
+    for n in range(1, 26):
+        assert (await ensure(address(n))).status == "created"
+    for at in (midnight + 5_400, midnight + 84_600, midnight + 86_399):  # 01:30, 23:30, 23:59:59
+        clock.t = at
+        late = await ensure(address(26))
+        assert (late.status, late.reason) == ("quota_exceeded", "client_daily_cap"), at
+    clock.t = midnight + 86_400  # 00:00 UTC of the next day, 23.5 h after the first 25
+    assert (await ensure(address(26))).status == "created"
+    assert fake.minted == 26 and len(fake.posts) == 26
 
 
 async def test_the_default_cap_is_25(ensure, fake):
@@ -837,6 +993,60 @@ async def test_a_budget_that_fails_to_release_blocks_the_address(ensure, fake, c
     again = await ensure(budget=broken)
     assert (again.status, again.reason) == ("pending", "in_flight")
     assert len(fake.posts) == 1
+
+
+class SyncBrokenBudget(rep.InMemoryMintBudget):
+    """``keep`` / ``release`` synchronous, raising when CALLED (nothing to await)."""
+
+    def __init__(self, fail: str) -> None:
+        super().__init__()
+        self.fail = fail
+
+    def keep(self, key, **kw):  # type: ignore[override]
+        if self.fail == "keep":
+            raise RuntimeError("store down")
+
+    def release(self, key, **kw):  # type: ignore[override]
+        if self.fail == "release":
+            raise RuntimeError("store down")
+
+
+@pytest.mark.parametrize(
+    "fail, answer, status", [("keep", complete, "created"), ("release", held_not_resumable,
+                                                            "refused")]
+)
+async def test_a_synchronous_budget_that_raises_still_answers(
+    ensure, fake, caplog, fail, answer, status
+):
+    caplog.set_level(logging.ERROR)
+    fake.register_script = [answer]
+    result = await ensure(budget=SyncBrokenBudget(fail))
+    assert result.status == status and len(fake.posts) == 1
+    assert "solana_identity.budget_write_failed" in caplog.text
+
+
+class _EqualsEverything:
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+@pytest.mark.parametrize("verdict", [["granted"], {"granted": True}, None, 1, b"granted",
+                                     "GRANTED", _EqualsEverything()])
+async def test_a_reserve_verdict_that_is_not_one_of_the_five_spends_nothing(
+    ensure, fake, verdict
+):
+    class Odd(rep.InMemoryMintBudget):
+        async def reserve(self, key, **kw):  # type: ignore[override]
+            return verdict
+
+    result = await ensure(budget=Odd())
+    assert (result.status, result.reason) == ("unavailable", "budget_unavailable")
+    assert fake.posts == []
 
 
 async def test_the_budget_is_the_callers_and_has_no_default(fake, clock, sleeps):

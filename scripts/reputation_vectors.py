@@ -866,6 +866,9 @@ SOL_OWNER = "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv"
 SOL_OTHER = "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q"
 SOL_ASSET = "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
 SOL_FEE_PAYER = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
+# SOL_OWNER with its last letter upper-cased: base58 is case-sensitive, so it is
+# ANOTHER valid address, and an owner compared without case would take it.
+SOL_OWNER_CASE = SOL_OWNER[:-1] + SOL_OWNER[-1].upper()
 
 
 def independent_b58decode(text: str) -> bytes:
@@ -884,7 +887,8 @@ def independent_b58decode(text: str) -> bytes:
     return b"\x00" * (len(text) - len(text.lstrip("1"))) + body
 
 
-SOL_VALID = [SOL_OWNER, SOL_OTHER, SOL_ASSET, SOL_FEE_PAYER, "1" * 31 + "2", "z" * 43]
+SOL_VALID = [SOL_OWNER, SOL_OTHER, SOL_ASSET, SOL_FEE_PAYER, SOL_OWNER_CASE, "1" * 31 + "2",
+             "z" * 43]
 SOL_REJECTED = [
     ("1" * 32, "zero address"),
     (" " + SOL_OWNER, "leading space"),
@@ -941,6 +945,9 @@ SOL_LOOKUP = [
     ("rate-limited", 429, {"code": "rate_limited"}, ("unknown", "lookup_rate_limited", None)),
     ("another-owner", 200, {"agentId": SOL_ASSET, "owner": SOL_OTHER, "network": "solana"},
      ("unknown", "lookup_owner_mismatch", None)),
+    ("owner-differs-only-in-case", 200,
+     {"agentId": SOL_ASSET, "owner": SOL_OWNER_CASE, "network": "solana"},
+     ("unknown", "lookup_owner_mismatch", None)),
     ("another-network", 200, {"agentId": SOL_ASSET, "owner": SOL_OWNER, "network": "base"},
      ("unknown", "lookup_network_mismatch", None)),
     ("bad-agent-id", 200, {"agentId": "x", "owner": SOL_OWNER, "network": "solana"},
@@ -957,6 +964,8 @@ SOL_REGISTER = [
     ("complete", 200, _COMPLETE,
      ("created", "minted", False, False, "complete", None, SOL_ASSET)),
     ("complete-for-another-owner", 200, {**_COMPLETE, "owner": SOL_OTHER},
+     ("uncertain", "owner_mismatch", False, False, "complete", None, SOL_ASSET)),
+    ("complete-owner-differs-only-in-case", 200, {**_COMPLETE, "owner": SOL_OWNER_CASE},
      ("uncertain", "owner_mismatch", False, False, "complete", None, SOL_ASSET)),
     ("complete-without-agent-id", 200, {**_COMPLETE, "agentId": None},
      ("uncertain", "unreadable_answer", False, False, "complete", None, None)),
@@ -1024,7 +1033,30 @@ SOL_REGISTER = [
      ("unavailable", "writer_lease_unavailable", True, True, None, None, None)),
     ("503-with-mint-in-progress", 503, {"success": False, "mint": _mint("pending_transfer")},
      ("uncertain", "inconsistent_answer", False, False, "pending_transfer", None, None)),
+    ("503-marked-with-mint-in-progress", 503,
+     {"success": False, "errorCode": "fee_payer_insufficient_balance",
+      "mint": _mint("pending_transfer")},
+     ("uncertain", "inconsistent_answer", False, False, "pending_transfer",
+      "fee_payer_insufficient_balance", None)),
     ("503-not-json", 503, None, ("uncertain", "unreadable_answer", False, False, None, None, None)),
+    # 408 / 429 / 503 release only with the facilitator's mark: a gateway answers
+    # them too, maybe after it forwarded the request.
+    ("503-unmarked", 503, {"message": "Service Unavailable"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("429-unmarked", 429, {"message": "Too Many Requests"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("408-unmarked", 408, {"message": "Request Timeout"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("503-code-that-is-not-a-code", 503, {"code": "ServiceUnavailable"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("503-marked-by-not-minted-alone", 503, {"success": False, "mint": {"status": "not_minted"}},
+     ("unavailable", "service_unavailable", True, False, "not_minted", None, None)),
+    ("503-success-true", 503, {**_refused("registry_unavailable"), "success": True},
+     ("uncertain", "inconsistent_answer", False, False, "not_minted", "registry_unavailable",
+      None)),
+    ("409-success-true", 409, {**_refused("held_identity_not_resumable"), "success": True},
+     ("uncertain", "inconsistent_answer", False, False, "not_minted",
+      "held_identity_not_resumable", None)),
     ("429-rate-limited", 429, {"error": "Too Many Requests", "code": "rate_limited"},
      ("unavailable", "rate_limited", True, True, None, None, None)),
     ("429-daily-cap", 429, {"success": False, "code": "erc8004_daily_write_limit",
@@ -1052,8 +1084,10 @@ SOL_TRANSPORT = [
      ("uncertain", "no_answer", False, False)),
 ]
 # The rules of the budget itself (InMemoryMintBudget), step by step on a fresh one.
-# T0 is 23:00 UTC, so a step at T0 + 3600 or later is the next UTC day.
+# T0 is 23:00 UTC, so a step at T0 + 3600 or later is the next UTC day; D1 is that
+# day's 00:00 UTC.
 T0 = 1_790_035_200 - 3_600
+D1 = 1_790_035_200
 _P = {"dailyCap": 25, "perAddressCap": 3, "holdSeconds": 1800}
 _A, _B, _C = "solana:" + SOL_OWNER, "solana:" + SOL_OTHER, "solana:" + SOL_ASSET
 
@@ -1101,6 +1135,14 @@ SOL_BUDGET = [
         _u(T0, "solana", 2), _u(T0, "solana-devnet", 1)]),
     ("the-daily-cap-starts-over-at-00-utc", {**_P, "dailyCap": 1}, [
         _r(_A, T0, "granted"), _r(_B, T0 + 1, "quota_exceeded"), _r(_B, T0 + 3600, "granted")]),
+    # The cap's window is the UTC calendar day: not an hour (01:30 and 23:30 of the
+    # same day are refused), not a rolling 24 hours (00:00 of the next day, 23.5 h
+    # after the first two, is granted), not another time zone.
+    ("the-daily-cap-is-the-utc-day", {**_P, "dailyCap": 2}, [
+        _r(_A, D1 + 1_800, "granted"), _r(_B, D1 + 1_800, "granted"),
+        _r(_C, D1 + 5_400, "quota_exceeded"), _r(_C, D1 + 84_600, "quota_exceeded"),
+        _r(_C, D1 + 86_399, "quota_exceeded"), _r(_C, D1 + 86_400, "granted"),
+        _u(D1 + 86_400, "solana", 1)]),
 ]
 
 
@@ -1142,6 +1184,8 @@ def solana_identity_vectors() -> dict:
         raw = independent_b58decode(value)
         if len(raw) != 32 or raw == bytes(32) or si.validate_solana_address(value) != value:
             raise Refused(f"valid address disagrees: {value!r}")
+    if independent_b58decode(SOL_OWNER_CASE) == independent_b58decode(SOL_OWNER):
+        raise Refused("the case-flipped owner is the same key")
     rejected = []
     for value, reason in SOL_REJECTED:
         try:
@@ -1216,7 +1260,10 @@ def solana_identity_vectors() -> dict:
         "/register for that recipient, answers as x402-rs 2.51.2 can give them; releasesSlot "
         "= the answer proves nothing reached the chain (the slot is given back), retryInCall "
         "= it may be sent again in the same call; a facilitator code that is not lower_snake "
-        "becomes 'facilitator_error'. 'transport': no HTTP answer, by meaning. 'reserve': what "
+        "becomes 'facilitator_error'; a 408 / 429 / 503 releases only with the facilitator's "
+        "mark (a lower_snake errorCode, mint.errorCode, code or reason, or mint.status "
+        "'not_minted'); owners compare exactly (base58 is case-sensitive). 'transport': no "
+        "HTTP answer, by meaning. 'reserve': what "
         "a MintBudget refusal makes of the call. 'budget': the rules of InMemoryMintBudget, "
         "step by step on a fresh one (reserve answers 'expect'; keep / release name their "
         "request by reservedAt; usedToday counts one network). 'policy': dailyMintCap is the "

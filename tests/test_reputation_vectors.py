@@ -56,7 +56,7 @@ VECTOR_SHA256 = {
     "payment-proof.json": "5844804ffc4798a4760fa578098a70a759a9203b9fbe64098a44acdc55a7d71e",
     "prepare-rejections.json": "e957162d1a5b03e420ce04b45527d0afd3954b8c72c8a7876fc78c5ab21d26f0",
     "relayed-feedback.json": "68480ed21a2e340a76b55aaedc9fcf8b9acea11fc483e8c43ea55e98e4fd14ae",
-    "solana-identity.json": "7419588c3e90560556dd3158f62b736210e4b49d46869d4ae72f24a0866dcd3c",
+    "solana-identity.json": "01258493c3d15fef89f5af8db65911870d7b62e76ee34ab3fc80ef13e5f72a03",
 }
 
 
