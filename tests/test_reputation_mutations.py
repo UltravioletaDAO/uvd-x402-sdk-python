@@ -48,6 +48,7 @@ from tests.test_reputation_round3 import (  # noqa: E402
     ref_window_in_a_tag,
     removed_log_payment,
     rotate_mid_flight,
+    rotate_while_paying,
 )
 from tests.test_reputation_signing import Lying, high_s, verified_for  # noqa: E402
 from uvd_x402_sdk.reputation import (  # noqa: E402
@@ -483,6 +484,16 @@ async def test_m16b_reading_the_signers_state_proves_a_landed_rating_absent():
         "        rater = signer_address(self.signer)\n        delegate = RELAY_DELEGATES",
     )
     assert await absent_for_a_rotated_signer(_env(), broken._Run) is True
+
+
+async def test_m16c_without_the_workers_rater_check_a_rotated_key_pays():
+    code, rotated, broadcasts = await rotate_while_paying(_env())
+    assert code == "rater_mismatch" and rotated.signatures == 0 and broadcasts == []
+    broken = mutant("worker", "            row_rater(entry, self.signer)\n", "            pass\n")
+    env = _env()
+    env.worker.__class__ = broken.ReputationWorker
+    code, rotated, broadcasts = await rotate_while_paying(env)
+    assert rotated.signatures == 1 and len(set(broadcasts)) == 1  # the new key paid
 
 
 # M17 a payee's code that is not hex

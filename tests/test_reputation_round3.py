@@ -156,6 +156,35 @@ async def test_a_rotated_rater_key_never_rates_a_moment_twice():
     assert len(ratings_on_chain(env)) == 1 and len(env.facilitator.prepares) == 1
 
 
+async def rotate_while_paying(env: Env) -> tuple:
+    """The key is rotated while a row waits in ``paying`` with nothing signed
+    (a gas spike): only the worker's own check stands between the new key and
+    a transfer. The code the next tick raised, the new key, the broadcasts."""
+    env.chain.base_fee = 10**15
+    entry = make_entry()
+    env.outbox.enqueue(entry)
+    await env.worker.tick()
+    assert env.outbox.get(entry.ref).payment is None
+    env.chain.base_fee = 5_000_000
+    rotated = Counting(fixed_account("22"))
+    env.worker.signer = rotated
+    env.clock.now += 200
+    try:
+        await env.worker.tick()
+        code = None
+    except ReputationError as exc:
+        code = exc.code
+    return code, rotated, list(env.chain.broadcasts)
+
+
+async def test_a_rotated_key_never_pays_for_a_row_another_key_started():
+    env = Env(InMemoryRatingOutbox())
+    env.own()
+    code, rotated, broadcasts = await rotate_while_paying(env)
+    assert code == "rater_mismatch"
+    assert rotated.signatures == 0 and broadcasts == []
+
+
 @pytest.mark.parametrize("cleared", [False, True])
 async def test_submit_with_reconcile_refuses_a_signer_that_is_not_the_rows_rater(cleared):
     env = Env(InMemoryRatingOutbox())
