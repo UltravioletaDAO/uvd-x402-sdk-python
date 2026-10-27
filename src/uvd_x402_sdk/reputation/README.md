@@ -174,16 +174,57 @@ The authorization of a first rating is signed over the account nonce read from t
 (`eth_getTransactionCount(rater, "pending")`), never the facilitator's word alone: an EIP-7702
 authorization does not expire, it is valid while that nonce is the account's.
 
+## The rated party's identity on Solana: `ensure_solana_identity`
+
+A rating on Solana needs the RATED party to own an 8004-solana identity (QuantuLabs' registry: a
+Metaplex Core asset, its `AgentAccount` and its ATOM stats). The facilitator mints it, pays the rent
+(about 0.0134 SOL each, as x402-rs prices it) and hands it to a base58 `recipient` in one transaction.
+Karma Kadabra and Execution Market each did this on their own; this is the one implementation. It needs
+no extra (httpx only), and it reads the identity on Solana, never with an EVM call.
+
+```python
+from uvd_x402_sdk import reputation as rep
+BUDGET = rep.InMemoryMintBudget()   # ONE long-lived process; more processes: a shared, persistent store
+async def identity_of(owner_base58, client):     # client = an Erc8004Client
+    result = await rep.ensure_solana_identity(owner_base58, client=client, budget=BUDGET,
+        agent_uri=f"https://my-app.example/agents/{owner_base58}")   # the SAME URI every time
+    if result.has_identity:                      # created / already_exists
+        return result.agent_id
+    return None                                  # rate elsewhere, say why (result.status, result.reason)
+```
+
+| Step | What it guarantees |
+|---|---|
+| `validate_solana_address` | 32-44 base58 characters taken exactly as given, 32 bytes, not the zero key; `ValueError` before any request |
+| join | a second call for the same address while one is in flight on the same event loop gets that call's result: one mint (a call of another loop is not joined: the budget's `in_flight` keeps it to one) |
+| `check_solana_identity` | `GET /identity/<network>/owner/<address>`, before EVERY reservation (a retry's too); only the owner lookup's own 404 (it carries `balance: "0"`, a string) is "owns nothing"; a 503, 429, timeout, other 404, another owner (compared exactly: base58 is case-sensitive) or another network is no verdict, and nothing is spent on it |
+| `MintBudget` (required) | `SOLANA_IDENTITY_DAILY_MINT_CAP` = 25 mint requests per UTC day and network (owner decision of 2026-10-27; a caller may ask for less, never more), `MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY` = 3 in any 24 hours, none while another request for the address is in flight, none for `MINT_HOLD_SECONDS` = 1800 after one that may have spent (EM's claim-table values and window); a reservation never resolved expires after the hold, counted as spent |
+| `POST /register` | classified from `mint.status`, the HTTP status and the facilitator's codes; sent again in the same call only after an answer that proves nothing was sent and may pass (a 503 before signing, the admission layer's 503 `overloaded` / 429 / 408, a 429 rate limit, no connection), at most `register_attempts` times, waiting a `Retry-After` of at most `max_backoff` (0 to a third of the hold) |
+| the slot | given back only when the answer proves nothing reached the chain (400, 403, 409 with a JSON body; 408, 429, 503 only with the facilitator's mark, a lower_snake `errorCode` / `code` / `reason` or `mint.status: not_minted`, since a gateway answers those too; never with `success: true` or a `mint.status` beyond `not_minted`; a connection never made); a timeout, a 500 (even `not_minted`: `send_and_confirm` can time out on a transaction that still lands), a 502 or any other 2xx keep it |
+| after `complete` | the owner lookup again: `confirmed` |
+
+`result.status` is one of `created`, `already_exists`, `pending` (the facilitator holds it, or another
+call is minting it: ask later, the same request finishes it), `quota_exceeded`, `unavailable` (nothing
+minted, ask again), `uncertain` (nobody can say yet; never minted over) and `refused` (409
+`held_identity_not_resumable`, 400, 403: the same request gets the same answer). `result.reason` is a
+stable code; a facilitator code that is not lower_snake becomes `facilitator_error`, so no address or
+URL reaches a `repr` or a log line. The budget has no default, on purpose: an implicit per-process
+counter turns 25 a day into 25 per worker and forgets the holds on a restart. `InMemoryMintBudget` is
+for one long-lived process; more processes, or a restart, need a store they share and that persists,
+keyed by the address exactly as given (base58 is case-sensitive). The verdict of every facilitator
+answer is in `tests/vectors/reputation/solana-identity.json` for the TypeScript twin.
+
 ## What it does not do
 
-Register the subject's identity (`Erc8004Client.register_agent`), read reputation (that is
+Register an EVM subject's identity (`Erc8004Client.register_agent`), read reputation (that is
 `uvd-describe-sdk`), host the evidence, or revoke (there is no relayed revocation).
 
 ## Shared vectors
 
 `tests/vectors/reputation/*.json` — message refs, prepare -> digest / signature / authorization, the
 refusal codes of `validate_preparation` (the FIRST failing check is reported; the order is part of the
-contract), `paymentHash`, evidence bytes and hashes. Written only by `python scripts/reputation_vectors.py`
+contract), `paymentHash`, evidence bytes and hashes, and the verdicts of `ensure_solana_identity` on
+each facilitator answer (`solana-identity.json`). Written only by `python scripts/reputation_vectors.py`
 (cross-checked against eth-account, the facilitator's captured proof and the deployed contract; `--check`
 exits 1 on drift); their sha256 are pinned in `tests/test_reputation_vectors.py`. The TypeScript twin
 consumes them as they are.

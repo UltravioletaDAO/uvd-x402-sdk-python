@@ -3,8 +3,9 @@
 The CONTRACT between the Python module (``uvd_x402_sdk.reputation``) and its
 TypeScript twin (``uvd-x402-sdk/reputation``): the same inputs must give the
 same digest, the same signature and EIP-7702 authorization, the same refusal
-code, the same evidence bytes and hash, the same ``paymentHash`` and the same
-``message_ref``. The TypeScript worker consumes these files as they are.
+code, the same evidence bytes and hash, the same ``paymentHash``, the same
+``message_ref`` and the same verdicts of ``ensure_solana_identity`` on each
+facilitator answer. The TypeScript worker consumes these files as they are.
 
 Every value is cross-checked BEFORE it is written against an implementation
 that is not the module's: the typed-data digest with eth-account's encoder
@@ -859,6 +860,426 @@ def evidence_vectors(proof: dict) -> dict:
     }
 
 
+# --- the Solana identity of a rated party -----------------------------------------
+B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+SOL_OWNER = "6xNPewUdKRbEZDReQdpyfNUdgNg8QRc8Mt263T5GZSRv"
+SOL_OTHER = "247Y4QLwz9ZbcuHR2nX2EQLZHCsMs1GTqvgd6fpdn85Q"
+SOL_ASSET = "8oo4dC4JvBLwy5tGgiH3WwK4B9PWxL9Z4XjA2jzkQMbQ"
+SOL_FEE_PAYER = "F742C4VfFLQ9zRQyithoj5229ZgtX2WqKCSFKgH2EThq"
+# SOL_OWNER with its last letter upper-cased: base58 is case-sensitive, so it is
+# ANOTHER valid address, and an owner compared without case would take it.
+SOL_OWNER_CASE = SOL_OWNER[:-1] + SOL_OWNER[-1].upper()
+
+
+def independent_b58decode(text: str) -> bytes:
+    """Base58 by digit arithmetic, not the module's big-int: the cross-check."""
+    out = [0]
+    for ch in text:
+        carry = B58.index(ch)
+        for i in range(len(out)):
+            carry += out[i] * 58
+            out[i] = carry & 0xFF
+            carry >>= 8
+        while carry:
+            out.append(carry & 0xFF)
+            carry >>= 8
+    body = bytes(reversed(out)).lstrip(b"\x00")
+    return b"\x00" * (len(text) - len(text.lstrip("1"))) + body
+
+
+SOL_VALID = [SOL_OWNER, SOL_OTHER, SOL_ASSET, SOL_FEE_PAYER, SOL_OWNER_CASE, "1" * 31 + "2",
+             "z" * 43]
+SOL_REJECTED = [
+    ("1" * 32, "zero address"),
+    (" " + SOL_OWNER, "leading space"),
+    (SOL_OWNER + "\n", "trailing newline"),
+    (SOL_OWNER[:-1] + "0", "0 is not base58"),
+    (SOL_OWNER[:-1] + "O", "O is not base58"),
+    (SOL_OWNER[:-1] + "I", "I is not base58"),
+    (SOL_OWNER[:-1] + "l", "l is not base58"),
+    (SOL_OWNER[:31], "31 characters"),
+    (SOL_OWNER + "1", "45 characters"),
+    ("z" * 44, "44 characters, 33 bytes"),
+    ("2" * 32, "32 characters, 24 bytes"),
+    ("0x" + "ab" * 20, "an EVM address"),
+    ("", "empty"),
+]
+
+
+def _mint(status: str, code: Any = None, **extra: Any) -> dict:
+    report = {"status": status, "resumed": False, "atomic": True, "metadataSkipped": False}
+    if code:
+        report["errorCode"] = code
+    report.update(extra)
+    return report
+
+
+def _refused(code: str, top_level: bool = False) -> dict:
+    body = {"success": False, "agentId": None, "transaction": None,
+            "transferTransaction": None, "owner": None, "error": "refused",
+            "network": "solana", "mint": _mint("not_minted", code, atomic=False)}
+    if top_level:
+        body["errorCode"] = code
+    return body
+
+
+_SIG = "5" * 88
+# (name, status, body or None for an answer that is not a JSON object, expected)
+SOL_LOOKUP = [
+    ("owns-one", 200, {"agentId": SOL_ASSET, "owner": SOL_OWNER, "agentUri": "https://a.example/x",
+                       "network": "solana", "balance": "1"},
+     ("registered", "owner_lookup", SOL_ASSET)),
+    ("owns-none", 404, {"error": "does not own any agent", "balance": "0"},
+     ("absent", "owner_not_found", None)),
+    ("404-number-balance", 404, {"error": "none", "balance": 0},
+     ("unknown", "lookup_not_a_verdict", None)),
+    ("404-float-balance", 404, {"error": "none", "balance": 0.0},
+     ("unknown", "lookup_not_a_verdict", None)),
+    ("route-not-found", 404, {"error": "Not Found", "code": "not_found"},
+     ("unknown", "lookup_not_a_verdict", None)),
+    ("404-not-json", 404, None, ("unknown", "lookup_not_a_verdict", None)),
+    ("404-bool-balance", 404, {"balance": False}, ("unknown", "lookup_not_a_verdict", None)),
+    ("404-balance-1", 404, {"balance": "1"}, ("unknown", "lookup_not_a_verdict", None)),
+    ("inconclusive", 503, {"error": "getProgramAccounts failed", "retryable": True},
+     ("unknown", "lookup_inconclusive", None)),
+    ("rate-limited", 429, {"code": "rate_limited"}, ("unknown", "lookup_rate_limited", None)),
+    ("another-owner", 200, {"agentId": SOL_ASSET, "owner": SOL_OTHER, "network": "solana"},
+     ("unknown", "lookup_owner_mismatch", None)),
+    ("owner-differs-only-in-case", 200,
+     {"agentId": SOL_ASSET, "owner": SOL_OWNER_CASE, "network": "solana"},
+     ("unknown", "lookup_owner_mismatch", None)),
+    ("another-network", 200, {"agentId": SOL_ASSET, "owner": SOL_OWNER, "network": "base"},
+     ("unknown", "lookup_network_mismatch", None)),
+    ("bad-agent-id", 200, {"agentId": "x", "owner": SOL_OWNER, "network": "solana"},
+     ("unknown", "lookup_unreadable", None)),
+    ("200-not-json", 200, None, ("unknown", "lookup_unreadable", None)),
+    ("bad-address", 400, {"error": "Invalid Solana address"}, ("unknown", "lookup_http_400", None)),
+    ("server-error", 500, {"error": "No Solana provider"}, ("unknown", "lookup_http_500", None)),
+]
+_COMPLETE = {"success": True, "agentId": SOL_ASSET, "transaction": _SIG,
+             "transferTransaction": _SIG, "owner": SOL_OWNER, "network": "solana",
+             "mint": _mint("complete", statsTransaction=_SIG)}
+# expected = (status, reason, releasesSlot, retryInCall, mintStatus, errorCode, agentId)
+SOL_REGISTER = [
+    ("complete", 200, _COMPLETE,
+     ("created", "minted", False, False, "complete", None, SOL_ASSET)),
+    ("complete-for-another-owner", 200, {**_COMPLETE, "owner": SOL_OTHER},
+     ("uncertain", "owner_mismatch", False, False, "complete", None, SOL_ASSET)),
+    ("complete-owner-differs-only-in-case", 200, {**_COMPLETE, "owner": SOL_OWNER_CASE},
+     ("uncertain", "owner_mismatch", False, False, "complete", None, SOL_ASSET)),
+    ("complete-without-agent-id", 200, {**_COMPLETE, "agentId": None},
+     ("uncertain", "unreadable_answer", False, False, "complete", None, None)),
+    ("success-not-complete", 200, {**_COMPLETE, "mint": _mint("pending_transfer")},
+     ("uncertain", "inconsistent_answer", False, False, "pending_transfer", None, SOL_ASSET)),
+    ("success-without-mint-report", 200, {k: v for k, v in _COMPLETE.items() if k != "mint"},
+     ("created", "minted", False, False, None, None, SOL_ASSET)),
+    ("200-not-success", 200, {**_COMPLETE, "success": False},
+     ("uncertain", "inconsistent_answer", False, False, "complete", None, SOL_ASSET)),
+    ("pending-transfer", 500, {"success": False, "agentId": SOL_ASSET, "owner": SOL_FEE_PAYER,
+                               "network": "solana", "mint": _mint("pending_transfer",
+                                                                  "transfer_failed")},
+     ("pending", "pending_transfer", False, False, "pending_transfer", "transfer_failed",
+      SOL_ASSET)),
+    ("pending-stats", 500, {"success": False, "agentId": SOL_ASSET, "network": "solana",
+                            "mint": _mint("pending_stats", "initialize_stats_failed")},
+     ("pending", "pending_stats", False, False, "pending_stats", "initialize_stats_failed",
+      SOL_ASSET)),
+    ("500-not-minted", 500, _refused("mint_transaction_failed"),
+     ("uncertain", "mint_transaction_failed", False, False, "not_minted",
+      "mint_transaction_failed", None)),
+    ("502-forward-unconfirmed", 502, {"reason": "forward_unconfirmed", "retryable": False},
+     ("uncertain", "forward_unconfirmed", False, False, None, None, None)),
+    ("504", 504, {"error": "gateway timeout"},
+     ("uncertain", "http_504", False, False, None, None, None)),
+    ("201-complete", 201, _COMPLETE,
+     ("uncertain", "http_201", False, False, "complete", None, SOL_ASSET)),
+    ("202", 202, {"jobId": "x", "status": "pending"},
+     ("uncertain", "http_202", False, False, None, None, None)),
+    ("404-on-post", 404, {"error": "Not Found", "code": "not_found"},
+     ("uncertain", "http_404", False, False, None, None, None)),
+    ("400-code-that-is-not-a-code", 400, {"success": False, "errorCode": "bad " + SOL_OWNER},
+     ("refused", "facilitator_error", True, False, None, "facilitator_error", None)),
+    ("503-stats-lookup", 503, _refused("stats_lookup_inconclusive"),
+     ("unavailable", "stats_lookup_inconclusive", True, True, "not_minted",
+      "stats_lookup_inconclusive", None)),
+    ("503-overloaded", 503, {"error": "at its ceiling", "code": "overloaded"},
+     ("unavailable", "overloaded", True, True, None, None, None)),
+    ("429-too-many-concurrent", 429, {"error": "in flight", "code": "too_many_concurrent_requests"},
+     ("unavailable", "too_many_concurrent_requests", True, True, None, None, None)),
+    ("408-body-timeout", 408, {"error": "body did not arrive", "code": "request_timeout"},
+     ("unavailable", "request_timeout", True, True, None, None, None)),
+    ("409-held", 409, _refused("held_identity_not_resumable"),
+     ("refused", "held_identity_not_resumable", True, False, "not_minted",
+      "held_identity_not_resumable", None)),
+    ("400-agent-uri", 400, _refused("agent_uri_tunnel", top_level=True),
+     ("refused", "agent_uri_tunnel", True, False, "not_minted", "agent_uri_tunnel", None)),
+    ("400-parse", 400, {"success": False, "error": "Invalid request format", "network": "ethereum"},
+     ("refused", "http_400", True, False, None, None, None)),
+    ("403-blocked", 403, _refused("recipient_blocked", top_level=True),
+     ("refused", "recipient_blocked", True, False, "not_minted", "recipient_blocked", None)),
+    ("503-fee-payer", 503, _refused("fee_payer_insufficient_balance"),
+     ("unavailable", "fee_payer_insufficient_balance", True, False, "not_minted",
+      "fee_payer_insufficient_balance", None)),
+    ("503-registry", 503, _refused("registry_unavailable"),
+     ("unavailable", "registry_unavailable", True, True, "not_minted", "registry_unavailable",
+      None)),
+    ("503-owner-lookup", 503, _refused("owner_lookup_inconclusive"),
+     ("unavailable", "owner_lookup_inconclusive", True, True, "not_minted",
+      "owner_lookup_inconclusive", None)),
+    ("503-screening", 503, _refused("recipient_screening_unavailable", top_level=True),
+     ("unavailable", "recipient_screening_unavailable", True, True, "not_minted",
+      "recipient_screening_unavailable", None)),
+    ("503-writer-lease", 503, {"error": "no writer lease", "reason": "forward_failed"},
+     ("unavailable", "writer_lease_unavailable", True, True, None, None, None)),
+    ("503-with-mint-in-progress", 503, {"success": False, "mint": _mint("pending_transfer")},
+     ("uncertain", "inconsistent_answer", False, False, "pending_transfer", None, None)),
+    ("503-marked-with-mint-in-progress", 503,
+     {"success": False, "errorCode": "fee_payer_insufficient_balance",
+      "mint": _mint("pending_transfer")},
+     ("uncertain", "inconsistent_answer", False, False, "pending_transfer",
+      "fee_payer_insufficient_balance", None)),
+    ("503-not-json", 503, None, ("uncertain", "unreadable_answer", False, False, None, None, None)),
+    # 408 / 429 / 503 release only with the facilitator's mark: a gateway answers
+    # them too, maybe after it forwarded the request.
+    ("503-unmarked", 503, {"message": "Service Unavailable"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("429-unmarked", 429, {"message": "Too Many Requests"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("408-unmarked", 408, {"message": "Request Timeout"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("503-code-that-is-not-a-code", 503, {"code": "ServiceUnavailable"},
+     ("uncertain", "unmarked_answer", False, False, None, None, None)),
+    ("503-marked-by-not-minted-alone", 503, {"success": False, "mint": {"status": "not_minted"}},
+     ("unavailable", "service_unavailable", True, False, "not_minted", None, None)),
+    ("503-success-true", 503, {**_refused("registry_unavailable"), "success": True},
+     ("uncertain", "inconsistent_answer", False, False, "not_minted", "registry_unavailable",
+      None)),
+    ("409-success-true", 409, {**_refused("held_identity_not_resumable"), "success": True},
+     ("uncertain", "inconsistent_answer", False, False, "not_minted",
+      "held_identity_not_resumable", None)),
+    ("429-rate-limited", 429, {"error": "Too Many Requests", "code": "rate_limited"},
+     ("unavailable", "rate_limited", True, True, None, None, None)),
+    ("429-daily-cap", 429, {"success": False, "code": "erc8004_daily_write_limit",
+                            "network": "solana"},
+     ("quota_exceeded", "facilitator_daily_cap", True, False, None, None, None)),
+]
+# (failure, what it means, expected (status, reason, releasesSlot, retryInCall)).
+# The failure names a MEANING, not an httpx class: the TypeScript twin maps its
+# own fetch errors onto these (a connection never made vs. a request that may
+# have reached the server).
+SOL_TRANSPORT = [
+    ("connection_refused", "the TCP/TLS connection was never established",
+     ("unavailable", "no_connection", True, True)),
+    ("connect_timeout", "timed out establishing the connection",
+     ("unavailable", "no_connection", True, True)),
+    ("pool_timeout", "timed out waiting for a free connection of the client's pool",
+     ("unavailable", "no_connection", True, True)),
+    ("read_timeout", "the request went out and no answer came in time",
+     ("uncertain", "no_answer", False, False)),
+    ("write_timeout", "timed out while sending the request (part of it may be out)",
+     ("uncertain", "no_answer", False, False)),
+    ("disconnected", "the server closed the connection without an answer",
+     ("uncertain", "no_answer", False, False)),
+    ("proxy_error", "a proxy in between failed (the request may have gone through it)",
+     ("uncertain", "no_answer", False, False)),
+]
+# The rules of the budget itself (InMemoryMintBudget), step by step on a fresh one.
+# T0 is 23:00 UTC, so a step at T0 + 3600 or later is the next UTC day; D1 is that
+# day's 00:00 UTC.
+T0 = 1_790_035_200 - 3_600
+D1 = 1_790_035_200
+_P = {"dailyCap": 25, "perAddressCap": 3, "holdSeconds": 1800}
+_A, _B, _C = "solana:" + SOL_OWNER, "solana:" + SOL_OTHER, "solana:" + SOL_ASSET
+
+
+def _r(key: str, now: int, expect: str) -> dict:
+    return {"op": "reserve", "key": key, "now": now, "expect": expect}
+
+
+def _k(key: str, reserved_at: int, now: int) -> dict:
+    return {"op": "keep", "key": key, "reservedAt": reserved_at, "now": now}
+
+
+def _x(key: str, reserved_at: int, now: int) -> dict:
+    return {"op": "release", "key": key, "reservedAt": reserved_at, "now": now}
+
+
+def _u(now: int, network: str, expect: int) -> dict:
+    return {"op": "usedToday", "now": now, "network": network, "expect": expect}
+
+
+SOL_BUDGET = [
+    ("in-flight-then-held-then-free", _P, [
+        _r(_A, T0, "granted"), _r(_A, T0 + 10, "in_flight"), _k(_A, T0, T0 + 20),
+        _r(_A, T0 + 30, "held"), _r(_A, T0 + 1820, "granted")]),
+    ("a-release-frees-at-once", _P, [
+        _r(_A, T0, "granted"), _x(_A, T0, T0 + 1), _r(_A, T0 + 2, "granted"),
+        _u(T0 + 2, "solana", 1)]),
+    ("an-orphan-expires-after-the-hold-counted-as-spent", _P, [
+        _r(_A, T0, "granted"), _r(_A, T0 + 1799, "in_flight"), _r(_A, T0 + 1800, "granted"),
+        _u(T0 + 1800, "solana", 2)]),
+    ("a-late-release-names-its-request", _P, [
+        _r(_A, T0, "granted"), _r(_A, T0 + 1800, "granted"), _x(_A, T0, T0 + 1801),
+        _r(_A, T0 + 1802, "in_flight")]),
+    ("a-late-keep-holds-again", _P, [
+        _r(_A, T0, "granted"), _r(_A, T0 + 1800, "granted"), _x(_A, T0 + 1800, T0 + 1800),
+        _k(_A, T0, T0 + 1801), _r(_A, T0 + 1802, "held")]),
+    ("three-per-address-in-any-24-hours", _P, [
+        _r(_A, T0, "granted"), _k(_A, T0, T0),
+        _r(_A, T0 + 1801, "granted"), _k(_A, T0 + 1801, T0 + 1801),
+        _r(_A, T0 + 3602, "granted"), _k(_A, T0 + 3602, T0 + 3602),
+        _r(_A, T0 + 5403, "address_exhausted"), _r(_A, T0 + 86_400, "granted")]),
+    ("the-daily-cap-is-per-network", {**_P, "dailyCap": 2}, [
+        _r(_A, T0, "granted"), _r(_B, T0, "granted"), _r(_C, T0, "quota_exceeded"),
+        _r("solana-devnet:" + SOL_OWNER, T0, "granted"),
+        _u(T0, "solana", 2), _u(T0, "solana-devnet", 1)]),
+    ("the-daily-cap-starts-over-at-00-utc", {**_P, "dailyCap": 1}, [
+        _r(_A, T0, "granted"), _r(_B, T0 + 1, "quota_exceeded"), _r(_B, T0 + 3600, "granted")]),
+    # The cap's window is the UTC calendar day: not an hour (01:30 and 23:30 of the
+    # same day are refused), not a rolling 24 hours (00:00 of the next day, 23.5 h
+    # after the first two, is granted), not another time zone.
+    ("the-daily-cap-is-the-utc-day", {**_P, "dailyCap": 2}, [
+        _r(_A, D1 + 1_800, "granted"), _r(_B, D1 + 1_800, "granted"),
+        _r(_C, D1 + 5_400, "quota_exceeded"), _r(_C, D1 + 84_600, "quota_exceeded"),
+        _r(_C, D1 + 86_399, "quota_exceeded"), _r(_C, D1 + 86_400, "granted"),
+        _u(D1 + 86_400, "solana", 1)]),
+]
+
+
+async def _replay_budget(module: Any, policy: dict, steps: list) -> None:
+    budget = module.InMemoryMintBudget()
+    for step in steps:
+        if step["op"] == "reserve":
+            got = await budget.reserve(
+                step["key"], now=step["now"], daily_cap=policy["dailyCap"],
+                per_address_cap=policy["perAddressCap"], hold_seconds=policy["holdSeconds"],
+            )
+        elif step["op"] == "keep":
+            got = await budget.keep(step["key"], reserved_at=step["reservedAt"],
+                                    now=step["now"], hold_seconds=policy["holdSeconds"])
+        elif step["op"] == "release":
+            got = await budget.release(step["key"], reserved_at=step["reservedAt"],
+                                       now=step["now"])
+        else:
+            got = budget.used_today(step["now"], step["network"])
+        if "expect" in step and got != step["expect"]:
+            raise Refused(f"budget step {step!r} gave {got!r}")
+
+
+# What a MintBudget.reserve verdict other than "granted" makes of the call.
+SOL_RESERVE = {
+    "quota_exceeded": ("quota_exceeded", "client_daily_cap"),
+    "address_exhausted": ("quota_exceeded", "address_daily_cap"),
+    "in_flight": ("pending", "in_flight"),
+    "held": ("uncertain", "recent_request"),
+}
+
+
+def solana_identity_vectors() -> dict:
+    import httpx
+
+    from uvd_x402_sdk.reputation import solana_identity as si
+
+    for value in SOL_VALID:
+        raw = independent_b58decode(value)
+        if len(raw) != 32 or raw == bytes(32) or si.validate_solana_address(value) != value:
+            raise Refused(f"valid address disagrees: {value!r}")
+    if independent_b58decode(SOL_OWNER_CASE) == independent_b58decode(SOL_OWNER):
+        raise Refused("the case-flipped owner is the same key")
+    rejected = []
+    for value, reason in SOL_REJECTED:
+        try:
+            si.validate_solana_address(value)
+        except ValueError:
+            rejected.append({"value": value, "reason": reason})
+        else:
+            raise Refused(f"validate_solana_address accepted {value!r}")
+    lookup = []
+    for name, status, body, (state, reason, agent_id) in SOL_LOOKUP:
+        got = si.lookup_verdict(status, body, SOL_OWNER, "solana")
+        if (got.state, got.reason, got.agent_id) != (state, reason, agent_id):
+            raise Refused(f"lookup {name}: {got!r}")
+        lookup.append({"name": name, "statusCode": status, "body": body,
+                       "expected": {"state": state, "reason": reason, "agentId": agent_id}})
+    register = []
+    for name, status, body, expected in SOL_REGISTER:
+        got = si.register_verdict(status, body, SOL_OWNER)
+        values = (got.status, got.reason, got.releases, got.retry, got.mint_status,
+                  got.error_code, got.agent_id)
+        if values != expected:
+            raise Refused(f"register {name}: {values!r}")
+        keys = ("status", "reason", "releasesSlot", "retryInCall", "mintStatus", "errorCode",
+                "agentId")
+        register.append({"name": name, "statusCode": status, "body": body,
+                         "expected": dict(zip(keys, expected))})
+    failures = {
+        "connection_refused": httpx.ConnectError("x"),
+        "connect_timeout": httpx.ConnectTimeout("x"),
+        "pool_timeout": httpx.PoolTimeout("x"),
+        "read_timeout": httpx.ReadTimeout("x"),
+        "write_timeout": httpx.WriteTimeout("x"),
+        "disconnected": httpx.RemoteProtocolError("x"),
+        "proxy_error": httpx.ProxyError("x"),
+    }
+    transport = []
+    for failure, meaning, expected in SOL_TRANSPORT:
+        got = si._transport_verdict(failures[failure])
+        if (got.status, got.reason, got.releases, got.retry) != expected:
+            raise Refused(f"transport {failure}: {got!r}")
+        keys = ("status", "reason", "releasesSlot", "retryInCall")
+        transport.append(
+            {"failure": failure, "meaning": meaning, "expected": dict(zip(keys, expected))}
+        )
+    if si._RESERVE_REFUSALS != SOL_RESERVE:
+        raise Refused(f"reserve mapping moved: {si._RESERVE_REFUSALS!r}")
+    reserve = [
+        {"verdict": verdict, "expected": {"status": status, "reason": reason}}
+        for verdict, (status, reason) in SOL_RESERVE.items()
+    ]
+    import asyncio
+
+    budget = []
+    for name, policy, steps in SOL_BUDGET:
+        asyncio.run(_replay_budget(si, policy, steps))
+        budget.append({"name": name, "policy": policy, "steps": steps})
+    policy = {
+        "dailyMintCap": si.SOLANA_IDENTITY_DAILY_MINT_CAP,
+        "maxMintAttemptsPerAddressPerDay": si.MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY,
+        "mintHoldSeconds": si.MINT_HOLD_SECONDS,
+        "networks": sorted(si.SOLANA_IDENTITY_NETWORKS),
+    }
+    if policy != {"dailyMintCap": 25, "maxMintAttemptsPerAddressPerDay": 3,
+                  "mintHoldSeconds": 1800, "networks": ["solana", "solana-devnet"]}:
+        raise Refused(f"policy moved: {policy!r}")
+    return {
+        "description": "ensure_solana_identity: the verdicts the TypeScript twin must reproduce. "
+        "'addresses': validate_solana_address (32-44 base58 characters taken as given, 32 "
+        "bytes, not zero). 'lookup': GET /identity/<network>/owner/<recipient> for recipient "
+        "= 'recipient' on 'solana'; only 'absent' lets a mint out; body null = an answer that "
+        "is not a JSON object; only the STRING balance '0' is a verdict. 'register': POST "
+        "/register for that recipient, answers as x402-rs 2.51.2 can give them; releasesSlot "
+        "= the answer proves nothing reached the chain (the slot is given back), retryInCall "
+        "= it may be sent again in the same call; a facilitator code that is not lower_snake "
+        "becomes 'facilitator_error'; a 408 / 429 / 503 releases only with the facilitator's "
+        "mark (a lower_snake errorCode, mint.errorCode, code or reason, or mint.status "
+        "'not_minted'); owners compare exactly (base58 is case-sensitive). 'transport': no "
+        "HTTP answer, by meaning. 'reserve': what "
+        "a MintBudget refusal makes of the call. 'budget': the rules of InMemoryMintBudget, "
+        "step by step on a fresh one (reserve answers 'expect'; keep / release name their "
+        "request by reservedAt; usedToday counts one network). 'policy': dailyMintCap is the "
+        "owner's decision of 2026-10-27 (per UTC day and network); maxMintAttemptsPerAddressPerDay "
+        "(in any 24 hours) and mintHoldSeconds are Execution Market's claim-table values.",
+        "recipient": SOL_OWNER,
+        "policy": policy,
+        "addresses": {"valid": SOL_VALID, "rejected": rejected},
+        "lookup": lookup,
+        "register": register,
+        "transport": transport,
+        "reserve": reserve,
+        "budget": budget,
+    }
+
+
 def render() -> dict:
     relay = relay_vectors()
     payment = payment_vectors()
@@ -868,6 +1289,7 @@ def render() -> dict:
         "prepare-rejections.json": rejection_vectors(relay["cases"][0]),
         "payment-proof.json": payment,
         "evidence-document.json": evidence_vectors(payment["proof"]),
+        "solana-identity.json": solana_identity_vectors(),
     }
 
 

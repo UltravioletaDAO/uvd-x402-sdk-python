@@ -17,12 +17,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 pytest.importorskip("eth_account")
 
 from uvd_x402_sdk.erc8004 import ProofOfPayment  # noqa: E402
 from uvd_x402_sdk.reputation import (  # noqa: E402
+    MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY,
+    MINT_HOLD_SECONDS,
+    SOLANA_IDENTITY_DAILY_MINT_CAP,
+    SOLANA_IDENTITY_NETWORKS,
     AccountSigner,
     EvidenceRejected,
     PreparationRejected,
@@ -35,7 +40,9 @@ from uvd_x402_sdk.reputation import (  # noqa: E402
     recompute_payment_hash,
     relayed_feedback_digest,
     sign_relayed_feedback,
+    solana_identity,
     validate_preparation,
+    validate_solana_address,
 )
 from uvd_x402_sdk.reputation.payment import _transfer_calldata  # noqa: E402
 from uvd_x402_sdk.reputation.preparation import domain_separator  # noqa: E402
@@ -49,6 +56,7 @@ VECTOR_SHA256 = {
     "payment-proof.json": "5844804ffc4798a4760fa578098a70a759a9203b9fbe64098a44acdc55a7d71e",
     "prepare-rejections.json": "e957162d1a5b03e420ce04b45527d0afd3954b8c72c8a7876fc78c5ab21d26f0",
     "relayed-feedback.json": "68480ed21a2e340a76b55aaedc9fcf8b9acea11fc483e8c43ea55e98e4fd14ae",
+    "solana-identity.json": "01258493c3d15fef89f5af8db65911870d7b62e76ee34ab3fc80ef13e5f72a03",
 }
 
 
@@ -259,3 +267,107 @@ class TestEvidence:
         with pytest.raises(EvidenceRejected) as caught:
             _evidence(case["inputs"])
         assert caught.value.code == case["code"]
+
+
+SOLANA = load("solana-identity.json")
+
+
+class TestSolanaIdentity:
+    """The verdicts of ensure_solana_identity, read from the file the TS twin reads."""
+
+    @pytest.mark.parametrize("value", SOLANA["addresses"]["valid"])
+    def test_a_valid_address(self, value):
+        assert validate_solana_address(value) == value
+
+    @pytest.mark.parametrize(
+        "case", SOLANA["addresses"]["rejected"], ids=lambda c: c["reason"]
+    )
+    def test_a_rejected_address(self, case):
+        with pytest.raises(ValueError):
+            validate_solana_address(case["value"])
+
+    @pytest.mark.parametrize("case", SOLANA["lookup"], ids=lambda c: c["name"])
+    def test_the_lookup_verdict(self, case):
+        got = solana_identity.lookup_verdict(
+            case["statusCode"], case["body"], SOLANA["recipient"], "solana"
+        )
+        expected = case["expected"]
+        assert (got.state, got.reason, got.agent_id) == (
+            expected["state"], expected["reason"], expected["agentId"]
+        )
+
+    @pytest.mark.parametrize("case", SOLANA["register"], ids=lambda c: c["name"])
+    def test_the_register_verdict(self, case):
+        got = solana_identity.register_verdict(
+            case["statusCode"], case["body"], SOLANA["recipient"]
+        )
+        expected = case["expected"]
+        assert {
+            "status": got.status,
+            "reason": got.reason,
+            "releasesSlot": got.releases,
+            "retryInCall": got.retry,
+            "mintStatus": got.mint_status,
+            "errorCode": got.error_code,
+            "agentId": got.agent_id,
+        } == expected
+
+    # The Python reading of each transport meaning (the TS twin maps its own).
+    TRANSPORT = {
+        "connection_refused": httpx.ConnectError("x"),
+        "connect_timeout": httpx.ConnectTimeout("x"),
+        "pool_timeout": httpx.PoolTimeout("x"),
+        "read_timeout": httpx.ReadTimeout("x"),
+        "write_timeout": httpx.WriteTimeout("x"),
+        "disconnected": httpx.RemoteProtocolError("x"),
+        "proxy_error": httpx.ProxyError("x"),
+    }
+
+    @pytest.mark.parametrize("case", SOLANA["transport"], ids=lambda c: c["failure"])
+    def test_the_transport_verdict(self, case):
+        got = solana_identity._transport_verdict(self.TRANSPORT[case["failure"]])
+        assert {
+            "status": got.status,
+            "reason": got.reason,
+            "releasesSlot": got.releases,
+            "retryInCall": got.retry,
+        } == case["expected"]
+
+    @pytest.mark.parametrize("case", SOLANA["budget"], ids=lambda c: c["name"])
+    async def test_the_budget_rules(self, case):
+        budget, policy = solana_identity.InMemoryMintBudget(), case["policy"]
+        for step in case["steps"]:
+            if step["op"] == "reserve":
+                got = await budget.reserve(
+                    step["key"],
+                    now=step["now"],
+                    daily_cap=policy["dailyCap"],
+                    per_address_cap=policy["perAddressCap"],
+                    hold_seconds=policy["holdSeconds"],
+                )
+                assert got == step["expect"], step
+            elif step["op"] == "keep":
+                await budget.keep(
+                    step["key"],
+                    reserved_at=step["reservedAt"],
+                    now=step["now"],
+                    hold_seconds=policy["holdSeconds"],
+                )
+            elif step["op"] == "release":
+                await budget.release(step["key"], reserved_at=step["reservedAt"], now=step["now"])
+            else:
+                assert budget.used_today(step["now"], step["network"]) == step["expect"], step
+
+    def test_the_reserve_mapping(self):
+        assert {
+            case["verdict"]: (case["expected"]["status"], case["expected"]["reason"])
+            for case in SOLANA["reserve"]
+        } == solana_identity._RESERVE_REFUSALS
+
+    def test_the_policy(self):
+        assert SOLANA["policy"] == {
+            "dailyMintCap": SOLANA_IDENTITY_DAILY_MINT_CAP,
+            "maxMintAttemptsPerAddressPerDay": MAX_MINT_ATTEMPTS_PER_ADDRESS_PER_DAY,
+            "mintHoldSeconds": MINT_HOLD_SECONDS,
+            "networks": sorted(SOLANA_IDENTITY_NETWORKS),
+        }
