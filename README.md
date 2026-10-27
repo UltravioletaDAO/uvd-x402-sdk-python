@@ -2006,6 +2006,23 @@ there, and `prepare` answers 400.
 
 Requires facilitator v1.93.0+ for the mainnets (2.38.0+ for arc); base-sepolia since v1.74.0.
 
+### The whole rail in one module: `uvd_x402_sdk.reputation` (0.101.0)
+
+The example above signs `prep.digest` as the facilitator sent it. A program
+that rates people on its own should not: a compromised or misrouted facilitator
+can hand back a digest that is an EIP-7702 delegation of the rater's account to
+someone else, or a typed-data Permit. `pip install "uvd-x402-sdk[reputation]"`
+brings the implementation Karma Hello runs in production, extracted so every
+product uses one: `validate_preparation` (rebuilds the typed data and the
+digest, delegate allowlist per chain), `sign_relayed_feedback` /
+`build_relay_authorization` (low-s, recovered against the rater before they
+leave), `pay_and_prove` (the anchor payment and its chain-built proof), a
+persisted outbox that never prepares the same rating twice, a `Governor` with
+caps and a circuit breaker, and public evidence without the chat text or its
+author. See
+[`src/uvd_x402_sdk/reputation/README.md`](src/uvd_x402_sdk/reputation/README.md)
+for a program wired in fifteen lines.
+
 ### The same thing on Solana, and it needs no delegate
 
 Solana has the identical defect and a shorter fix. Account 0 of the program's

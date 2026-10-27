@@ -1,0 +1,802 @@
+{
+  "description": "Relayed ERC-8004 rating: facilitator prepare -> digest, signature, EIP-7702 authorization. Signer key = '0x' + signerSeedByte * 32 (test key, no funds). typedDataToSign is what the module hands a wallet (types without EIP712Domain).",
+  "cases": [
+    {
+      "name": "base-first-rating",
+      "network": "base",
+      "now": 1790000000,
+      "signerSeedByte": "11",
+      "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "params": {
+        "agentId": 18896,
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "feedbackURI": "https://credits.example/evidence/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a.json",
+        "feedbackHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+      },
+      "prepare": {
+        "success": true,
+        "delegate": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163",
+        "digest": "0xa67407ab3d64e4098dcaa8ff66a9ad545115cdd2c1e528ec44b5efc8a02e8f28",
+        "typedData": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "types": {
+            "EIP712Domain": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "version",
+                "type": "string"
+              },
+              {
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "name": "verifyingContract",
+                "type": "address"
+              }
+            ],
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "18896",
+            "value": "90",
+            "valueDecimals": 0,
+            "tag1": "credits_roll:idea",
+            "tag2": "credits-roll|moment",
+            "endpoint": "https://www.twitch.tv/somechannel",
+            "feedbackURI": "https://credits.example/evidence/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a.json",
+            "feedbackHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+            "deadline": "1790000900",
+            "nonce": "0x0000000000000000000000000000000000000000000000000000000000000001"
+          }
+        },
+        "deadline": 1790000900,
+        "nonce": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "delegated": false,
+        "accountNonce": 0,
+        "chainId": 8453,
+        "network": "base"
+      },
+      "expected": {
+        "digest": "0xa67407ab3d64e4098dcaa8ff66a9ad545115cdd2c1e528ec44b5efc8a02e8f28",
+        "typedDataToSign": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "types": {
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "18896",
+            "value": "90",
+            "valueDecimals": 0,
+            "tag1": "credits_roll:idea",
+            "tag2": "credits-roll|moment",
+            "endpoint": "https://www.twitch.tv/somechannel",
+            "feedbackURI": "https://credits.example/evidence/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a.json",
+            "feedbackHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+            "deadline": "1790000900",
+            "nonce": "0x0000000000000000000000000000000000000000000000000000000000000001"
+          }
+        },
+        "signature": "0x22c2dd56b755ba352bf91b1ee260754a5161c2424c603d310fa5bcb03d0cf60e52d6b5ea8d2926ceee2f00c5a505b5e3bf6768ec5d2df8806541d241a36e4e2b1c",
+        "authorizationDigest": "0x0d543952ebe0958e18933b3036f879f6ee24b192712ba42409a30e1477a7e143",
+        "authorization": {
+          "chainId": 8453,
+          "address": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163",
+          "nonce": 0,
+          "yParity": 0,
+          "r": "0x409bdca7aa2aed84683d10c6d47035863ebe83b6d51bde4adc8155d5517db4f1",
+          "s": "0x0e0e999e979773272a3517c027bf530872597b47b7c475f33c0c02d2ab8ac5ee"
+        }
+      }
+    },
+    {
+      "name": "base-delegated",
+      "network": "base",
+      "now": 1790000000,
+      "signerSeedByte": "11",
+      "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "params": {
+        "agentId": 18896,
+        "value": 85,
+        "tag1": "credits_roll:assist",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "feedbackURI": "https://credits.example/evidence/second.json",
+        "feedbackHash": "0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b"
+      },
+      "prepare": {
+        "success": true,
+        "delegate": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163",
+        "digest": "0xc45c8809aa309c703a1d437249d2e1c30dcf7464ade976f41d86c68ad4d9088b",
+        "typedData": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "types": {
+            "EIP712Domain": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "version",
+                "type": "string"
+              },
+              {
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "name": "verifyingContract",
+                "type": "address"
+              }
+            ],
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "18896",
+            "value": "85",
+            "valueDecimals": 0,
+            "tag1": "credits_roll:assist",
+            "tag2": "credits-roll|moment",
+            "endpoint": "https://www.twitch.tv/somechannel",
+            "feedbackURI": "https://credits.example/evidence/second.json",
+            "feedbackHash": "0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b",
+            "deadline": "1790000900",
+            "nonce": "0x0000000000000000000000000000000000000000000000000000000000000002"
+          }
+        },
+        "deadline": 1790000900,
+        "nonce": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "delegated": true,
+        "accountNonce": null,
+        "chainId": 8453,
+        "network": "base"
+      },
+      "expected": {
+        "digest": "0xc45c8809aa309c703a1d437249d2e1c30dcf7464ade976f41d86c68ad4d9088b",
+        "typedDataToSign": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "types": {
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "18896",
+            "value": "85",
+            "valueDecimals": 0,
+            "tag1": "credits_roll:assist",
+            "tag2": "credits-roll|moment",
+            "endpoint": "https://www.twitch.tv/somechannel",
+            "feedbackURI": "https://credits.example/evidence/second.json",
+            "feedbackHash": "0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b",
+            "deadline": "1790000900",
+            "nonce": "0x0000000000000000000000000000000000000000000000000000000000000002"
+          }
+        },
+        "signature": "0x6ccfddceeb4bb842b848287e5c043528fb1f0176223d60cfcf73f9f3924e9e93548631c050392093180aa83b2e2926e16b2b2ad42a4556f1d76b820e6f9cf5ec1c",
+        "authorizationDigest": null,
+        "authorization": null
+      }
+    },
+    {
+      "name": "base-unicode-tags",
+      "network": "base",
+      "now": 1790000000,
+      "signerSeedByte": "11",
+      "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "params": {
+        "agentId": 7,
+        "value": 80,
+        "tag1": "requester_rating:diseño",
+        "tag2": "karma-hello|comentario 🎬",
+        "endpoint": "https://kick.com/cañal",
+        "feedbackURI": "ipfs://bafy-example",
+        "feedbackHash": "0x7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c"
+      },
+      "prepare": {
+        "success": true,
+        "delegate": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163",
+        "digest": "0x9e05b8c785075b7448c8b9d355e9036f37ccfe647b94ed354327106769f6393b",
+        "typedData": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "types": {
+            "EIP712Domain": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "version",
+                "type": "string"
+              },
+              {
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "name": "verifyingContract",
+                "type": "address"
+              }
+            ],
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "7",
+            "value": "80",
+            "valueDecimals": 0,
+            "tag1": "requester_rating:diseño",
+            "tag2": "karma-hello|comentario 🎬",
+            "endpoint": "https://kick.com/cañal",
+            "feedbackURI": "ipfs://bafy-example",
+            "feedbackHash": "0x7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c",
+            "deadline": "1790000900",
+            "nonce": "0xabababababababababababababababababababababababababababababababab"
+          }
+        },
+        "deadline": 1790000900,
+        "nonce": "0xabababababababababababababababababababababababababababababababab",
+        "delegated": true,
+        "accountNonce": null,
+        "chainId": 8453,
+        "network": "base"
+      },
+      "expected": {
+        "digest": "0x9e05b8c785075b7448c8b9d355e9036f37ccfe647b94ed354327106769f6393b",
+        "typedDataToSign": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 8453,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "types": {
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "7",
+            "value": "80",
+            "valueDecimals": 0,
+            "tag1": "requester_rating:diseño",
+            "tag2": "karma-hello|comentario 🎬",
+            "endpoint": "https://kick.com/cañal",
+            "feedbackURI": "ipfs://bafy-example",
+            "feedbackHash": "0x7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c",
+            "deadline": "1790000900",
+            "nonce": "0xabababababababababababababababababababababababababababababababab"
+          }
+        },
+        "signature": "0x2627e30ed5d7775028fceca25196f59e2685e8895db8b5d304c579062f3f7b7f19872b2e73d5da02cfca41082fdcbf48f150e699585fcfac613d61700478c24e1c",
+        "authorizationDigest": null,
+        "authorization": null
+      }
+    },
+    {
+      "name": "arc-first-rating",
+      "network": "arc",
+      "now": 1790000000,
+      "signerSeedByte": "11",
+      "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+      "params": {
+        "agentId": 1,
+        "value": 95,
+        "tag1": "quality",
+        "tag2": "api",
+        "endpoint": "https://agent.example",
+        "feedbackURI": "https://example.com/f.json",
+        "feedbackHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "prepare": {
+        "success": true,
+        "delegate": "0x955Cc9fB9aB95FC0821ae74197D273dde5dA84f1",
+        "digest": "0x0e6fb5a1a0e01b4f7ae485da76b2fc298241770231ebf94ebb721a4434c37185",
+        "typedData": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 5042,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "types": {
+            "EIP712Domain": [
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "version",
+                "type": "string"
+              },
+              {
+                "name": "chainId",
+                "type": "uint256"
+              },
+              {
+                "name": "verifyingContract",
+                "type": "address"
+              }
+            ],
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "1",
+            "value": "95",
+            "valueDecimals": 0,
+            "tag1": "quality",
+            "tag2": "api",
+            "endpoint": "https://agent.example",
+            "feedbackURI": "https://example.com/f.json",
+            "feedbackHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "deadline": "1790000900",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242"
+          }
+        },
+        "deadline": 1790000900,
+        "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+        "delegated": false,
+        "accountNonce": 7,
+        "chainId": 5042,
+        "network": "arc"
+      },
+      "expected": {
+        "digest": "0x0e6fb5a1a0e01b4f7ae485da76b2fc298241770231ebf94ebb721a4434c37185",
+        "typedDataToSign": {
+          "domain": {
+            "name": "FeedbackDelegate",
+            "version": "1",
+            "chainId": 5042,
+            "verifyingContract": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A"
+          },
+          "types": {
+            "RelayedGiveFeedback": [
+              {
+                "name": "registry",
+                "type": "address"
+              },
+              {
+                "name": "agentId",
+                "type": "uint256"
+              },
+              {
+                "name": "value",
+                "type": "int128"
+              },
+              {
+                "name": "valueDecimals",
+                "type": "uint8"
+              },
+              {
+                "name": "tag1",
+                "type": "string"
+              },
+              {
+                "name": "tag2",
+                "type": "string"
+              },
+              {
+                "name": "endpoint",
+                "type": "string"
+              },
+              {
+                "name": "feedbackURI",
+                "type": "string"
+              },
+              {
+                "name": "feedbackHash",
+                "type": "bytes32"
+              },
+              {
+                "name": "deadline",
+                "type": "uint256"
+              },
+              {
+                "name": "nonce",
+                "type": "bytes32"
+              }
+            ]
+          },
+          "primaryType": "RelayedGiveFeedback",
+          "message": {
+            "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+            "agentId": "1",
+            "value": "95",
+            "valueDecimals": 0,
+            "tag1": "quality",
+            "tag2": "api",
+            "endpoint": "https://agent.example",
+            "feedbackURI": "https://example.com/f.json",
+            "feedbackHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "deadline": "1790000900",
+            "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242"
+          }
+        },
+        "signature": "0x5bd63feaff6e7d8d59d9f72a2e29c92d77e10056466b2436ec9afee5849f6f5b67a8fb591ed995d4a5734ab68fcb6f438480be0eaf6f8895c41ef0e6225b72b21b",
+        "authorizationDigest": "0xefacc70c09452ea1f4615d68bcb43b060db6bfb3139bf66c00a34c838e845e0c",
+        "authorization": {
+          "chainId": 5042,
+          "address": "0x955Cc9fB9aB95FC0821ae74197D273dde5dA84f1",
+          "nonce": 7,
+          "yParity": 1,
+          "r": "0x3cdf5c42c452aefdf57f187baa77e66af95874bf88750c3ab48a41092f826e6c",
+          "s": "0x22e94fb636036db0ed3b48e4b666d866c71387d78f7f6b70330af549b4c06896"
+        }
+      }
+    }
+  ],
+  "deployedContract": {
+    "source": "x402-rs relay_v4.rs::the_vector_matches_the_deployed_v4_contract (eth_call on Base, 2026-08-25): the view called on the delegate itself, so the account is the delegate",
+    "chainId": 8453,
+    "account": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163",
+    "registry": "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+    "params": {
+      "agentId": 2106,
+      "value": 95,
+      "tag1": "quality",
+      "tag2": "api",
+      "endpoint": "https://agent.example",
+      "feedbackURI": "https://execution.market/feedback/abc",
+      "feedbackHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "deadline": 1787662172,
+    "nonce": "0x4242424242424242424242424242424242424242424242424242424242424242",
+    "domainSeparator": "0xae792427891b13b5663e321e5c8802c304437aad75338e22a4b8e1a47243d09d",
+    "digest": "0xa7a2a62dd18c44c79f7c252d628f32b3c46234b20d237866154dbe118ebaf6e1"
+  }
+}

@@ -1,0 +1,407 @@
+{
+  "description": "evidence_document: body = canonical JSON (sorted keys, no whitespace, UTF-8, ensure_ascii off, no floats) of the document; contentHash = keccak(body) = the feedbackHash. 'private' values enter only as commitments HMAC-SHA256(salt, label|value); none of them, nor the keys of PRIVATE_KEYS, may appear in the public part.",
+  "cases": [
+    {
+      "name": "credits-roll-moment",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "momentType": "idea"
+        }
+      },
+      "body": "{\"agentId\":\"18896\",\"agentRegistry\":\"eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432\",\"chainId\":8453,\"clientAddress\":\"0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A\",\"commitmentScheme\":\"hmac-sha256(salt, label|value); salt per viewer, kept off-chain\",\"commitments\":{\"login\":\"0x6880a2814e1b63881f578c194c10988b2f81308ea888dfaca8645271bcfaecf7\",\"message\":\"0xbe7e1f3682dcd4f34f45330c998d5378e9aae1c36bab87a00b8f96a7c195107b\",\"moment_ref\":\"0xa22eb60c8eb0f63fdf116191ce8d3b68f9e8749d84396e24ee1d4351164d9d0f\",\"user_id\":\"0x0e3a056d9f89d0888d8c27e819c7be5de27911da4957f2886bd763790478d634\"},\"context\":{\"momentType\":\"idea\"},\"createdAt\":\"2026-09-21T14:13:20Z\",\"endpoint\":\"https://www.twitch.tv/somechannel\",\"issuer\":{\"name\":\"Credits Roll\",\"product\":\"credits-roll\"},\"network\":\"base\",\"proofOfPayment\":{\"amount\":\"1000\",\"blockNumber\":53125001,\"network\":\"base\",\"payee\":\"0x2222222222222222222222222222222222222222\",\"payer\":\"0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A\",\"paymentHash\":\"0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52\",\"timestamp\":1790000002,\"token\":\"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\",\"transactionHash\":\"0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3\"},\"schema\":\"uvd.reputation.evidence/v1\",\"subject\":{\"wallet\":\"0x2222222222222222222222222222222222222222\",\"walletBinding\":\"self_declared_unverified\"},\"tag1\":\"credits_roll:idea\",\"tag2\":\"credits-roll|moment\",\"value\":90,\"valueDecimals\":0}",
+      "contentHash": "0x90f075d3101629ea4c03ac9e8df12929a77f0a156251a854f032d097791303f6"
+    },
+    {
+      "name": "unicode-no-proof",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:riff ñ",
+        "tag2": "credits-roll|🎬",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1"
+        },
+        "walletBinding": "eip191_verified",
+        "proof": null,
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": null
+      },
+      "body": "{\"agentId\":\"18896\",\"agentRegistry\":\"eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432\",\"chainId\":8453,\"clientAddress\":\"0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A\",\"commitmentScheme\":\"hmac-sha256(salt, label|value); salt per viewer, kept off-chain\",\"commitments\":{\"moment_ref\":\"0xa22eb60c8eb0f63fdf116191ce8d3b68f9e8749d84396e24ee1d4351164d9d0f\"},\"createdAt\":\"2026-09-21T14:13:20Z\",\"endpoint\":\"https://www.twitch.tv/somechannel\",\"issuer\":{\"name\":\"Credits Roll\",\"product\":\"credits-roll\"},\"network\":\"base\",\"schema\":\"uvd.reputation.evidence/v1\",\"subject\":{\"wallet\":\"0x2222222222222222222222222222222222222222\",\"walletBinding\":\"eip191_verified\"},\"tag1\":\"credits_roll:riff ñ\",\"tag2\":\"credits-roll|🎬\",\"value\":90,\"valueDecimals\":0}",
+      "contentHash": "0x1146d682b9a77fb5b9a3484413044666e44945db4f9290cd53de45f6c9469040"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "context-carries-the-message",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "message": "hola"
+        }
+      },
+      "code": "private_field"
+    },
+    {
+      "name": "context-author-any-case",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "Author-Name": "x",
+          "Author": "y"
+        }
+      },
+      "code": "private_field"
+    },
+    {
+      "name": "nested-login",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "viewer": {
+            "login": "x"
+          }
+        }
+      },
+      "code": "private_field"
+    },
+    {
+      "name": "tag2-carries-the-text",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|una idea brillante para el stream",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "momentType": "idea"
+        }
+      },
+      "code": "private_value_leaked"
+    },
+    {
+      "name": "context-float",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "score": 0.5
+        }
+      },
+      "code": "float_in_evidence"
+    },
+    {
+      "name": "binding-unknown",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "verified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "momentType": "idea"
+        }
+      },
+      "code": "wallet_binding"
+    },
+    {
+      "name": "network-without-relay",
+      "inputs": {
+        "network": "avalanche",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 90,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "momentType": "idea"
+        }
+      },
+      "code": "unknown_network"
+    },
+    {
+      "name": "value-100-plus",
+      "inputs": {
+        "network": "base",
+        "agentId": 18896,
+        "rater": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "subject": "0x2222222222222222222222222222222222222222",
+        "value": 101,
+        "tag1": "credits_roll:idea",
+        "tag2": "credits-roll|moment",
+        "endpoint": "https://www.twitch.tv/somechannel",
+        "createdAt": 1790000000,
+        "saltHex": "abababababababababababababababababababababababababababababababab",
+        "private": {
+          "moment_ref": "184119bb3e1e0aa94f5b30680b594bedbd3d2ed491bb396c98a3a135672377a1",
+          "user_id": "40912334",
+          "login": "some_viewer",
+          "message": "una idea brillante para el stream"
+        },
+        "walletBinding": "self_declared_unverified",
+        "proof": {
+          "transactionHash": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+          "blockNumber": 53125001,
+          "network": "base",
+          "payer": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+          "payee": "0x2222222222222222222222222222222222222222",
+          "amount": "1000",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "timestamp": 1790000002,
+          "paymentHash": "0x7a1ec6f5b95d49495829609dde939ed46facfb160cf45120dbb778633507af52"
+        },
+        "issuer": {
+          "name": "Credits Roll",
+          "product": "credits-roll"
+        },
+        "context": {
+          "momentType": "idea"
+        }
+      },
+      "code": "value"
+    }
+  ]
+}

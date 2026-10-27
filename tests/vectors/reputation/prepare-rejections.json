@@ -1,0 +1,672 @@
+{
+  "description": "validate_preparation over the base-first-rating prepare of relayed-feedback.json: apply each case's ops (set/delete at a JSON path) and expect the code of the FIRST failing check (the order of validate_preparation is part of the contract). 'network' / 'rater' override what the caller asked for. 'accepted' must pass.",
+  "base": "base-first-rating",
+  "now": 1790000000,
+  "rejected": [
+    {
+      "name": "prepare-failed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "success"
+          ],
+          "value": false
+        }
+      ],
+      "code": "prepare_failed"
+    },
+    {
+      "name": "chain-id-zero",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "chainId"
+          ],
+          "value": 0
+        }
+      ],
+      "code": "no_chain"
+    },
+    {
+      "name": "chain-id-other",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "chainId"
+          ],
+          "value": 1
+        }
+      ],
+      "code": "chain_mismatch"
+    },
+    {
+      "name": "asked-another-network",
+      "ops": [],
+      "code": "chain_mismatch",
+      "network": "ethereum"
+    },
+    {
+      "name": "asked-unknown-network",
+      "ops": [],
+      "code": "unknown_network",
+      "network": "avalanche"
+    },
+    {
+      "name": "delegate-not-allowlisted",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "delegate"
+          ],
+          "value": "0xdededededededededededededededededededede"
+        }
+      ],
+      "code": "delegate_mismatch"
+    },
+    {
+      "name": "delegate-of-another-chain",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "delegate"
+          ],
+          "value": "0x9577F05D10D2052C75D115e3a0A8f9Dc0cBb7A7b"
+        }
+      ],
+      "code": "delegate_mismatch"
+    },
+    {
+      "name": "typed-data-missing",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData"
+          ],
+          "value": null
+        }
+      ],
+      "code": "typed_data_missing"
+    },
+    {
+      "name": "typed-data-extra-key",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "extra"
+          ],
+          "value": 1
+        }
+      ],
+      "code": "typed_data_shape"
+    },
+    {
+      "name": "primary-type-revoke",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "primaryType"
+          ],
+          "value": "RelayedRevokeFeedback"
+        }
+      ],
+      "code": "primary_type"
+    },
+    {
+      "name": "types-without-domain",
+      "ops": [
+        {
+          "op": "delete",
+          "path": [
+            "typedData",
+            "types",
+            "EIP712Domain"
+          ]
+        }
+      ],
+      "code": "types_mismatch"
+    },
+    {
+      "name": "types-value-int256",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "types",
+            "RelayedGiveFeedback",
+            2,
+            "type"
+          ],
+          "value": "int256"
+        }
+      ],
+      "code": "types_mismatch"
+    },
+    {
+      "name": "types-extra-struct",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "types",
+            "Permit"
+          ],
+          "value": []
+        }
+      ],
+      "code": "types_mismatch"
+    },
+    {
+      "name": "domain-name-permit",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "name"
+          ],
+          "value": "USD Coin"
+        }
+      ],
+      "code": "domain_mismatch"
+    },
+    {
+      "name": "domain-version",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "version"
+          ],
+          "value": "2"
+        }
+      ],
+      "code": "domain_mismatch"
+    },
+    {
+      "name": "domain-extra-key",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "salt"
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "code": "domain_mismatch"
+    },
+    {
+      "name": "domain-chain-id",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "chainId"
+          ],
+          "value": 1
+        }
+      ],
+      "code": "domain_chain_id"
+    },
+    {
+      "name": "verifying-contract-is-delegate",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "verifyingContract"
+          ],
+          "value": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163"
+        }
+      ],
+      "code": "domain_verifying_contract"
+    },
+    {
+      "name": "message-extra-field",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "extra"
+          ],
+          "value": "x"
+        }
+      ],
+      "code": "message_shape"
+    },
+    {
+      "name": "registry-is-usdc",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "registry"
+          ],
+          "value": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        }
+      ],
+      "code": "registry"
+    },
+    {
+      "name": "value-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "value"
+          ],
+          "value": "99"
+        }
+      ],
+      "code": "value"
+    },
+    {
+      "name": "value-decimals-2",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "valueDecimals"
+          ],
+          "value": 2
+        }
+      ],
+      "code": "value"
+    },
+    {
+      "name": "agent-id-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "agentId"
+          ],
+          "value": "18897"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "tag1-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "tag1"
+          ],
+          "value": "attacker"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "tag2-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "tag2"
+          ],
+          "value": "false issuer"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "endpoint-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "endpoint"
+          ],
+          "value": "https://evil.example"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "feedback-uri-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "feedbackURI"
+          ],
+          "value": "https://evil.example"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "feedback-hash-changed",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "feedbackHash"
+          ],
+          "value": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "message-nonce-not-prepare-nonce",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "nonce"
+          ],
+          "value": "0x9999999999999999999999999999999999999999999999999999999999999999"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "message-deadline-not-prepare-deadline",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "deadline"
+          ],
+          "value": "1790000901"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "deadline-too-far",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "deadline"
+          ],
+          "value": 1790003601
+        },
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "deadline"
+          ],
+          "value": "1790003601"
+        }
+      ],
+      "code": "deadline"
+    },
+    {
+      "name": "deadline-too-close",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "deadline"
+          ],
+          "value": 1790000015
+        },
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "deadline"
+          ],
+          "value": "1790000015"
+        }
+      ],
+      "code": "deadline"
+    },
+    {
+      "name": "digest-not-ours",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "digest"
+          ],
+          "value": "0x0101010101010101010101010101010101010101010101010101010101010101"
+        }
+      ],
+      "code": "digest_mismatch"
+    },
+    {
+      "name": "digest-missing",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "digest"
+          ],
+          "value": null
+        }
+      ],
+      "code": "digest_mismatch"
+    },
+    {
+      "name": "first-rating-without-account-nonce",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "accountNonce"
+          ],
+          "value": null
+        }
+      ],
+      "code": "account_nonce"
+    },
+    {
+      "name": "account-nonce-beyond-uint64",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "accountNonce"
+          ],
+          "value": 18446744073709551616
+        }
+      ],
+      "code": "account_nonce"
+    },
+    {
+      "name": "another-rater",
+      "ops": [],
+      "code": "domain_verifying_contract",
+      "rater": "0x2222222222222222222222222222222222222222"
+    },
+    {
+      "name": "agent-id-trailing-newline",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "agentId"
+          ],
+          "value": "18896\n"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "delegate-trailing-newline",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "delegate"
+          ],
+          "value": "0x260D3D0258680aA458D0EBB8BcAE8A2f68bf6163\n"
+        }
+      ],
+      "code": "delegate_mismatch"
+    },
+    {
+      "name": "agent-id-hex",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "agentId"
+          ],
+          "value": "0x49d0"
+        }
+      ],
+      "code": "message_binding"
+    },
+    {
+      "name": "agent-id-leading-space",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "agentId"
+          ],
+          "value": " 18896"
+        }
+      ],
+      "code": "message_binding"
+    }
+  ],
+  "accepted": [
+    {
+      "name": "delegate-lowercase",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "delegate"
+          ],
+          "value": "0x260d3d0258680aa458d0ebb8bcae8a2f68bf6163"
+        }
+      ]
+    },
+    {
+      "name": "digest-uppercase-hex",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "digest"
+          ],
+          "value": "0xA67407AB3D64E4098DCAA8FF66A9AD545115CDD2C1E528EC44B5EFC8A02E8F28"
+        }
+      ]
+    },
+    {
+      "name": "message-uints-as-json-numbers",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "agentId"
+          ],
+          "value": 18896
+        },
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "value"
+          ],
+          "value": 90
+        },
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "deadline"
+          ],
+          "value": 1790000900
+        }
+      ]
+    },
+    {
+      "name": "domain-chain-id-as-string",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "domain",
+            "chainId"
+          ],
+          "value": "8453"
+        }
+      ]
+    },
+    {
+      "name": "registry-lowercase",
+      "ops": [
+        {
+          "op": "set",
+          "path": [
+            "typedData",
+            "message",
+            "registry"
+          ],
+          "value": "0x8004baa17c55a88189ae136b182e5fda19de9b63"
+        }
+      ]
+    }
+  ]
+}
