@@ -24,7 +24,11 @@ from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
-from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.payment_headers import (
+    event_payment_header,
+    payment_input_error_response,
+)
+from uvd_x402_sdk.response import create_402_headers, create_402_response
 
 logger = logging.getLogger(__name__)
 
@@ -34,33 +38,6 @@ F = TypeVar("F", bound=Callable[..., Any])
 LambdaEvent = Dict[str, Any]
 LambdaContext = Any
 LambdaResponse = Dict[str, Any]
-
-
-def _get_header(event: LambdaEvent, header_name: str) -> Optional[str]:
-    """
-    Get header from Lambda event.
-
-    Handles both API Gateway REST API and HTTP API formats.
-    """
-    headers = event.get("headers", {})
-    if not headers:
-        return None
-
-    # Try exact match
-    if header_name in headers:
-        return headers[header_name]
-
-    # Try lowercase (HTTP API normalizes to lowercase)
-    lower_name = header_name.lower()
-    if lower_name in headers:
-        return headers[lower_name]
-
-    # Try case-insensitive search
-    for key, value in headers.items():
-        if key.lower() == lower_name:
-            return value
-
-    return None
 
 
 def _event_resource(event: LambdaEvent) -> str:
@@ -114,7 +91,9 @@ def _create_lambda_response(
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type,X-PAYMENT,Authorization",
+            "Access-Control-Allow-Headers": (
+                "Content-Type,X-PAYMENT,PAYMENT-SIGNATURE,Authorization"
+            ),
             **(headers or {}),
         },
     }
@@ -219,8 +198,8 @@ class LambdaX402:
         return self._config
 
     def get_payment_header(self, event: LambdaEvent) -> Optional[str]:
-        """Get X-PAYMENT header from Lambda event."""
-        return _get_header(event, "X-PAYMENT")
+        """Select one payment from the standard headers, refusing conflicts."""
+        return event_payment_header(event)
 
     def create_402_response(
         self,
@@ -309,19 +288,19 @@ class LambdaX402:
         Returns:
             PaymentResult if payment verified, LambdaResponse if 402 needed
         """
-        payment_header = self.get_payment_header(event)
-
-        if not payment_header:
-            logger.info(f"No payment header, returning 402 for ${amount_usd}")
-            return self.create_402_response(amount_usd, message)
-
         try:
+            payment_header = self.get_payment_header(event)
+
+            if not payment_header:
+                logger.info(f"No payment header, returning 402 for ${amount_usd}")
+                return self.create_402_response(amount_usd, message)
+
             result = self._process(event, payment_header, Decimal(str(amount_usd)))
             logger.info(f"Payment processed: {result.payer_address} paid ${amount_usd}")
             return result
 
         except X402Error as e:
-            conflict = _undelivered_response(e)
+            conflict = payment_input_error_response(e) or _undelivered_response(e)
             if conflict is not None:
                 # Already admitted for another request or already used (409),
                 # may have moved (500, with the transaction), or no verdict yet

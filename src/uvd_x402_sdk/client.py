@@ -93,6 +93,14 @@ from uvd_x402_sdk.networks.base import TokenConfig, get_token_config, to_base_un
 
 logger = logging.getLogger(__name__)
 
+# ECMAScript WhiteSpace + LineTerminator, matching the TypeScript SDK's trim.
+# Python str.strip() omits U+FEFF and includes extra control characters.
+_NETWORK_WHITESPACE = (
+    " \t\n\r\v\f\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+    "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+
+
 
 # =============================================================================
 # Settle Retry Policy (opt-in via settle_payment(..., retry=True))
@@ -1853,7 +1861,11 @@ class X402Client:
             )
 
         raw_network = accepted.get("network")
-        if not raw_network:
+        if (
+            not isinstance(raw_network, str)
+            or not raw_network
+            or raw_network != raw_network.strip(_NETWORK_WHITESPACE)
+        ):
             raise InvalidPayloadError(
                 "v2 envelope: `accepted.network` is missing — echo the "
                 "chosen accept object from the 402 unchanged"
@@ -1920,6 +1932,15 @@ class X402Client:
             # v2 envelope (`accepted` echo) -> flat v1 shape; v1 passes as-is
             if isinstance(data, dict):
                 data = self._normalize_v2_envelope(data)
+                network = data.get("network")
+                if (
+                    not isinstance(network, str)
+                    or not network
+                    or network != network.strip(_NETWORK_WHITESPACE)
+                ):
+                    raise InvalidPayloadError(
+                        "Payment payload requires a non-empty network", field="network"
+                    )
 
             # Validate and parse with Pydantic
             payload = PaymentPayload(**data)

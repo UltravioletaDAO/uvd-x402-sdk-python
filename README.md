@@ -216,6 +216,21 @@ def premium_endpoint(payment_result):
 
 > **Robinhood Chain settles in Paxos USDG, not USDC.** USDG's on-chain `version()` getter reverts, so clients MUST send the EIP-712 domain `{"name": "Global Dollar", "version": "1"}` in `PaymentRequirements.extra`. The SDK carries this automatically for the `robinhood` / `robinhood-testnet` networks.
 
+### Payment request headers
+
+All server integrations (FastAPI, Flask, Django, Lambda and `require_payment`)
+accept `X-PAYMENT` or `PAYMENT-SIGNATURE`, with case-insensitive header names.
+When both are present, their values must be identical after removing surrounding
+HTTP spaces and tabs (SP/HTAB) for comparison; distinct values return HTTP 400 before verification
+or settlement. An empty header or
+a payload without a non-empty `network` (v1) or `accepted.network` (v2), or a
+network with surrounding whitespace, also returns 400. With neither header the
+server returns 402. The selected original header bytes are preserved for purchase
+bindings, verification and settlement, so existing bound payments remain recoverable.
+Lambda also reads API Gateway
+`multiValueHeaders`; a custom `require_payment(header_name=...)` is an alias
+subject to the same conflict rule.
+
 ## Installation
 
 ```bash
