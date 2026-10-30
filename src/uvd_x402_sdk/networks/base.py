@@ -555,6 +555,8 @@ _NETWORK_TO_CAIP2 = {
     "scroll": "eip155:534352",
     "skale-base": "eip155:1187947933",
     "skale-base-sepolia": "eip155:324705682",
+    "hashkey": "eip155:177",
+    "hashkey-testnet": "eip155:133",
     "robinhood": "eip155:4663",
     "robinhood-testnet": "eip155:46630",
     "arc": "eip155:5042",
