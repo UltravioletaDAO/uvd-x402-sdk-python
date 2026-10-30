@@ -175,13 +175,14 @@ class X402Config:
     # maxTimeoutSeconds of the requirements the client sends to the facilitator.
     max_timeout_seconds: int = 60
 
-    # Network configuration - All 29 networks
+    # Network configuration - All 31 networks
     supported_networks: List[str] = field(default_factory=lambda: [
-        # EVM chains (17)
+        # EVM chains (19)
         "base", "ethereum", "polygon", "arbitrum", "optimism",
         "avalanche", "celo", "hyperevm", "unichain", "monad",
         "scroll", "skale-base", "skale-base-sepolia",
         "robinhood", "robinhood-testnet", "arc", "arc-testnet",
+        "hashkey", "hashkey-testnet",
         # SVM chains (2)
         "solana", "fogo",
         # NEAR (1)

@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote
 import httpx
 
 try:
-    from fastapi import FastAPI, Request, Response, HTTPException, Depends
+    from fastapi import Depends, FastAPI, HTTPException, Request, Response
     from fastapi.encoders import jsonable_encoder
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.concurrency import run_in_threadpool
@@ -49,8 +49,12 @@ from uvd_x402_sdk.durable import (
 )
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
-from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.payment_headers import (
+    payment_input_error_response,
+    select_payment_header,
+)
 from uvd_x402_sdk.receipts import payment_response_headers, validate_purchase_context
+from uvd_x402_sdk.response import create_402_headers, create_402_response
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +192,7 @@ def _payment_error(error: X402Error) -> tuple[int, Any, dict[str, str]]:
     would ask the buyer for a second payment. Every rejection keeps the answer
     it had.
     """
-    answer = _undelivered_response(error)
+    answer = payment_input_error_response(error) or _undelivered_response(error)
     if answer is not None:
         return answer
     return _payment_error_status(error), error.to_dict(), _receipt_error_headers(error)
@@ -346,21 +350,23 @@ class FastAPIX402:
         required_amount = Decimal(str(amount_usd))
 
         async def dependency(request: Request, response: Response = None) -> PaymentResult:
-            payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
-
-            if not payment_header:
-                response_body = create_402_response(
-                    amount_usd=required_amount,
-                    config=self._config,
-                    message=message,
-                )
-                raise HTTPException(
-                    status_code=402,
-                    detail=response_body,
-                    headers=create_402_headers(),
-                )
-
             try:
+                payment_header = select_payment_header(
+                    request.headers.items(), header_name="PAYMENT-SIGNATURE"
+                )
+
+                if not payment_header:
+                    response_body = create_402_response(
+                        amount_usd=required_amount,
+                        config=self._config,
+                        message=message,
+                    )
+                    raise HTTPException(
+                        status_code=402,
+                        detail=response_body,
+                        headers=create_402_headers(),
+                    )
+
                 result = await _process_payment(
                     self._client, request, payment_header, required_amount, self._binding_store
                 )
@@ -408,21 +414,23 @@ class X402Depends:
 
     async def __call__(self, request: Request, response: Response = None) -> PaymentResult:
         """Process payment when used as dependency."""
-        payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
-
-        if not payment_header:
-            response_body = create_402_response(
-                amount_usd=self._amount,
-                config=self._config,
-                message=self._message,
-            )
-            raise HTTPException(
-                status_code=402,
-                detail=response_body,
-                headers=create_402_headers(),
-            )
-
         try:
+            payment_header = select_payment_header(
+                request.headers.items(), header_name="PAYMENT-SIGNATURE"
+            )
+
+            if not payment_header:
+                response_body = create_402_response(
+                    amount_usd=self._amount,
+                    config=self._config,
+                    message=self._message,
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail=response_body,
+                    headers=create_402_headers(),
+                )
+
             result = await _process_payment(
                 self._client, request, payment_header, self._amount, self._binding_store
             )
@@ -748,21 +756,23 @@ def fastapi_require_payment(
     def decorator(func: F) -> F:
         @wraps(func)
         async def wrapper(request: Request, *args: Any, **kwargs: Any) -> Any:
-            payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
-
-            if not payment_header:
-                response_body = create_402_response(
-                    amount_usd=required_amount,
-                    config=config,
-                    message=message,
-                )
-                return JSONResponse(
-                    status_code=402,
-                    content=response_body,
-                    headers=create_402_headers(),
-                )
-
             try:
+                payment_header = select_payment_header(
+                    request.headers.items(), header_name="PAYMENT-SIGNATURE"
+                )
+
+                if not payment_header:
+                    response_body = create_402_response(
+                        amount_usd=required_amount,
+                        config=config,
+                        message=message,
+                    )
+                    return JSONResponse(
+                        status_code=402,
+                        content=response_body,
+                        headers=create_402_headers(),
+                    )
+
                 result = await _process_payment(
                     client, request, payment_header, required_amount, binding_store
                 )
@@ -915,20 +925,22 @@ class X402Middleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         required_amount = self._protected_paths[path]
-        payment_header = request.headers.get("PAYMENT-SIGNATURE") or request.headers.get("X-PAYMENT")
-
-        if not payment_header:
-            response_body = create_402_response(
-                amount_usd=required_amount,
-                config=self._config,
-            )
-            return JSONResponse(
-                status_code=402,
-                content=response_body,
-                headers=create_402_headers(),
-            )
-
         try:
+            payment_header = select_payment_header(
+                request.headers.items(), header_name="PAYMENT-SIGNATURE"
+            )
+
+            if not payment_header:
+                response_body = create_402_response(
+                    amount_usd=required_amount,
+                    config=self._config,
+                )
+                return JSONResponse(
+                    status_code=402,
+                    content=response_body,
+                    headers=create_402_headers(),
+                )
+
             result = await _process_payment(
                 self._client, request, payment_header, required_amount, self._binding_store
             )

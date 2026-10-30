@@ -727,8 +727,7 @@ def test_the_same_authorization_re_encoded_for_another_resource_is_not_delivered
 
 @entry_points
 def test_a_header_that_is_not_a_payment_never_reaches_the_store(rails, mount):
-    """Parsed before ``bind``: garbage gets the answer it always got and writes
-    no row that nothing would ever remove."""
+    """Malformed credentials return 400 before ``bind`` and write no row."""
     seen = []
 
     class Counting(InMemoryBindingStore):
@@ -741,7 +740,7 @@ def test_a_header_that_is_not_a_payment_never_reaches_the_store(rails, mount):
 
     status, _, _ = site.get("not-a-payment")
 
-    assert status == 402 and seen == [] and rail.calls == []
+    assert status == 400 and seen == [] and rail.calls == []
 
 
 # -- the mount is part of what is bought ----------------------------------------

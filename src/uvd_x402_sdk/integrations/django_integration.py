@@ -6,14 +6,14 @@ Provides:
 - django_require_payment: Decorator for view functions
 """
 
+import json
 from decimal import Decimal
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
-import json
 
 try:
-    from django.http import JsonResponse, HttpRequest, HttpResponse
     from django.conf import settings
+    from django.http import HttpRequest, HttpResponse, JsonResponse
 except ImportError:
     raise ImportError(
         "Django is required for Django integration. "
@@ -24,7 +24,11 @@ from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
 from uvd_x402_sdk.models import PaymentResult
-from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.payment_headers import (
+    payment_input_error_response,
+    select_payment_header,
+)
+from uvd_x402_sdk.response import create_402_headers, create_402_response
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -38,7 +42,7 @@ def _conflict_response(error: X402Error) -> Optional[HttpResponse]:
     Retry-After while in flight or without a verdict (a timeout, a store the
     facilitator could not read); ``None`` for a rejection. Never delivered, and
     never a 402, which would ask the buyer for a second payment."""
-    conflict = _undelivered_response(error)
+    conflict = payment_input_error_response(error) or _undelivered_response(error)
     if conflict is None:
         return None
     status, body, headers = conflict
@@ -116,19 +120,19 @@ class DjangoX402Middleware:
             return self.get_response(request)
 
         # Get payment header (Django uses HTTP_X_PAYMENT format)
-        payment_header = request.META.get("HTTP_X_PAYMENT")
-
-        if not payment_header:
-            response_body = create_402_response(
-                amount_usd=required_amount,
-                config=self._config,
-            )
-            response = JsonResponse(response_body, status=402)
-            for key, value in create_402_headers().items():
-                response[key] = value
-            return response
-
         try:
+            payment_header = select_payment_header(request.headers.items())
+
+            if not payment_header:
+                response_body = create_402_response(
+                    amount_usd=required_amount,
+                    config=self._config,
+                )
+                response = JsonResponse(response_body, status=402)
+                for key, value in create_402_headers().items():
+                    response[key] = value
+                return response
+
             result = self._client.process_payment(
                 x_payment_header=payment_header,
                 expected_amount_usd=required_amount,
@@ -176,20 +180,20 @@ def django_require_payment(
         @wraps(func)
         def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
             # Get payment header
-            payment_header = request.META.get("HTTP_X_PAYMENT")
-
-            if not payment_header:
-                response_body = create_402_response(
-                    amount_usd=required_amount,
-                    config=_config,
-                    message=message,
-                )
-                response = JsonResponse(response_body, status=402)
-                for key, value in create_402_headers().items():
-                    response[key] = value
-                return response
-
             try:
+                payment_header = select_payment_header(request.headers.items())
+
+                if not payment_header:
+                    response_body = create_402_response(
+                        amount_usd=required_amount,
+                        config=_config,
+                        message=message,
+                    )
+                    response = JsonResponse(response_body, status=402)
+                    for key, value in create_402_headers().items():
+                        response[key] = value
+                    return response
+
                 result = _client.process_payment(
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
@@ -235,20 +239,20 @@ class X402PaymentView:
         config = self.x402_config or _get_config_from_settings()
         client = X402Client(config=config)
 
-        payment_header = request.META.get("HTTP_X_PAYMENT")
-
-        if not payment_header:
-            response_body = create_402_response(
-                amount_usd=self.x402_amount,
-                config=config,
-                message=self.x402_message,
-            )
-            response = JsonResponse(response_body, status=402)
-            for key, value in create_402_headers().items():
-                response[key] = value
-            return response
-
         try:
+            payment_header = select_payment_header(request.headers.items())
+
+            if not payment_header:
+                response_body = create_402_response(
+                    amount_usd=self.x402_amount,
+                    config=config,
+                    message=self.x402_message,
+                )
+                response = JsonResponse(response_body, status=402)
+                for key, value in create_402_headers().items():
+                    response[key] = value
+                return response
+
             result = client.process_payment(
                 x_payment_header=payment_header,
                 expected_amount_usd=self.x402_amount,

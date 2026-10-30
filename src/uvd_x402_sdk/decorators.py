@@ -7,16 +7,21 @@ for specific endpoints across different web frameworks.
 
 from decimal import Decimal
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union, Dict
+from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
-from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.client import X402Client, _undelivered_response
+from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import (
-    X402Error,
-    PaymentRequiredError,
     InvalidPayloadError,
+    PaymentRequiredError,
+    X402Error,
 )
-from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.payment_headers import (
+    event_payment_header,
+    payment_input_error_response,
+    select_payment_header,
+)
+from uvd_x402_sdk.response import create_402_headers, create_402_response
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -137,7 +142,6 @@ def require_payment(
             # Framework-agnostic request extraction
             # This will be overridden by framework-specific integrations
             request = _extract_request(*args, **kwargs)
-            payment_header = _get_header(request, header_name)
 
             # Determine amount
             if amount_callback:
@@ -145,17 +149,19 @@ def require_payment(
             else:
                 required_amount = Decimal(str(amount_usd))
 
-            # No payment header - return 402
-            if not payment_header:
-                response_body = create_402_response(
-                    amount_usd=required_amount,
-                    config=config,
-                    message=message,
-                )
-                return _create_402_response(response_body)
-
-            # Process payment
             try:
+                payment_header = _get_header(request, header_name)
+
+                # No payment header - return 402
+                if not payment_header:
+                    response_body = create_402_response(
+                        amount_usd=required_amount,
+                        config=config,
+                        message=message,
+                    )
+                    return _create_402_response(response_body)
+
+                # Process payment
                 result = client.process_payment(
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
@@ -218,24 +224,14 @@ def _get_header(request: Any, header_name: str) -> Optional[str]:
     if request is None:
         return None
 
-    # Dict-like (AWS Lambda event)
     if isinstance(request, dict):
-        headers = request.get("headers", {})
-        # Lambda headers can be case-sensitive or not
-        return headers.get(header_name) or headers.get(header_name.lower())
-
-    # Flask/Werkzeug
+        return event_payment_header(request, header_name=header_name)
     if hasattr(request, "headers"):
-        headers = request.headers
-        if hasattr(headers, "get"):
-            return headers.get(header_name)
-
-    # Django
+        return select_payment_header(request.headers.items(), header_name=header_name)
     if hasattr(request, "META"):
-        # Django uses HTTP_X_PAYMENT format
-        django_header = f"HTTP_{header_name.replace('-', '_').upper()}"
-        return request.META.get(django_header)
-
+        headers = ((name[5:].replace("_", "-"), value)
+                   for name, value in request.META.items() if name.startswith("HTTP_"))
+        return select_payment_header(headers, header_name=header_name)
     return None
 
 
@@ -298,7 +294,7 @@ def _create_error_response(
     # Retry-After while in flight), may have moved (500, with the transaction),
     # or no verdict yet (503 + Retry-After): not delivered, and not a 402, which
     # would ask for a second payment.
-    conflict = _undelivered_response(error)
+    conflict = payment_input_error_response(error) or _undelivered_response(error)
     if conflict is not None:
         status, body, headers = conflict
         return _create_json_response(status, body, headers)

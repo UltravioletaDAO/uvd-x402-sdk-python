@@ -2,7 +2,7 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **29 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless stablecoin payments** across **31 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
 **New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Funded EURC payments confirmed on Arc mainnet (x402 v1 and v2, 2026-09-22); Arc testnet funded acceptance pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
 
@@ -12,7 +12,7 @@ Accept **gasless stablecoin payments** across **29 blockchain networks** with a 
 
 ## Features
 
-- **29 Networks**: EVM chains (17 including Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
+- **31 Networks**: EVM chains (19 including HashKey mainnet/testnet, Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
 - **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
 - **x402 v1 & v2**: Protocol auto-detection; native Hedera supports v2/exact only
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
@@ -182,6 +182,8 @@ def premium_endpoint(payment_result):
 | Scroll | EVM | 534352 | `eip155:534352` | Active |
 | SKALE | EVM | 1187947933 | `eip155:1187947933` | Active |
 | SKALE Testnet | EVM | 324705682 | `eip155:324705682` | Active |
+| HashKey | EVM | 177 | `eip155:177` | Active |
+| HashKey Testnet | EVM | 133 | `eip155:133` | Active |
 | Robinhood | EVM | 4663 | `eip155:4663` | Active |
 | Robinhood Testnet | EVM | 46630 | `eip155:46630` | Active |
 | Arc | EVM | 5042 | `eip155:5042` | Active |
@@ -197,6 +199,8 @@ def premium_endpoint(payment_result):
 | XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl` | Active |
 | XRP Ledger Testnet | XRPL | - | _(no CAIP-2)_ `xrpl-testnet` | Active |
 
+> **HashKey Chain** (`hashkey` / `hashkey-testnet`) uses HSK for gas and USDC with 6 decimals for payments. Mainnet signs with `Bridged USDC / 2`; testnet uses `USD Coin / 2`. HashKey USDT is not supported because it lacks EIP-3009.
+
 ### Supported Tokens
 
 | Token | Networks | Decimals |
@@ -211,6 +215,21 @@ def premium_endpoint(payment_result):
 > **Arc uses one USDC balance at two precisions.** Native gas uses 18 decimals; ERC-20 payments use 6. Both Arc networks sign `$0.01` as `10000` atomic units. Do not add the native and ERC-20 balance readings together.
 
 > **Robinhood Chain settles in Paxos USDG, not USDC.** USDG's on-chain `version()` getter reverts, so clients MUST send the EIP-712 domain `{"name": "Global Dollar", "version": "1"}` in `PaymentRequirements.extra`. The SDK carries this automatically for the `robinhood` / `robinhood-testnet` networks.
+
+### Payment request headers
+
+All server integrations (FastAPI, Flask, Django, Lambda and `require_payment`)
+accept `X-PAYMENT` or `PAYMENT-SIGNATURE`, with case-insensitive header names.
+When both are present, their values must be identical after removing surrounding
+HTTP spaces and tabs (SP/HTAB) for comparison; distinct values return HTTP 400 before verification
+or settlement. An empty header or
+a payload without a non-empty `network` (v1) or `accepted.network` (v2), or a
+network with surrounding whitespace, also returns 400. With neither header the
+server returns 402. The selected original header bytes are preserved for purchase
+bindings, verification and settlement, so existing bound payments remain recoverable.
+Lambda also reads API Gateway
+`multiValueHeaders`; a custom `require_payment(header_name=...)` is an alias
+subject to the same conflict rule.
 
 ## Installation
 

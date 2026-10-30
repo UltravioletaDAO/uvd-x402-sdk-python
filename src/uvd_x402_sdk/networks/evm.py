@@ -317,7 +317,7 @@ MONAD = NetworkConfig(
         "usdt": TokenConfig(
             address="0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
             decimals=6,
-            name="USD\u20ae0",  # USD₮0 (USDT0 omnichain via LayerZero)
+            name="USDT0",  # ASCII on-chain name; other USDT0 chains use USD₮0
             version="1",
         ),
     },
@@ -389,6 +389,56 @@ SKALE_TESTNET = NetworkConfig(
             name="Bridged USDC (SKALE Bridge)",
             version="2",
         ),
+    },
+)
+
+# HashKey Chain: HSK gas; USDC supports EIP-3009. USDT does not.
+HASHKEY = NetworkConfig(
+    name="hashkey",
+    display_name="HashKey Chain",
+    network_type=NetworkType.EVM,
+    chain_id=177,
+    usdc_address="0x054ed45810DbBAb8B27668922D110669c9D88D0a",
+    usdc_decimals=6,
+    usdc_domain_name="Bridged USDC",
+    usdc_domain_version="2",
+    rpc_url="https://mainnet.hsk.xyz",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x054ed45810DbBAb8B27668922D110669c9D88D0a",
+            decimals=6,
+            name="Bridged USDC",
+            version="2",
+        ),
+    },
+    extra_config={"native_gas_asset": "HSK", "explorer": "https://hsk.blockscout.com"},
+)
+
+# The testnet USDC has a DIFFERENT EIP-712 name from mainnet.
+HASHKEY_TESTNET = NetworkConfig(
+    name="hashkey-testnet",
+    display_name="HashKey Chain Testnet",
+    network_type=NetworkType.EVM,
+    chain_id=133,
+    usdc_address="0x8FE3cB719Ee4410E236Cd6b72ab1fCDC06eF53c6",
+    usdc_decimals=6,
+    usdc_domain_name="USD Coin",
+    usdc_domain_version="2",
+    rpc_url="https://testnet.hsk.xyz",
+    enabled=True,
+    tokens={
+        "usdc": TokenConfig(
+            address="0x8FE3cB719Ee4410E236Cd6b72ab1fCDC06eF53c6",
+            decimals=6,
+            name="USD Coin",
+            version="2",
+        ),
+    },
+    extra_config={
+        "native_gas_asset": "HSK",
+        "explorer": "https://testnet-explorer.hskchain.net",
+        "testnet": True,
     },
 )
 
@@ -564,6 +614,8 @@ _EVM_NETWORKS = [
     SCROLL,
     SKALE,
     SKALE_TESTNET,
+    HASHKEY,
+    HASHKEY_TESTNET,
     ROBINHOOD,
     ROBINHOOD_TESTNET,
     ARC,
@@ -594,6 +646,8 @@ def get_usdc_domain_name(network_name: str) -> str:
     # Robinhood Chain settles in Paxos USDG (domain 'Global Dollar'), not USDC
     robinhood_domain_networks = {"robinhood", "robinhood-testnet"}
 
+    if network_name.lower() == "hashkey":
+        return "Bridged USDC"
     if network_name.lower() in robinhood_domain_networks:
         return "Global Dollar"
     if network_name.lower() in skale_domain_networks:

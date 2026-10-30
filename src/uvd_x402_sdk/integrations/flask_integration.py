@@ -11,7 +11,7 @@ from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, Union
 
 try:
-    from flask import Flask, request, jsonify, make_response, g
+    from flask import Flask, g, jsonify, make_response, request
 except ImportError:
     raise ImportError(
         "Flask is required for Flask integration. "
@@ -21,7 +21,11 @@ except ImportError:
 from uvd_x402_sdk.client import X402Client, _undelivered_response
 from uvd_x402_sdk.config import X402Config
 from uvd_x402_sdk.exceptions import X402Error
-from uvd_x402_sdk.response import create_402_response, create_402_headers
+from uvd_x402_sdk.payment_headers import (
+    payment_input_error_response,
+    select_payment_header,
+)
+from uvd_x402_sdk.response import create_402_headers, create_402_response
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -35,7 +39,7 @@ def _conflict_response(error: X402Error) -> Any:
     Retry-After while in flight or without a verdict (a timeout, a store the
     facilitator could not read); ``None`` for a rejection. Never delivered, and
     never a 402, which would ask the buyer for a second payment."""
-    conflict = _undelivered_response(error)
+    conflict = payment_input_error_response(error) or _undelivered_response(error)
     if conflict is None:
         return None
     status, body, headers = conflict
@@ -161,30 +165,30 @@ class FlaskX402:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
                 # Get payment header
-                payment_header = request.headers.get("X-PAYMENT")
-
-                # Determine amount
-                if amount_callback:
-                    required_amount = Decimal(str(amount_callback()))
-                elif amount_usd:
-                    required_amount = Decimal(str(amount_usd))
-                else:
-                    raise ValueError("Either amount_usd or amount_callback is required")
-
-                # No payment header - return 402
-                if not payment_header:
-                    response_body = create_402_response(
-                        amount_usd=required_amount,
-                        config=self.config,
-                        message=message,
-                    )
-                    response = make_response(jsonify(response_body), 402)
-                    for key, value in create_402_headers().items():
-                        response.headers[key] = value
-                    return response
-
-                # Process payment
                 try:
+                    payment_header = select_payment_header(request.headers.items())
+
+                    # Determine amount
+                    if amount_callback:
+                        required_amount = Decimal(str(amount_callback()))
+                    elif amount_usd:
+                        required_amount = Decimal(str(amount_usd))
+                    else:
+                        raise ValueError("Either amount_usd or amount_callback is required")
+
+                    # No payment header - return 402
+                    if not payment_header:
+                        response_body = create_402_response(
+                            amount_usd=required_amount,
+                            config=self.config,
+                            message=message,
+                        )
+                        response = make_response(jsonify(response_body), 402)
+                        for key, value in create_402_headers().items():
+                            response.headers[key] = value
+                        return response
+
+                    # Process payment
                     result = self.client.process_payment(
                         x_payment_header=payment_header,
                         expected_amount_usd=required_amount,
@@ -249,22 +253,22 @@ def flask_require_payment(
             required_amount = Decimal(str(amount_usd))
 
             # Get payment header
-            payment_header = request.headers.get("X-PAYMENT")
-
-            # No payment - return 402
-            if not payment_header:
-                response_body = create_402_response(
-                    amount_usd=required_amount,
-                    config=x402_ext.config,
-                    message=message,
-                )
-                response = make_response(jsonify(response_body), 402)
-                for key, value in create_402_headers().items():
-                    response.headers[key] = value
-                return response
-
-            # Process payment
             try:
+                payment_header = select_payment_header(request.headers.items())
+
+                # No payment - return 402
+                if not payment_header:
+                    response_body = create_402_response(
+                        amount_usd=required_amount,
+                        config=x402_ext.config,
+                        message=message,
+                    )
+                    response = make_response(jsonify(response_body), 402)
+                    for key, value in create_402_headers().items():
+                        response.headers[key] = value
+                    return response
+
+                # Process payment
                 result = x402_ext.client.process_payment(
                     x_payment_header=payment_header,
                     expected_amount_usd=required_amount,
