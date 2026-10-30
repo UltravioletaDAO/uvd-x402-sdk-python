@@ -317,7 +317,7 @@ MONAD = NetworkConfig(
         "usdt": TokenConfig(
             address="0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
             decimals=6,
-            name="USD\u20ae0",  # USD₮0 (USDT0 omnichain via LayerZero)
+            name="USDT0",  # ASCII on-chain name; other USDT0 chains use USD₮0
             version="1",
         ),
     },
