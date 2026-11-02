@@ -493,7 +493,7 @@ def test_lifecycle_invalid_network(network):
 
 
 def test_facilitator_v2_envelopes():
-    from uvd_x402_sdk.envelope_v2 import build_verify_request_v2, build_settle_request_v2
+    from uvd_x402_sdk.envelope_v2 import build_settle_request_v2, build_verify_request_v2
 
     resource = {
         "url": "https://seller.example/task",
