@@ -54,7 +54,7 @@ def mutations(source: str):
             "isinstance(secret_key, bytes) and len(secret_key) in (32, 64)",
         ),
         ("Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)", "pass"),
-        ('"deposit": 0,', '"deposit": 1,'),
+        ('"deposit": 0}', '"deposit": 1}'),
         (
             'raise NotImplementedError("Arras v2 budget ABI and golden vectors are not frozen")',
             "return {}",

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.104.0] - 2026-11-02
+
+- Added `uvd_x402_sdk.near_escrow`: canonical Arras v1 messages and deterministic payment IDs, local Ed25519 NEP-366 authorization (`ft_transfer_call`, one action, 1 yocto) and deposit-zero `release`, `refund`, `reclaim`, `withdraw`, `withdraw_for` helpers. Uses explicit `near:mainnet`/`near:testnet`, native USDC per network, exact integers, bounded gas and the existing Borsh serializer. Signature results are checked before returning. No RPC, nonce allocation or transaction submission.
+- Added the `near` extra (`cryptography>=42.0.0`), included in `all`; pure message/id builders need no extra. API and facilitator-envelope examples: `docs/near-escrow.md`.
+- Preserved Arras's frozen Rust vectors byte for byte and added an independent signed-wire decoder, negative coverage, a source-mutation runner and actual Python/TypeScript parity over V-1..V-3 plus 21 signed delegates.
+- Reserved `authorize_from_budget` and the `AuthorizeFromBudget` adapter protocol for v2; the entry point raises before signing until the contract supplies its ABI and vectors.
+
 ## [0.103.0] - 2026-10-30
 
 - **Added: HashKey Chain USDC payments**, `hashkey` (177 / `eip155:177`) and `hashkey-testnet` (133 / `eip155:133`), including default network configuration, CAIP-2 conversion, RPCs and explorers. Both use HSK gas and 6-decimal USDC. The EIP-712 domains differ: mainnet is `Bridged USDC / 2`, testnet is `USD Coin / 2`. HashKey USDT is not supported (no EIP-3009).
