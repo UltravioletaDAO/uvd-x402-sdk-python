@@ -26,7 +26,7 @@ Local verification (Python 3.11.4 / Node 20.20.2, no production credentials/netw
 | Existing CI cross-language harness against isolated TS main 2016c3e | 512 checks across 9 phases passed |
 | Wheel 0.104.0, fresh base then near extra | base builders without crypto; near signing independently verified |
 | Ruff0.17.3 / black / pip check | passed |
-| Three-dot diff secret scan, gitleaks8.30.1 | zero after exact public USDC account exclusions; defaults retained |
+| Three-dot diff / gitleaks 8.30.1 | zero after exact public USDC account exclusions; defaults retained |
 
 One adversarial refuter (gpt-6.1-sol xhigh) found no other P1/P2 in the signing module.
 Its packaging-extra and lifecycle amount-zero documentation findings were fixed and verified.
