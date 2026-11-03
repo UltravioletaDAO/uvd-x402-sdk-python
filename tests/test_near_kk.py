@@ -17,7 +17,11 @@ from uvd_x402_sdk import near_events as events
 from uvd_x402_sdk import near_exact as exact
 from uvd_x402_sdk import near_nep413 as nep
 from uvd_x402_sdk import near_storage as storage
-from uvd_x402_sdk.near_escrow import NEAR_ESCROW_CONTRACTS, NEAR_ESCROW_TOKENS, NearEd25519Signer
+from uvd_x402_sdk.near_escrow import (
+    NEAR_ESCROW_CONTRACTS,
+    NEAR_ESCROW_TOKENS,
+    NearEd25519Signer,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures/near-kk.json"
 V = json.loads(FIXTURE.read_text(encoding="utf-8"))
