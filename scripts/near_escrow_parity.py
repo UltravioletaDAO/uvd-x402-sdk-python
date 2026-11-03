@@ -115,6 +115,7 @@ def check(ts_root: Path, node: str = "node") -> None:
         o = replace(
             options,
             network=c["network"],
+            sender_id=c["vector"]["payer"],
             escrow_contract=c["contract"],
             nonce=c["nonce"],
             max_block_height=c["height"],
