@@ -1,0 +1,64 @@
+{
+  "provenance": "NEP-413 official hi/[0..31]/myapp.com/myapp.com/callback example; reference bytes generated independently with Python struct + cryptography Ed25519. Public test seed is bytes(range(32)), nonce likewise. Exact uses frozen Arras V-1/V-3 inputs, nonce=7, maxBlockHeight=100000000, gas=30 TGas.",
+  "nep413": [
+    {
+      "id": "official-example",
+      "message": "hi",
+      "recipient": "myapp.com",
+      "callbackUrl": "myapp.com/callback",
+      "preimageHex": "9d010080020000006869000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f090000006d796170702e636f6d01120000006d796170702e636f6d2f63616c6c6261636b",
+      "digestHex": "c9ce5de288f7de6d83e2303e56c7615949da83867ea33c0747ed45c47ef50148",
+      "signatureBase64": "IGw11a1TraTcmwrU5Y5QDF2hgXVw8G/V8juiUCiyt1xGnkzGAoqiQ+45UzQCjSGXc+DI/f4Sm9uVVyxBXGeXAg=="
+    },
+    {
+      "id": "no-callback",
+      "message": "EM payout proof: tarea-ñ 🦀",
+      "recipient": "execution.market",
+      "callbackUrl": null,
+      "preimageHex": "9d0100801e000000454d207061796f75742070726f6f663a2074617265612dc3b120f09fa680000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f10000000657865637574696f6e2e6d61726b657400",
+      "digestHex": "232418429a4f120593a06170e5163d79531e8d33cca5d337fe8ff7550b5f3fa0",
+      "signatureBase64": "zXV3ZpIJ1t9wZkajSBSp/Fv0ym+Z+ChMbOHSzs3Mjk41hJ5SrO8VRFRcoVGsTsJEAXbm1aClnKGUjkc+Tb2lBQ=="
+    },
+    {
+      "id": "empty-callback",
+      "message": "",
+      "recipient": "execution.market",
+      "callbackUrl": "",
+      "preimageHex": "9d01008000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f10000000657865637574696f6e2e6d61726b65740100000000",
+      "digestHex": "2cfc2a30d8f6ad88c8e127d1168b78bde007335a23a9abf1bfdcca3a971740cd",
+      "signatureBase64": "bcqiTSnZjHn4gwOzyNETkz1f5neVnF7U4duaJgPfPw0nidxwnqJH9i4M6p2Z7VsTDocgcJlNfepoFeMrR8vOAw=="
+    }
+  ],
+  "exact": [
+    {
+      "network": "near:testnet",
+      "senderId": "payer-demo.testnet",
+      "token": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+      "payTo": "worker-demo.testnet",
+      "amount": "1000000",
+      "signedDelegateAction": "EgAAAHBheWVyLWRlbW8udGVzdG5ldEAAAAAzZTIyMTBlMTE4NGI0NWI2NGM4YTQzNGMwYTdlN2IyM2NjMDRlYTdlYjdhNmMzYzMyNTIwZDAzZDRhZmNiOGFmAQAAAAILAAAAZnRfdHJhbnNmZXI4AAAAeyJyZWNlaXZlcl9pZCI6Indvcmtlci1kZW1vLnRlc3RuZXQiLCJhbW91bnQiOiIxMDAwMDAwIn0A4FfrSBsAAAEAAAAAAAAAAAAAAAAAAAAHAAAAAAAAAADh9QUAAAAAAAOhB7/zzhC+HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4AOcg+0t0yJjXsO7+28TXP35QQzfOTnZ2CDp/D3tpIMfEtk/y4AlyBgVQZdzpqNjv79tJKBE3Dh5bVr9xQdnPaw8="
+    },
+    {
+      "network": "near:mainnet",
+      "senderId": "payer-demo.near",
+      "token": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "payTo": "robot-k1.near",
+      "amount": "10000000",
+      "signedDelegateAction": "DwAAAHBheWVyLWRlbW8ubmVhckAAAAAxNzIwODYyOGY4NGY1ZDZhZDMzZjBkYTNiYmJlYjI3ZmZjYjM5OGVhYzUwMWEzMWJkNmFkMjAxMWUzNjEzM2ExAQAAAAILAAAAZnRfdHJhbnNmZXIzAAAAeyJyZWNlaXZlcl9pZCI6InJvYm90LWsxLm5lYXIiLCJhbW91bnQiOiIxMDAwMDAwMCJ9AOBX60gbAAABAAAAAAAAAAAAAAAAAAAABwAAAAAAAAAA4fUFAAAAAAADoQe/884Qvh1w3RjnS8CZZ+TWMJulDV8d3IZkElUxuACUC+cIfsqSeozXZAZRnStGtTMlDvE9as576m6plJwaJJHF9guVihSQOJG0AAJBrztp/W/h+P7WRZF98126w68O"
+    }
+  ],
+  "arrasEvents": [
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"authorized\",\"data\":[{\"payment_id\":\"id\",\"operator_id\":\"em\",\"token\":\"usdc.testnet\",\"payer\":\"payer.testnet\",\"receiver\":\"worker.testnet\",\"amount\":\"1000000\",\"fee_bps\":1300,\"fee_recipient\":\"fee.testnet\",\"terms_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"released\",\"data\":[{\"payment_id\":\"DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M\",\"amount\":\"1000000\",\"net\":\"870000\",\"fee\":\"130000\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"refunded\",\"data\":[{\"payment_id\":\"id\",\"amount\":\"1000000\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"reclaimed\",\"data\":[{\"payment_id\":\"id\",\"amount\":\"1000000\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"withdrawn\",\"data\":[{\"account\":\"worker.testnet\",\"token\":\"usdc.testnet\",\"amount\":\"870000\",\"ok\":false}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"compacted\",\"data\":[{\"payment_id\":\"id\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"operator_registered\",\"data\":[{\"operator_id\":\"em\",\"owner\":\"owner.testnet\",\"capturers\":[\"capturer.testnet\"],\"fee_bps\":1300,\"fee_recipient\":\"fee.testnet\",\"min_amount\":\"10000\",\"tope_tvl_operador\":\"1000000000\",\"tope_tvl_por_payer\":\"20000000\",\"sponsor_max_por_payer\":\"0\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"operator_updated\",\"data\":[{\"operator_id\":\"em\",\"fee_bps\":1800}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"caps_set\",\"data\":[{\"by\":\"owner.testnet\",\"tope_por_pago\":\"10000000\",\"tope_tvl_global\":\"1000000000\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"paused\",\"data\":[{\"by\":\"guardian.testnet\",\"paused\":true,\"at\":\"18446744073709551615\"}]}",
+    "EVENT_JSON:{\"standard\":\"arras\",\"version\":\"1.0.0\",\"event\":\"unpaused\",\"data\":[{\"by\":\"owner.testnet\",\"paused\":false,\"at\":\"0\"}]}"
+  ],
+  "eventsProvenance": "Constructed from escrow-core/src/events.rs Arras v1. All eleven variants, Rust U128/U64 decimal strings, optional operator fields omitted when absent. Released matches formato_exacto_nep297_con_data_arreglo verbatim."
+}

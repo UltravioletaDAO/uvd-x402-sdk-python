@@ -39,6 +39,7 @@ on:
       - 'examples/**'
       - 'interop/**'
       - 'scripts/release_tag.py'
+      - 'scripts/near_kk_parity.py'
   pull_request:
     # The same list as `push`, entry for entry.
     paths:
@@ -52,6 +53,7 @@ on:
       - 'examples/**'
       - 'interop/**'
       - 'scripts/release_tag.py'
+      - 'scripts/near_kk_parity.py'
 
 # Both jobs only read: this checkout, and the TypeScript SDK, which is public.
 permissions:
@@ -119,7 +121,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install this SDK
-        run: pip install -e '.[signer]'
+        run: pip install -e '.[signer,near]'
         working-directory: uvd-x402-sdk-python
 
       - name: Install and build the TypeScript SDK
@@ -142,3 +144,6 @@ jobs:
           UVD_X402_PY_ROOT: ${{ github.workspace }}/uvd-x402-sdk-python
           UVD_PYTHON: python
         run: node scripts/xlang/cross-language-conformance.mjs
+      - name: NEAR golden-flow conformance (NEP-413, exact, storage, Arras logs)
+        working-directory: uvd-x402-sdk-python
+        run: python scripts/near_kk_parity.py --ts-root ../uvd-x402-sdk-typescript

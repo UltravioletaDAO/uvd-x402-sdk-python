@@ -156,3 +156,134 @@ and the full JSON payment. V-3 retains its mainnet message/preimage/ID. Signing 
 each network's registered contract and USDC. The harness also compares the contract registry and refusals
 before signing, without RPC calls or generated expectations. It fails if TypeScript is unavailable.
 The v2 budget format is not defined here; no budget vectors or signing are invented.
+
+## Golden-flow helpers (0.106.0)
+
+Execution Market (EM#659) and KarmaKadabra can use these public helpers instead of
+keeping their own Arras event parser or storage builders. All are offline. No
+helper contacts RPC, allocates a nonce, submits a transaction or loads credentials.
+
+### NEP-145 storage, paid by the payer
+
+```python
+from uvd_x402_sdk import build_arras_storage_deposit, build_usdc_storage_deposit
+
+arras_registration = build_arras_storage_deposit(
+    network="near:mainnet",
+    payer_id="parent.near",             # signs and pays the normal transaction
+    account_id="agent.parent.near",      # storage beneficiary; defaults to payer_id
+    escrow_contract="v1.arras-escrow.near",
+)
+usdc_registration = build_usdc_storage_deposit(
+    network="near:mainnet", payer_id="parent.near", account_id="agent.parent.near",
+)
+```
+
+These return `{signerId, receiverId, actions}` for a wallet's normal transaction
+API. They are unsigned transactions, with one `storage_deposit` call and 30 TGas.
+The payer pays both gas and the attached deposit; they are never facilitator
+delegates. Arras requires a deployment in `near_escrow.NEAR_ESCROW_CONTRACTS` for
+the selected network, just like escrow signing. No account parent is inferred.
+USDC uses the native token from `NEAR_ESCROW_TOKENS` for that network.
+
+Arras defaults to 0.05 NEAR (`50000000000000000000000` yoctoNEAR) with
+`registration_only=False`, so surplus stays available to fund payments. USDC
+defaults to 0.00125 NEAR (`1250000000000000000000`) with
+`registration_only=True`, returning surplus. These are starting amounts, not
+capacity guarantees: query the target's `storage_balance_bounds` and
+`storage_balance_of` before choosing a live amount. `deposit=` accepts a positive
+u128 integer or canonical decimal string in yoctoNEAR.
+
+### NEP-413 payout-account proof
+
+```python
+from uvd_x402_sdk import NearEd25519Signer, sign_nep413
+
+signer = NearEd25519Signer(seed_from_your_key_store)  # 32-byte seed, near extra
+proof = sign_nep413(
+    signer, account_id="agent.parent.near", message=server_challenge,
+    nonce=server_nonce_32_bytes, recipient="execution.market",
+    callback_url=None,
+)
+```
+
+Returns `{accountId, publicKey, signature}` with an `ed25519:` base58 public key
+and base64 signature. Per [NEP-413](https://github.com/near/NEPs/blob/master/neps/nep-0413.md),
+it signs SHA-256 of little-endian u32 `2**31 + 413`, then Borsh `message`, fixed
+32-byte `nonce`, `recipient`, and `Option<String>` callback. Absent callback and
+empty callback are distinct. `nep413_preimage` exposes those exact bytes.
+
+Use a FullAccess key. This offline signer cannot inspect on-chain permissions;
+the verifier must bind account and public key to a FullAccess access key on the
+intended network and check its challenge, one-use nonce, recipient and callback.
+The account id itself is not part of the NEP-413 signed preimage. A signature alone
+is not account ownership or settlement proof. `intents.near` is refused, including
+case and trailing-dot variants; callers still enforce their configured recipient
+and message policy. The helper verifies a custom signer's Ed25519 output before
+returning it. The official `hi` / nonce `[0..31]` / `myapp.com` / callback example
+and independent signature checks live in `tests/test_near_kk.py`; the test seed is
+public synthetic data, never a funded key.
+
+### Exact NEAR payments
+
+The existing `networks.near` serializers build Borsh bytes but did not sign exact
+NEAR payments. `sign_exact_near_delegate` reuses the escrow NEP-366 encoder and
+signature verifier; there is one implementation of delegate serialization.
+
+```python
+from uvd_x402_sdk import NearExactDelegateOptions, sign_exact_near_delegate
+from uvd_x402_sdk.near_escrow import NEAR_ESCROW_TOKENS
+
+payment = sign_exact_near_delegate(
+    NearExactDelegateOptions(
+        network="near:mainnet", signer=signer, sender_id="agent.parent.near",
+        nonce=next_access_key_nonce, max_block_height=expiry_block_height,
+    ),
+    token=NEAR_ESCROW_TOKENS["near:mainnet"], pay_to="seller.near", amount="10000",
+)
+```
+
+Returns the x402 payment `{x402Version: 2, scheme: "exact", network, payload:
+{signedDelegateAction}}`. It signs exactly one native-USDC `ft_transfer`, with
+1 yoctoNEAR and default/maximum 30 TGas. Amount is positive u128; nonce and expiry
+are positive u64 with `nonce < max_block_height * 1_000_000`. Amounts are always
+JSON decimal strings, including when Python callers pass integers.
+
+Select a FullAccess payer key. Read the next nonce and current height from the
+chain, serialize concurrent nonce allocation, enforce expiry freshness (KK uses
+at most 600 blocks), enforce the purchase budget and recipient/code policy, and
+persist the signed payment before relay. The SDK cannot check those live facts.
+`intents.near` is refused. Escrow payments continue through
+`sign_escrow_authorization`; exact does not replace Arras authorization.
+
+### Arras NEP-297 logs
+
+```python
+from uvd_x402_sdk import parse_arras_events
+
+for event in parse_arras_events(receipt_logs):
+    if event["event"] == "released":
+        for item in event["data"]:
+            print(item["payment_id"], item["amount"])
+```
+
+Returns typed envelopes `{standard: "arras", version: "1.0.0", event, data}`,
+preserving log order, batches and U128/U64 decimal strings without converting
+them to floats. Supports all eleven variants in `escrow-core/src/events.rs`:
+`authorized`, `released`, `refunded`, `reclaimed`, `withdrawn`, `compacted`,
+`operator_registered`, `operator_updated`, `caps_set`, `paused`, `unpaused`.
+Operator updates can omit unchanged fields. Extra data fields are preserved.
+Unrelated logs, malformed entries, unknown standards/versions/events, invalid
+field types and out-of-range integers are skipped; an invalid batch is skipped
+as a whole. Each JSON document is limited to 512 KiB and 64 nesting levels.
+
+Parsing is not proof of emitter identity or payment success. Consumers must
+check the receipt executor, receipt outcomes and expected payment id. In
+particular, a `withdrawn` entry with `ok=False` reports a failed withdrawal.
+
+`tests/fixtures/near-kk.json` is a byte copy of the TypeScript golden-flow fixture.
+Run `python scripts/near_kk_parity.py --ts-root <TS-checkout> --node <node20>` to
+compare both real runtimes' preimages, signatures, exact delegates, storage calls
+and event envelopes. Use a checkout with LF fixture bytes (`.gitattributes`), as in CI.
+The cross-language CI job runs this check too; the existing ERC-8128/escrow driver remains
+unchanged.
