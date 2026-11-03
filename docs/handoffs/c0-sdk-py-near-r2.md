@@ -28,3 +28,9 @@ is unchanged. Mypy has 170 preexisting errors versus 171 in base, with none in n
 Offline tests use closed proxies except loopback and an empty AWS credentials file, no profile.
 No RPC, transaction, merge of a PR, deploy or publish is performed by this worker.
 c0der controls the release after review. Existing commits b14f2ab, 9ccd948 and 1924d91 are preserved.
+
+Final verification: **7810 passed, 76 skipped, 0 failed**, +138 net tests against the saved base, identical skips/common verdicts. Two old wire-case IDs were replaced by explicit V-1..V-3 cases and the registered mainnet wire checks.
+CI cross-language on TS main a55578a: clean npm ci/build with Node 20.20.2, fixture check and 512 checks/9 phases pass.
+M1-M52 all killed (pytest exit 1), no timeouts, source untouched. Adversarial review gpt-6.1-sol/xhigh found
+no P1/P2/P3: 42 independently decoded/verified delegates and 630 pre-key refusals. Agent tokens are not exposed.
+merge-tree with the parallel Python golden-flow worker a84207e passes without conflicts.
