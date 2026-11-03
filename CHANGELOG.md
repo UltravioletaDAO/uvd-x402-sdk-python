@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.106.0] - 2026-11-03
+
+- Add offline `sign_nep413` and `nep413_preimage` with the NEP-413 domain prefix, Borsh callback option and locally verified Ed25519 signatures. Pin the official message example plus Unicode and absent/empty callback vectors shared with TypeScript.
+- Add `sign_exact_near_delegate` using the existing NEP-366 encoder: one native-USDC `ft_transfer`, 1 yoctoNEAR, at most 30 TGas, positive canonical integer amounts and bounded nonce/expiry.
+- Add payer-funded, unsigned Arras/USDC NEP-145 storage transactions. Arras targets must belong to the immutable deployment registry for the chosen network; the payer signs and pays deposit/gas.
+- Add typed `parse_arras_events` for all eleven v1 NEP-297 variants, preserving batches and integer strings while skipping foreign, unknown, malformed or oversized logs.
+- Export the helpers at package level; document adoption by EM#659 and KK, offline caller obligations, shared runtime parity and bounded mutation checks.
+
 ## [0.105.0] - 2026-11-02
 
 - NEAR escrow authorization and lifecycle signing now require a registered Arras contract for the selected network. `NEAR_ESCROW_CONTRACTS` is immutable: testnet contains `arras-v1b-1101.testnet`; mainnet contains `v1.arras-escrow.near`. `NEAR_ESCROW_TOKENS` is immutable too.

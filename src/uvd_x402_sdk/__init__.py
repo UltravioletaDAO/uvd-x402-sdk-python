@@ -856,3 +856,30 @@ __all__ += ["HederaSigner", "build_hedera_requirements", "build_hedera_request"]
 __all__ += ["FacilitatorReceipt", "PurchaseContext", "FetchReceiptResult",
             "verify_receipt", "payment_response_headers", "get_receipt",
             "fetch_with_receipt", "parse_receipt", "validate_purchase_context"]
+
+# NEAR offline golden-flow helpers; cryptography is imported only when signing.
+from uvd_x402_sdk.near_escrow import NearEd25519Signer, NearLocalSigner
+from uvd_x402_sdk.near_events import (
+    ArrasAuthorizedData, ArrasCapsSetData, ArrasCompactedData, ArrasEvent,
+    ArrasEventData, ArrasOperatorData, ArrasPauseData, ArrasPaymentAmountData,
+    ArrasReleasedData, ArrasWithdrawnData, parse_arras_events,
+)
+from uvd_x402_sdk.near_exact import NearExactDelegateOptions, sign_exact_near_delegate
+from uvd_x402_sdk.near_nep413 import (
+    NEP413_PREFIX, Nep413SignedMessage, nep413_preimage, sign_nep413,
+)
+from uvd_x402_sdk.near_storage import (
+    NEAR_ARRAS_STORAGE_DEPOSIT, NEAR_USDC_STORAGE_DEPOSIT, NearStorageTransaction,
+    build_arras_storage_deposit, build_usdc_storage_deposit,
+)
+
+__all__ += [
+    "NearEd25519Signer", "NearLocalSigner", "NearExactDelegateOptions",
+    "sign_exact_near_delegate", "NEP413_PREFIX", "Nep413SignedMessage",
+    "nep413_preimage", "sign_nep413", "NearStorageTransaction",
+    "NEAR_ARRAS_STORAGE_DEPOSIT", "NEAR_USDC_STORAGE_DEPOSIT",
+    "build_arras_storage_deposit", "build_usdc_storage_deposit", "ArrasAuthorizedData",
+    "ArrasCapsSetData", "ArrasCompactedData", "ArrasEvent", "ArrasEventData",
+    "ArrasOperatorData", "ArrasPauseData", "ArrasPaymentAmountData", "ArrasReleasedData",
+    "ArrasWithdrawnData", "parse_arras_events",
+]

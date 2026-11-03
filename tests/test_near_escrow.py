@@ -709,6 +709,12 @@ def test_guide_uses_the_capturer_key_for_release_and_refund():
         capturer_next_nonce=11,
         capturer_refund_nonce=12,
         capturer_expiry_height=100_000_001,
+        seed_from_your_key_store=bytes(range(32)),
+        server_challenge="EM payout proof: test",
+        server_nonce_32_bytes=bytes(range(32)),
+        next_access_key_nonce=7,
+        expiry_block_height=100_000_000,
+        receipt_logs=[],
     )
     for block in blocks:
         exec(compile(block, "docs/near-escrow.md", "exec"), context)
