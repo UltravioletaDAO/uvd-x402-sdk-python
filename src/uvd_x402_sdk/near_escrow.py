@@ -266,8 +266,6 @@ def _options(options: NearEscrowDelegateOptions) -> None:
     height = _uint(options.max_block_height, 64, "max_block_height")
     if nonce == 0:
         raise ValueError("nonce must be positive")
-    if height == 0:
-        raise ValueError("max_block_height must be positive")
     if nonce >= height * 1_000_000:
         raise ValueError("nonce must be below max_block_height * 1_000_000")
 
