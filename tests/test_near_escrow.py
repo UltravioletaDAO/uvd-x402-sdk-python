@@ -1,12 +1,14 @@
 """Frozen Rust vectors and an independent decoder of every signed NEP-366 field."""
 
 import base64
+import builtins
 import hashlib
 import inspect
 import json
 import struct
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -114,16 +116,12 @@ def test_canonical_msg_and_short_id():
     )
 
 
-@pytest.mark.parametrize(
-    "network,vector", [("near:testnet", V1), ("near:mainnet", VECTORS["payment_id"]["vectores"][2])]
-)
-def test_authorization_wire(network, vector):
-    o = options(
-        network=network,
-        sender_id=vector["payer"],
-        escrow_contract="arras.near" if network.endswith("mainnet") else "arras.testnet",
-    )
-    payment = authorize(o, token=vector["token"], msg=vector, amount=vector["amount"])
+@pytest.mark.parametrize("vector", VECTORS["payment_id"]["vectores"], ids=lambda v: v["id"])
+def test_authorization_wire(vector):
+    # The mainnet vector still pins its message/id; signing uses registered testnet USDC.
+    network = "near:testnet"
+    o = options(sender_id=vector["payer"])
+    payment = authorize(o, msg=vector, amount=vector["amount"])
     assert set(payment) == {"x402Version", "scheme", "network", "payload"}
     assert (
         payment["x402Version"] == 2
@@ -131,7 +129,7 @@ def test_authorization_wire(network, vector):
         and payment["network"] == network
     )
     d = decode(payment)
-    assert d["sender"] == vector["payer"] and d["receiver"] == vector["token"]
+    assert d["sender"] == vector["payer"] and d["receiver"] == TOKEN
     assert d["method"] == "ft_transfer_call"
     assert d["args"] == {
         "receiver_id": o.escrow_contract,
@@ -141,7 +139,7 @@ def test_authorization_wire(network, vector):
     assert d["gas"] == 100_000_000_000_000 and d["deposit"] == 1
     assert d["nonce"] == 7 and d["height"] == 100_000_000
     assert d["public_key"] == o.signer.public_key
-    assert authorize(o, token=vector["token"], msg=vector, amount=vector["amount"]) == payment
+    assert authorize(o, msg=vector, amount=vector["amount"]) == payment
 
 
 @pytest.mark.parametrize(
@@ -540,3 +538,160 @@ def test_facilitator_v2_envelopes():
     decoded = decode({"payload": body["paymentPayload"]["payload"]})
     assert decoded["method"] == "release" and decoded["nonce"] == 8
     assert body["resource"] == resource
+
+
+class NoKey:
+    @property
+    def public_key(self):
+        pytest.fail("invalid intent accessed the signer public key")
+
+    def sign(self, digest):
+        pytest.fail("invalid intent called the signer")
+
+
+def sign_operation(o, method):
+    if method == "authorize":
+        return authorize(o, token=es.NEAR_ESCROW_TOKENS[o.network])
+    args = (
+        {"account": "worker.testnet"}
+        if method == "withdraw_for"
+        else {} if method == "withdraw" else {"payment_id": V1["payment_id"]}
+    )
+    return es.sign_escrow_lifecycle(o, method, args)
+
+
+@pytest.mark.parametrize(
+    "method", ["authorize", "release", "refund", "reclaim", "withdraw", "withdraw_for"]
+)
+@pytest.mark.parametrize(
+    "network,contract",
+    [
+        ("near:mainnet", "evil-sink.near"),
+        ("near:mainnet", "arras-v1b-1101.testnet"),
+        ("near:mainnet", "arras.near"),
+        ("near:mainnet", "v1.arras.ultravioletadao.near"),
+        ("near:testnet", "evil-sink.testnet"),
+        ("near:testnet", "arras.testnet"),
+        ("near:testnet", "ARRAS-v1b-1101.testnet"),
+        ("near:testnet", " arras-v1b-1101.testnet"),
+        ("near:testnet", "arras-v1b-1101.testnet "),
+        ("near:testnet", "arras-v1b-1101.testnet\n"),
+        ("near:testnet", "ａｒｒａｓ-v1b-1101.testnet"),
+        ("near:testnet", ""),
+        ("near:testnet", None),
+    ],
+)
+def test_unregistered_contract_before_key(network, contract, method):
+    with pytest.raises(ValueError):
+        sign_operation(options(network=network, escrow_contract=contract, signer=NoKey()), method)
+
+
+def test_registries_are_immutable():
+    assert isinstance(es.NEAR_ESCROW_CONTRACTS, MappingProxyType)
+    assert dict(es.NEAR_ESCROW_CONTRACTS) == {
+        "near:testnet": ("arras-v1b-1101.testnet",),
+        "near:mainnet": (),
+    }
+    assert isinstance(es.NEAR_ESCROW_TOKENS, MappingProxyType)
+    assert dict(es.NEAR_ESCROW_TOKENS) == {
+        "near:testnet": TOKEN,
+        "near:mainnet": VECTORS["payment_id"]["vectores"][2]["token"],
+    }
+    with pytest.raises(TypeError):
+        es.NEAR_ESCROW_CONTRACTS["near:mainnet"] = ("evil-sink.near",)
+    with pytest.raises(TypeError):
+        es.NEAR_ESCROW_CONTRACTS["near:testnet"][0] = "evil-sink.testnet"
+    with pytest.raises(TypeError):
+        es.NEAR_ESCROW_TOKENS["near:testnet"] = "evil-token.testnet"
+
+
+@pytest.mark.parametrize(
+    "method", ["authorize", "release", "refund", "reclaim", "withdraw", "withdraw_for"]
+)
+@pytest.mark.parametrize("as_string", [False, True])
+def test_nonce_ceiling_before_key(method, as_string):
+    height = 100
+    ceiling = height * 1_000_000
+    encode = str if as_string else int
+    d = decode(
+        sign_operation(options(nonce=encode(ceiling - 1), max_block_height=encode(height)), method)
+    )
+    assert d["nonce"] == ceiling - 1 and d["height"] == height
+    for nonce in (ceiling, ceiling + 1, 2**64 - 1):
+        with pytest.raises(ValueError, match="nonce"):
+            sign_operation(
+                options(nonce=encode(nonce), max_block_height=encode(height), signer=NoKey()),
+                method,
+            )
+    # The product must not wrap/truncate to u64 or pass through floating point.
+    d = decode(sign_operation(options(nonce=2**64 - 1, max_block_height=2**64 - 1), method))
+    assert d["nonce"] == d["height"] == 2**64 - 1
+
+
+def test_integer_inputs_are_decimal_strings_in_signed_bytes():
+    terms = {**V1, "release_deadline": 1793577600000000000, "reclaim_after": 1793664000000000000}
+    d = decode(authorize(amount=1000000, msg=terms))
+    assert d["args"]["amount"] == "1000000"
+    msg = json.loads(d["args"]["msg"])
+    assert msg["release_deadline"] == "1793577600000000000"
+    assert msg["reclaim_after"] == "1793664000000000000"
+    assert d["args"]["msg"] == VECTORS["msg_canonico_v1"]
+    assert decode(es.release(options(), V1["payment_id"], 400000))["args"]["amount"] == "400000"
+
+
+def test_missing_crypto_extra_names_near(monkeypatch):
+    original = builtins.__import__
+
+    def without_crypto(name, *args, **kwargs):
+        if name.startswith("cryptography"):
+            raise ImportError("cryptography unavailable")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_crypto)
+    with pytest.raises(ImportError, match=r"uvd-x402-sdk\[near\]") as exc:
+        es.NearEd25519Signer(bytes(range(32)))
+    assert "solana" not in str(exc.value)
+
+
+def test_withdraw_for_can_name_the_caller():
+    o = options()
+    assert decode(es.withdraw_for(o, o.sender_id))["args"] == {"account": o.sender_id}
+
+
+def test_guide_uses_the_capturer_key_for_release_and_refund():
+    guide = (Path(__file__).resolve().parents[1] / "docs/near-escrow.md").read_text(
+        encoding="utf-8"
+    )
+    blocks = [part.split("```", 1)[0] for part in guide.split("```python\n")[1:]]
+    context = dict(
+        network="near:testnet",
+        secret_key=bytes(range(32)),
+        payer=V1["payer"],
+        contract="arras-v1b-1101.testnet",
+        next_nonce=7,
+        expiry_height=100_000_000,
+        token=TOKEN,
+        amount=1000000,
+        terms=V1,
+        resource={
+            "url": "https://seller.example/task",
+            "description": "task",
+            "mimeType": "application/json",
+        },
+        capturer="capturer.testnet",
+        capturer_secret_key=bytes(range(1, 33)),
+        capturer_next_nonce=11,
+        capturer_refund_nonce=12,
+        capturer_expiry_height=100_000_001,
+    )
+    for block in blocks:
+        exec(compile(block, "docs/near-escrow.md", "exec"), context)
+    for name, method, nonce in (("release_body", "release", 11), ("refund_body", "refund", 12)):
+        body = context[name]
+        d = decode({"payload": body["paymentPayload"]["payload"]})
+        assert d["sender"] == "capturer.testnet"
+        assert d["public_key"] == es.NearEd25519Signer(bytes(range(1, 33))).public_key
+        assert d["method"] == method and d["nonce"] == nonce
+        assert d["height"] == 100_000_001 and d["deposit"] == 0
+        assert body["accepted"]["amount"] == "0"
+        assert body["accepted"]["extra"]["nearEscrow"]["action"] == method

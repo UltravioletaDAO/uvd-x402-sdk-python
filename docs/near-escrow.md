@@ -1,4 +1,4 @@
-# Arras NEAR escrow (Python 0.104.0)
+# Arras NEAR escrow (Python 0.105.0)
 
 Install `pip install 'uvd-x402-sdk[near]'`. Import from `uvd_x402_sdk.near_escrow`.
 Builders need only the base package; signing uses cryptography. All helpers are offline.
@@ -6,15 +6,18 @@ They allocate no nonces and send no transactions.
 
 Use contract and operator IDs from trusted `GET /supported` configuration for the selected
 `scheme: escrow`, `near:mainnet` or `near:testnet` entry (`extra.nearEscrow.contracts` and
-`operatorIds`). A syntactically valid account does not prove deployment or facilitator support.
-Mainnet signing support does not enable mainnet escrow on the facilitator. Check its advertised
-support before submitting. There are no default escrow addresses.
+`operatorIds`). `NEAR_ESCROW_CONTRACTS` is an immutable registry of contracts this SDK will sign for:
+`near:testnet` contains only `arras-v1b-1101.testnet`; `near:mainnet` is empty until its
+deployment ships in a release. Authorization and every lifecycle method reject accounts outside
+the selected network row before accessing the signer. `NEAR_ESCROW_TOKENS` is immutable too.
+Check advertised support before submitting; callers still select the contract explicitly.
 
 ## Public API for adapters
 
 `Unsigned` below means `int | str`, with canonical ASCII decimal strings. Bools, floats, signs,
 whitespace, leading zeroes and overflow are rejected. All amounts are atomic token units, not USD
-floats. Release/reclaim timestamps are **nanoseconds** (u64); expiry is a **block height** (u64).
+floats. Amounts and deadlines passed as integers are encoded as decimal JSON strings.
+Release/reclaim timestamps are **nanoseconds** (u64); expiry is a **block height** (u64).
 
 | Name | Arguments | Return |
 | --- | --- | --- |
@@ -59,7 +62,8 @@ These are the current facilitator v1 limits, not automatically refreshed configu
 Use the operator/capturer's function-call key for release/refund/withdraw_for, restricted to
 the selected escrow, method names and a bounded allowance. A local secret does not encode
 its on-chain permission; the chain verifies it. Reclaim uses the payer's key; withdraw uses
-the balance holder's key. Never reuse the same nonce across calls. Persist signed bytes
+the balance holder's key. Delegates require `nonce < max_block_height * 1_000_000`; equality and larger nonces are
+rejected before accessing a key. Never reuse the same nonce across calls. Persist signed bytes
 before submission; submission/receipt reconciliation belongs to the adapter.
 
 ## Building a facilitator request
@@ -98,10 +102,14 @@ method name). Release/refund/reclaim also name `paymentId`:
 from dataclasses import replace
 from uvd_x402_sdk.envelope_v2 import build_settle_request_v2
 
-# This example reserves the next distinct nonce. In a concurrent adapter use
-# your persistent nonce allocator, not an unsynchronized increment.
-next_options = replace(options, nonce=int(options.nonce) + 1)
-released = near.release(next_options, payment_id)
+# Release/refund use the capturer's key and its own selected access-key context.
+# Reserve distinct nonces with your persistent allocator before signing.
+capturer_options = near.NearEscrowDelegateOptions(
+    network=network, signer=near.NearEd25519Signer(capturer_secret_key),
+    sender_id=capturer, escrow_contract=contract,
+    nonce=capturer_next_nonce, max_block_height=capturer_expiry_height,
+)
+released = near.release(capturer_options, payment_id)
 lifecycle_accepted = {
     **accepted, "amount": "0", "extra": {"nearEscrow": {
         "contract": contract, "action": "release", "paymentId": payment_id,
@@ -109,6 +117,16 @@ lifecycle_accepted = {
 }
 release_body = build_settle_request_v2(
     payload=released["payload"], resource=resource, accepted=lifecycle_accepted,
+)
+
+# Alternative refund flow, using another nonce reserved for the same capturer key.
+refund_options = replace(capturer_options, nonce=capturer_refund_nonce)
+refunded = near.refund(refund_options, payment_id)
+refund_body = build_settle_request_v2(
+    payload=refunded["payload"], resource=resource,
+    accepted={**lifecycle_accepted, "extra": {"nearEscrow": {
+        "contract": contract, "action": "refund", "paymentId": payment_id,
+    }}},
 )
 ```
 
@@ -132,7 +150,9 @@ python scripts/near_escrow_parity.py --ts-root ../uvd-x402-sdk-typescript --node
 ```
 
 The second command requires the TypeScript H-6 checkout with dependencies installed (`npm ci`).
-It compiles the actual TS helper in memory and compares all three vectors plus 21 signed
-delegates (authorization and each lifecycle method), including signatures and the full JSON
-payment, without RPC calls or generated expectations. It fails if TypeScript is unavailable.
+It compiles the actual TS helper in memory and compares all three unchanged vectors and
+21 signed testnet delegates (authorization and each lifecycle method), including signatures
+and the full JSON payment. V-3 retains its mainnet message/preimage/ID; its signing exercise
+uses registered testnet USDC. The harness also compares the contract registry and refusals
+before signing, without RPC calls or generated expectations. It fails if TypeScript is unavailable.
 The v2 budget format is not defined here; no budget vectors or signing are invented.

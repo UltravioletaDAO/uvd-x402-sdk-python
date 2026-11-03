@@ -1,6 +1,7 @@
 """Arras v1: offline NEP-366 signing, in atomic units and nanoseconds.
 
-Read contract/operator scope from trusted facilitator ``/supported`` configuration.
+Only registered escrow contracts are signed. Read operator scope and advertised
+support from trusted facilitator ``/supported`` configuration.
 No helper submits a transaction, reads an access key or allocates a nonce. Pass the
 NEXT nonce and an expiry block from the selected key; persist the signed payment
 before submitting it. Lifecycle callers should use a function-call key restricted
@@ -18,6 +19,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Protocol, Union
 
 from .networks.near import (
@@ -36,6 +38,7 @@ __all__ = [
     "NEAR_ESCROW_MIN_GAS",
     "NEAR_ESCROW_MAX_GAS",
     "NEAR_ESCROW_TOKENS",
+    "NEAR_ESCROW_CONTRACTS",
     "build_escrow_msg",
     "payment_id_preimage",
     "compute_payment_id",
@@ -55,10 +58,19 @@ __all__ = [
 Unsigned = Union[int, str]
 NEAR_ESCROW_MIN_GAS = 38_000_000_000_000
 NEAR_ESCROW_MAX_GAS = 100_000_000_000_000
-NEAR_ESCROW_TOKENS = {
-    "near:mainnet": NEAR.usdc_address,
-    "near:testnet": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
-}
+NEAR_ESCROW_TOKENS: Mapping[str, str] = MappingProxyType(
+    {
+        "near:mainnet": NEAR.usdc_address,
+        "near:testnet": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+    }
+)
+# Mainnet stays closed until its deployment is included in a release.
+NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "near:testnet": ("arras-v1b-1101.testnet",),
+        "near:mainnet": (),
+    }
+)
 _LIFECYCLE_GAS = {
     "release": (3_000_000_000_000, 30_000_000_000_000),
     "refund": (3_000_000_000_000, 30_000_000_000_000),
@@ -78,7 +90,7 @@ def _uint(value: Unsigned, bits: int, name: str) -> int:
     return value
 
 
-def _account(value: str, name: str) -> None:
+def _account(value: object, name: str) -> None:
     if (
         not isinstance(value, str)
         or not 2 <= len(value) <= 64
@@ -209,7 +221,13 @@ class NearEd25519Signer:
             raw = secret_key
         else:
             raise ValueError("expected a 32-byte seed or NEAR ed25519: secret key")
-        self._signer = Ed25519Signer(raw)
+        try:
+            self._signer = Ed25519Signer(raw)
+        except ImportError:
+            raise ImportError(
+                "NearEd25519Signer needs cryptography; install the 'near' extra: "
+                "pip install 'uvd-x402-sdk[near]'"
+            ) from None
 
     @property
     def public_key(self) -> bytes:
@@ -242,10 +260,16 @@ def _options(options: NearEscrowDelegateOptions) -> None:
         raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
     _account(options.sender_id, "sender_id")
     _account(options.escrow_contract, "escrow_contract")
-    if _uint(options.nonce, 64, "nonce") == 0:
+    if options.escrow_contract not in NEAR_ESCROW_CONTRACTS[options.network]:
+        raise ValueError("escrow_contract is not registered for this network")
+    nonce = _uint(options.nonce, 64, "nonce")
+    height = _uint(options.max_block_height, 64, "max_block_height")
+    if nonce == 0:
         raise ValueError("nonce must be positive")
-    if _uint(options.max_block_height, 64, "max_block_height") == 0:
+    if height == 0:
         raise ValueError("max_block_height must be positive")
+    if nonce >= height * 1_000_000:
+        raise ValueError("nonce must be below max_block_height * 1_000_000")
 
 
 def build_escrow_authorization_delegate(
@@ -457,7 +481,7 @@ def withdraw(options: NearEscrowDelegateOptions) -> dict:
 
 
 def withdraw_for(options: NearEscrowDelegateOptions, account: str) -> dict:
-    """Withdraw to account, never to the capturer that triggers the call."""
+    """Withdraw to the named account, which may also be the caller."""
     return sign_escrow_lifecycle(options, "withdraw_for", {"account": account})
 
 

@@ -14,15 +14,16 @@ const mod = new Module(source);
 mod.paths = Module._nodeModulePaths(dirname(source));
 mod._compile(code, source);
 const sdk = mod.exports;
-const vectors = JSON.parse(readFileSync(0, 'utf8'));
+const { vectors, cases } = JSON.parse(readFileSync(0, 'utf8'));
 const signer = sdk.createNearLocalSigner(Uint8Array.from({ length: 32 }, (_, i) => i));
 const results = [];
 for (const v of vectors.payment_id.vectores) {
-  const network = v.token === sdk.NEAR_ESCROW_TOKENS['near:mainnet'] ? 'near:mainnet' : 'near:testnet';
+  const network = 'near:testnet';
   const o = { network, signer, senderId: v.payer,
-    escrowContract: network === 'near:mainnet' ? 'arras.near' : 'arras.testnet',
+    escrowContract: sdk.NEAR_ESCROW_CONTRACTS[network][0],
     nonce: '7', maxBlockHeight: '100000000' };
-  const authorization = await sdk.signEscrowAuthorization({ ...o, token: v.token, amount: v.amount, msg: v });
+  const authorization = await sdk.signEscrowAuthorization({ ...o, token: sdk.NEAR_ESCROW_TOKENS[network], amount: BigInt(v.amount),
+    msg: { ...v, release_deadline: BigInt(v.release_deadline), reclaim_after: BigInt(v.reclaim_after) } });
   const lifecycle = [];
   for (const [method, args] of [
     ['release', { payment_id: v.payment_id }],
@@ -34,5 +35,21 @@ for (const v of vectors.payment_id.vectores) {
     preimage: Buffer.from(sdk.paymentIdPreimage(v)).toString('hex'),
     paymentId: sdk.computePaymentId(v), authorization, lifecycle });
 }
-process.stdout.write(JSON.stringify({ results,
+const refusals = [];
+for (const c of cases) {
+  let touched = false;
+  const spy = { get publicKey() { touched = true; return signer.publicKey; },
+    sign(digest) { touched = true; return signer.sign(digest); } };
+  const o = { network: c.network, signer: spy, senderId: c.vector.payer,
+    escrowContract: c.contract, nonce: c.nonce, maxBlockHeight: c.height };
+  let refused = false;
+  try {
+    if (c.method === 'authorize') await sdk.signEscrowAuthorization({ ...o,
+      token: c.vector.token, amount: c.vector.amount, msg: c.vector });
+    else await sdk.signEscrowLifecycle(o, c.method, c.method === 'withdraw_for'
+      ? { account: c.vector.receiver } : c.method === 'withdraw' ? {} : { payment_id: c.vector.payment_id });
+  } catch { refused = !touched; }
+  refusals.push(refused);
+}
+process.stdout.write(JSON.stringify({ results, contracts: sdk.NEAR_ESCROW_CONTRACTS, refusals,
   minGas: String(sdk.NEAR_ESCROW_MIN_GAS), maxGas: String(sdk.NEAR_ESCROW_MAX_GAS) }));
