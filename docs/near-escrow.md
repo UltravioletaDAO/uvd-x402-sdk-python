@@ -7,8 +7,8 @@ They allocate no nonces and send no transactions.
 Use contract and operator IDs from trusted `GET /supported` configuration for the selected
 `scheme: escrow`, `near:mainnet` or `near:testnet` entry (`extra.nearEscrow.contracts` and
 `operatorIds`). `NEAR_ESCROW_CONTRACTS` is an immutable registry of contracts this SDK will sign for:
-`near:testnet` contains only `arras-v1b-1101.testnet`; `near:mainnet` is empty until its
-deployment ships in a release. Authorization and every lifecycle method reject accounts outside
+`near:testnet` contains only `arras-v1b-1101.testnet`; `near:mainnet` contains only
+`v1.arras-escrow.near`. Authorization and every lifecycle method reject accounts outside
 the selected network row before accessing the signer. `NEAR_ESCROW_TOKENS` is immutable too.
 Check advertised support before submitting; callers still select the contract explicitly.
 
@@ -151,8 +151,8 @@ python scripts/near_escrow_parity.py --ts-root ../uvd-x402-sdk-typescript --node
 
 The second command requires the TypeScript H-6 checkout with dependencies installed (`npm ci`).
 It compiles the actual TS helper in memory and compares all three unchanged vectors and
-21 signed testnet delegates (authorization and each lifecycle method), including signatures
-and the full JSON payment. V-3 retains its mainnet message/preimage/ID; its signing exercise
-uses registered testnet USDC. The harness also compares the contract registry and refusals
+21 signed delegates on each network (authorization and each lifecycle method), including signatures
+and the full JSON payment. V-3 retains its mainnet message/preimage/ID. Signing exercises use
+each network's registered contract and USDC. The harness also compares the contract registry and refusals
 before signing, without RPC calls or generated expectations. It fails if TypeScript is unavailable.
 The v2 budget format is not defined here; no budget vectors or signing are invented.

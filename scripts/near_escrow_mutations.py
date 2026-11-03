@@ -74,6 +74,8 @@ def mutations(source: str):
             'raise NotImplementedError("Arras v2 budget ABI and golden vectors are not frozen")',
             "return {}",
         ),
+        ('("v1.arras-escrow.near",)', "()"),
+        ('("v1.arras-escrow.near",)', '["v1.arras-escrow.near"]'),
     ]
     for old, new in replacements:
         assert source.count(old) == 1, ("mutation site moved", old, source.count(old))

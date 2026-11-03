@@ -570,6 +570,12 @@ def sign_operation(o, method):
         ("near:mainnet", "arras-v1b-1101.testnet"),
         ("near:mainnet", "arras.near"),
         ("near:mainnet", "v1.arras.ultravioletadao.near"),
+        ("near:mainnet", "V1.arras-escrow.near"),
+        ("near:mainnet", " v1.arras-escrow.near"),
+        ("near:mainnet", "v1.arras-escrow.near "),
+        ("near:mainnet", "v1.arras-escrow.near\n"),
+        ("near:mainnet", "v1.ａｒｒａｓ-escrow.near"),
+        ("near:testnet", "v1.arras-escrow.near"),
         ("near:testnet", "evil-sink.testnet"),
         ("near:testnet", "arras.testnet"),
         ("near:testnet", "ARRAS-v1b-1101.testnet"),
@@ -586,11 +592,29 @@ def test_unregistered_contract_before_key(network, contract, method):
         sign_operation(options(network=network, escrow_contract=contract, signer=NoKey()), method)
 
 
+@pytest.mark.parametrize(
+    "method", ["authorize", "release", "refund", "reclaim", "withdraw", "withdraw_for"]
+)
+def test_registered_mainnet_contract_wire(method):
+    o = options(network="near:mainnet", escrow_contract="v1.arras-escrow.near")
+    payment = sign_operation(o, method)
+    assert payment["network"] == "near:mainnet"
+    d = decode(payment)
+    if method == "authorize":
+        assert d["receiver"] == VECTORS["payment_id"]["vectores"][2]["token"]
+        assert d["method"] == "ft_transfer_call" and d["deposit"] == 1
+        assert d["args"]["receiver_id"] == "v1.arras-escrow.near"
+    else:
+        assert d["receiver"] == "v1.arras-escrow.near"
+        assert d["method"] == method and d["deposit"] == 0
+    assert d["public_key"] == o.signer.public_key
+
+
 def test_registries_are_immutable():
     assert isinstance(es.NEAR_ESCROW_CONTRACTS, MappingProxyType)
     assert dict(es.NEAR_ESCROW_CONTRACTS) == {
         "near:testnet": ("arras-v1b-1101.testnet",),
-        "near:mainnet": (),
+        "near:mainnet": ("v1.arras-escrow.near",),
     }
     assert isinstance(es.NEAR_ESCROW_TOKENS, MappingProxyType)
     assert dict(es.NEAR_ESCROW_TOKENS) == {
@@ -601,6 +625,8 @@ def test_registries_are_immutable():
         es.NEAR_ESCROW_CONTRACTS["near:mainnet"] = ("evil-sink.near",)
     with pytest.raises(TypeError):
         es.NEAR_ESCROW_CONTRACTS["near:testnet"][0] = "evil-sink.testnet"
+    with pytest.raises(TypeError):
+        es.NEAR_ESCROW_CONTRACTS["near:mainnet"][0] = "evil-sink.near"
     with pytest.raises(TypeError):
         es.NEAR_ESCROW_TOKENS["near:testnet"] = "evil-token.testnet"
 

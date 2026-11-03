@@ -17,8 +17,7 @@ const sdk = mod.exports;
 const { vectors, cases } = JSON.parse(readFileSync(0, 'utf8'));
 const signer = sdk.createNearLocalSigner(Uint8Array.from({ length: 32 }, (_, i) => i));
 const results = [];
-for (const v of vectors.payment_id.vectores) {
-  const network = 'near:testnet';
+for (const network of ['near:testnet', 'near:mainnet']) for (const v of vectors.payment_id.vectores) {
   const o = { network, signer, senderId: v.payer,
     escrowContract: sdk.NEAR_ESCROW_CONTRACTS[network][0],
     nonce: '7', maxBlockHeight: '100000000' };

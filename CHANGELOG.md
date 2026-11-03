@@ -4,7 +4,7 @@
 
 ## [0.105.0] - 2026-11-02
 
-- NEAR escrow authorization and lifecycle signing now require a registered Arras contract for the selected network. `NEAR_ESCROW_CONTRACTS` is immutable: testnet contains `arras-v1b-1101.testnet`; mainnet is empty until its deployment ships in a release. `NEAR_ESCROW_TOKENS` is immutable too.
+- NEAR escrow authorization and lifecycle signing now require a registered Arras contract for the selected network. `NEAR_ESCROW_CONTRACTS` is immutable: testnet contains `arras-v1b-1101.testnet`; mainnet contains `v1.arras-escrow.near`. `NEAR_ESCROW_TOKENS` is immutable too.
 - Reject delegates with `nonce >= max_block_height * 1_000_000` before accessing the signer.
 - Pin decimal-string encoding of integer amounts and nanosecond deadlines in signed delegates. Correct the capturer examples, missing `near` extra error, account-validator typing and `withdraw_for` docstring.
 - Preserve the frozen Rust vectors and compare actual TypeScript/Python messages, IDs, signed delegates and pre-signature refusals offline.

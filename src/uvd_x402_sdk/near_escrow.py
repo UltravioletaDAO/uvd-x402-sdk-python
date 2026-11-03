@@ -64,11 +64,11 @@ NEAR_ESCROW_TOKENS: Mapping[str, str] = MappingProxyType(
         "near:testnet": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
     }
 )
-# Mainnet stays closed until its deployment is included in a release.
+# Arras v1 deployments, isolated by network.
 NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "near:testnet": ("arras-v1b-1101.testnet",),
-        "near:mainnet": (),
+        "near:mainnet": ("v1.arras-escrow.near",),
     }
 )
 _LIFECYCLE_GAS = {

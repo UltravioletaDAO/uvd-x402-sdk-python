@@ -10,6 +10,7 @@ import argparse
 import json
 import subprocess
 from dataclasses import replace
+from itertools import product
 from pathlib import Path
 
 from uvd_x402_sdk import near_escrow as sdk
@@ -27,6 +28,9 @@ def check(ts_root: Path, node: str = "node") -> None:
             ("near:mainnet", "arras-v1b-1101.testnet", "7", "100000000"),
             ("near:mainnet", "arras.near", "7", "100000000"),
             ("near:testnet", "evil-sink.testnet", "7", "100000000"),
+            ("near:testnet", "v1.arras-escrow.near", "7", "100000000"),
+            ("near:mainnet", "v1.arras-escrow.near", "100000000", "100"),
+            ("near:mainnet", "v1.arras-escrow.near", "100000001", "100"),
             ("near:testnet", "arras-v1b-1101.testnet", "100000000", "100"),
             ("near:testnet", "arras-v1b-1101.testnet", "100000001", "100"),
         ):
@@ -55,8 +59,7 @@ def check(ts_root: Path, node: str = "node") -> None:
     assert actual["minGas"] == str(sdk.NEAR_ESCROW_MIN_GAS)
     assert actual["maxGas"] == str(sdk.NEAR_ESCROW_MAX_GAS)
     expected = []
-    for v in vectors["payment_id"]["vectores"]:
-        network = "near:testnet"
+    for network, v in product(("near:testnet", "near:mainnet"), vectors["payment_id"]["vectores"]):
         options = sdk.NearEscrowDelegateOptions(
             network=network,
             signer=sdk.NearEd25519Signer(bytes(range(32))),
@@ -139,7 +142,7 @@ def check(ts_root: Path, node: str = "node") -> None:
             refusals.append(False)
     assert actual["refusals"] == refusals == [True] * len(cases)
     print(
-        "NEAR parity: V-1..V-3 messages, preimages, ids and 21 signed testnet delegates "
+        "NEAR parity: V-1..V-3 messages, preimages, ids and 42 signed delegates (21 per network) "
         f"are byte-identical; registry and {len(cases)} pre-signature refusals match"
     )
 

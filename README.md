@@ -523,7 +523,8 @@ NEAR uses NEP-366 meta-transactions with Borsh serialization.
 Arras escrow helpers (`uvd_x402_sdk.near_escrow`, extra `near`) sign local Ed25519
 `ft_transfer_call` authorizations and `release`/`refund`/`reclaim`/`withdraw`/`withdraw_for`
 delegates offline. See [the public API and facilitator request examples](docs/near-escrow.md).
-Mainnet and testnet support depends on the facilitator's advertised `escrow` entry.
+Signing requires a contract in `NEAR_ESCROW_CONTRACTS` for its network and advertised facilitator support.
+The registry contains `arras-v1b-1101.testnet` on testnet and `v1.arras-escrow.near` on mainnet.
 
 ```python
 from uvd_x402_sdk import X402Client, X402Config
