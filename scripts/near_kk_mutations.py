@@ -45,6 +45,8 @@ def mutations(name, source):
             )
     sites = {
         "near_exact": [
+            ('_account(sender, "sender_id")', "pass"),
+            ('_account(pay_to, "pay_to")', "pass"),
             ('"amount": str(value)', '"amount": amount'),
             ('"deposit": 1', '"deposit": 0'),
             ('"ft_transfer"', '"ft_transfer_call"'),
@@ -52,6 +54,7 @@ def mutations(name, source):
             ("nonce >= height * 1_000_000", "nonce > height * 1_000_000"),
         ],
         "near_nep413": [
+            ('_account(account_id, "account_id")', "pass"),
             ("2**31 + 413", "2**30 + 413"),
             (
                 (
@@ -76,6 +79,12 @@ def mutations(name, source):
             ('"30000000000000"', '"30000000000001"'),
         ],
         "near_events": [
+            ("not isinstance(logs, Iterable) or isinstance(logs, (str, bytes, dict))", "False"),
+            ('not isinstance(log, str) or not log.startswith("EVENT_JSON:")', "False"),
+            ("not isinstance(value, dict)", "False"),
+            ('not isinstance(value.get("event"), str)', "False"),
+            ("isinstance(value, dict)\n            and all(", "True\n            and all("),
+            ("key not in value or validate(value[key])", "True"),
             ("return isinstance(value, str)", "return True"),
             ("return type(value) is bool", "return True"),
             ("if type(value) is not str:", "if False:"),

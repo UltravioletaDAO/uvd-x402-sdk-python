@@ -551,3 +551,25 @@ def test_fixture_is_frozen():
 
 
 FIXTURE_SHA256 = "763537d4ed2026e286bc4876efcbfbd141385a2cd7968c60653ed13efcc14bca"
+
+
+@pytest.mark.parametrize(
+    "builder", [storage.build_arras_storage_deposit, storage.build_usdc_storage_deposit]
+)
+@pytest.mark.parametrize("payer", [None, "A.near", "aa.near\n", "ñ.near"])
+def test_storage_valid_beneficiary_does_not_mask_invalid_payer(builder, payer):
+    args = dict(network="near:testnet", payer_id=payer, account_id="beneficiary.testnet")
+    if builder is storage.build_arras_storage_deposit:
+        args["escrow_contract"] = "arras-v1b-1101.testnet"
+    with pytest.raises(ValueError):
+        builder(**args)
+
+
+def test_events_prefix_is_exact_even_with_valid_json_tail():
+    good = V["arrasEvents"][1]
+    assert (
+        events.parse_arras_events(
+            [good.replace("EVENT_JSON:", "event_json:"), "garbage___:" + good[11:]]
+        )
+        == []
+    )
