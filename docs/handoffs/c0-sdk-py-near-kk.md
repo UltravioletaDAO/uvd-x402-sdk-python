@@ -22,4 +22,28 @@ binding. No helper sends transactions or loads keys from an external store.
 OWS real-vault tests skip on Windows with the existing explicit reason because the
 pinned library has no Windows wheel; Linux CI keeps its real-library import gate.
 
-Validation evidence is recorded below when the final union has been checked.
+Validation (PowerShell, no production network or credentials):
+
+| Check | Local result |
+| --- | --- |
+| Golden-flow tests | 194 passed on Python 3.11.4 and installed wheel on 3.9.24 |
+| Independent protocol verification | Official NEP-413 example, hand-built Borsh and Ed25519 verification; full NEP-366 wire decoder |
+| NEAR runtime parity | 3 NEP-413 preimages/signatures, 2 exact delegates, 3 storage calls, 11 event variants match TS |
+| Existing escrow parity | 42 delegates across both networks and 54 pre-signature refusals match TS |
+| General cross-language driver | 512 checks passed with Node 20.20.2 |
+| Source mutation runner | 54/54 killed, no timeouts; tracked source untouched |
+| Wheel compatibility | Base import/builders work without cryptography on Python 3.9; signer tests pass with it |
+| Lint/format | Ruff 0.17.3 and Black 26.10.1 pass for the new Python files |
+| Secret scan | Gitleaks 8.30.1, three-dot diff against origin/main: zero findings |
+| Pre-CI | exit 0; no cheap steps recognized, so the heavy jobs were run explicitly |
+
+The first mutation round exposed a masked payer-validator test: the default
+beneficiary copied the invalid payer, causing a different check to reject it.
+The final suite isolates an invalid payer with a valid beneficiary; that mutation
+now fails. The mutation runner also exercises the exact log prefix with valid
+JSON tails and JSON bounds on otherwise valid envelopes.
+
+One independent adversarial Codex review (gpt-6.1-terra/xhigh) found no P1/P2;
+its CI-coverage observation led to adding the NEAR runtime driver to the job.
+The tool did not expose subagent token usage. The strict fixture check needs LF
+bytes, as enforced by both repositories' .gitattributes.
