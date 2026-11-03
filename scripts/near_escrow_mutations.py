@@ -42,6 +42,21 @@ def mutations(source: str):
         )
     replacements = [
         ("NEP366_PREFIX + wire", "wire"),
+        ('"amount": str(n)', '"amount": amount'),
+        ("str(release_at)", 'params["release_deadline"]'),
+        ("str(reclaim_at)", 'params["reclaim_after"]'),
+        ('str(_uint(amount, 128, "amount"))', "amount"),
+        ("nonce >= height * 1_000_000", "nonce > height * 1_000_000"),
+        (
+            "NEAR_ESCROW_TOKENS: Mapping[str, str] = MappingProxyType(",
+            "NEAR_ESCROW_TOKENS: Mapping[str, str] = dict(",
+        ),
+        (
+            "NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(",
+            "NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = dict(",
+        ),
+        ('("arras-v1b-1101.testnet",)', '["arras-v1b-1101.testnet"]'),
+        ("uvd-x402-sdk[near]'\"", "uvd-x402-sdk[solana]'\""),
         (".write_u8(2)", ".write_u8(0)"),
         (
             '("operator_id", "token", "payer", "receiver")',
@@ -59,6 +74,8 @@ def mutations(source: str):
             'raise NotImplementedError("Arras v2 budget ABI and golden vectors are not frozen")',
             "return {}",
         ),
+        ('("v1.arras-escrow.near",)', "()"),
+        ('("v1.arras-escrow.near",)', '["v1.arras-escrow.near"]'),
     ]
     for old, new in replacements:
         assert source.count(old) == 1, ("mutation site moved", old, source.count(old))
