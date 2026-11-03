@@ -26,6 +26,8 @@ Validation (PowerShell, no production network or credentials):
 
 | Check | Local result |
 | --- | --- |
+| Complete base | 7,672 passed, 76 skipped, zero failures on origin/main 4d22320 |
+| Final test coverage | 8,008 passed, 76 skipped, zero failures; all 8,084 final collected cases covered by the complete suite plus final NEAR rerun |
 | Golden-flow tests | 194 passed on Python 3.11.4 and installed wheel on 3.9.24 |
 | Independent protocol verification | Official NEP-413 example, hand-built Borsh and Ed25519 verification; full NEP-366 wire decoder |
 | NEAR runtime parity | 3 NEP-413 preimages/signatures, 2 exact delegates, 3 storage calls, 11 event variants match TS |
@@ -47,3 +49,10 @@ One independent adversarial Codex review (gpt-6.1-terra/xhigh) found no P1/P2;
 its CI-coverage observation led to adding the NEAR runtime driver to the job.
 The tool did not expose subagent token usage. The strict fixture check needs LF
 bytes, as enforced by both repositories' .gitattributes.
+
+Final stack: rebased onto origin/0xultravioleta/c0-sdk-py-near-r2 at 3d50a26
+(PR #79), with origin/main 4d22320 already included. merge-tree against r2 is
+clean. The final remote rebase changed only six lines of r2's handoff; runtime
+sources are identical to those used by the full-suite run. After adding nine
+mutation-isolation cases, the final NEAR rerun passed 465 tests; auditing both
+JUnit files against the final collection found no uncovered or failing cases.
