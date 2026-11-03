@@ -520,6 +520,11 @@ print(f"Token Contract: {stellar_data.tokenContract}")
 
 NEAR uses NEP-366 meta-transactions with Borsh serialization.
 
+Arras escrow helpers (`uvd_x402_sdk.near_escrow`, extra `near`) sign local Ed25519
+`ft_transfer_call` authorizations and `release`/`refund`/`reclaim`/`withdraw`/`withdraw_for`
+delegates offline. See [the public API and facilitator request examples](docs/near-escrow.md).
+Mainnet and testnet support depends on the facilitator's advertised `escrow` entry.
+
 ```python
 from uvd_x402_sdk import X402Client, X402Config
 

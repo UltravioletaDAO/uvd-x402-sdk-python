@@ -1,0 +1,129 @@
+{
+  "_fuente": "prescripcion del escrow Arras, sec. 7 (recomputados por el refutador el 2026-10-26); probados por U-01 y U-02 en contracts/escrow-core",
+  "payment_id": {
+    "formula": "base58(sha256(borsh(preimagen)))",
+    "preimagen": [
+      "v u8 (=1)",
+      "operator_id String",
+      "token String",
+      "payer String",
+      "receiver String",
+      "amount u128",
+      "release_deadline u64",
+      "reclaim_after u64",
+      "fee_bps_max u16",
+      "terms_hash [u8;32]",
+      "salt [u8;16]"
+    ],
+    "borsh": "String = u32 LE + bytes; enteros LE",
+    "vectores": [
+      {
+        "id": "V-1",
+        "operator_id": "em",
+        "token": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+        "payer": "payer-demo.testnet",
+        "receiver": "worker-demo.testnet",
+        "amount": "1000000",
+        "release_deadline": "1793577600000000000",
+        "reclaim_after": "1793664000000000000",
+        "fee_bps_max": 1300,
+        "terms_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "salt": "00000000000000000000000000000000",
+        "preimagen_bytes": 202,
+        "preimagen_hex": "0102000000656d40000000336532323130653131383462343562363463386134333463306137653762323363633034656137656237613663336333323532306430336434616663623861661200000070617965722d64656d6f2e746573746e657413000000776f726b65722d64656d6f2e746573746e657440420f000000000000000000000000000000190d5311e4180000689ee75fe4181405000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "sha256": "b7b2b0e5d5108ea9a57677a8c6a8db75f5a3a831dd79c8aa64fbaf5b1c8573b2",
+        "payment_id": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M"
+      },
+      {
+        "id": "V-2",
+        "operator_id": "em",
+        "token": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+        "payer": "payer-demo.testnet",
+        "receiver": "worker-demo.testnet",
+        "amount": "1000000",
+        "release_deadline": "1793577600000000000",
+        "reclaim_after": "1793664000000000000",
+        "fee_bps_max": 1300,
+        "terms_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "salt": "00000000000000000000000000000001",
+        "preimagen_bytes": 202,
+        "sha256": "068f284abb07df3b822f07b5ea6463ccfbcbc79cb505350482aa684b4df90be8",
+        "payment_id": "Sc4D4Jn3ErWE68FckdDTLzThk1FTR1ZfLzuBUE4EeRm",
+        "nota": "43 caracteres, no 44"
+      },
+      {
+        "id": "V-3",
+        "operator_id": "em",
+        "token": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+        "payer": "payer-demo.near",
+        "receiver": "robot-k1.near",
+        "amount": "10000000",
+        "release_deadline": "1793577600000000000",
+        "reclaim_after": "1793664000000000000",
+        "fee_bps_max": 1800,
+        "terms_hash": "134931ea6d298d41174d2200087b1c4a38c81987f1af576b4601921af65808d8",
+        "terms_hash_es": "sha256(\"em-task-0001\")",
+        "salt": "abababababababababababababababab",
+        "preimagen_bytes": 193,
+        "sha256": "1bda3698bc2574284b8a54b4078007aff35bf04514e8c66eae4e5c96f49ca359",
+        "payment_id": "2sizp6qpQdKz3DPmd1kX2ovobag9LfXerQKmEPQV3mb6"
+      }
+    ]
+  },
+  "msg_canonico_v1": "{\"v\":1,\"action\":\"authorize\",\"operator_id\":\"em\",\"receiver\":\"worker-demo.testnet\",\"release_deadline\":\"1793577600000000000\",\"reclaim_after\":\"1793664000000000000\",\"fee_bps_max\":1300,\"terms_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"salt\":\"00000000000000000000000000000000\"}",
+  "tarifas": {
+    "formula": "fee = floor(x * fee_bps / 10000), net = x - fee",
+    "vectores": [
+      {
+        "id": "F-1",
+        "x": "1000000",
+        "fee_bps": 1300,
+        "fee": "130000",
+        "net": "870000"
+      },
+      {
+        "id": "F-2",
+        "x": "1",
+        "fee_bps": 1300,
+        "fee": "0",
+        "net": "1"
+      },
+      {
+        "id": "F-3",
+        "x": "10000000",
+        "fee_bps": 1300,
+        "fee": "1300000",
+        "net": "8700000"
+      },
+      {
+        "id": "F-4",
+        "x": "400000",
+        "fee_bps": 1300,
+        "fee": "52000",
+        "net": "348000"
+      },
+      {
+        "id": "F-5",
+        "x": "600000",
+        "fee_bps": 1300,
+        "fee": "78000",
+        "net": "522000"
+      },
+      {
+        "id": "F-6",
+        "x": "10000000",
+        "fee_bps": 1800,
+        "fee": "1800000",
+        "net": "8200000"
+      },
+      {
+        "id": "F-7",
+        "x": "10000",
+        "fee_bps": 1300,
+        "fee": "1300",
+        "net": "8700",
+        "nota": "min_amount 0,01 USDC"
+      }
+    ]
+  }
+}
