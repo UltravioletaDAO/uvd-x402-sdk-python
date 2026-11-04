@@ -151,7 +151,8 @@ async def test_a_failing_persist_sends_nothing(world):
     assert chain.broadcasts == []
 
 
-async def test_a_retry_resends_the_same_bytes_and_signs_nothing(world):
+@pytest.mark.parametrize("network", ["base", "eip155:8453"])
+async def test_a_retry_resends_the_same_bytes_and_signs_nothing(world, network):
     clock, chain, signer = world
     chain.auto_mine = False
     kept = []
@@ -161,18 +162,21 @@ async def test_a_retry_resends_the_same_bytes_and_signs_nothing(world):
             SUBJECT,
             1000,
             chain,
+            network=network,
             max_amount=10_000,
             on_signed=kept.append,
             wait_seconds=5,
             sleep=clock.sleep,
             clock=clock,
         )
+    assert kept[0].network == "base"
     chain.auto_mine, chain.mempool = True, set()
     proof = await pay_and_prove(
         signer,
         SUBJECT,
         1000,
         chain,
+        network=network,
         max_amount=10_000,
         signed=kept[0].to_dict(),
         sleep=clock.sleep,
@@ -181,6 +185,7 @@ async def test_a_retry_resends_the_same_bytes_and_signs_nothing(world):
     assert signer.transactions == 1
     assert set(chain.broadcasts) == {kept[0].transaction_hash}
     assert proof.transaction_hash == kept[0].transaction_hash
+    assert proof.network == "base"
 
 
 async def test_already_known_is_a_successful_resend(world):

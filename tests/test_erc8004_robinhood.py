@@ -17,8 +17,9 @@ here, offline:
    (tests/test_erc8004_caip2_aliases.py walks the whole table, reads and writes
    included). Exact strings only; no other spelling becomes Robinhood.
 3. Neither network is on a feedback rail (no ``FeedbackDelegate``, not Solana),
-   so the rating rail refuses both before anything is signed, and no escrow row
-   exists for either chain (x402r has no escrow on Robinhood).
+   so preparation and evidence refuse both. The worker also refuses queued
+   rows before RPC or anchor-payment signing (test_reputation_networks.py).
+   No escrow row exists for either chain (x402r has no escrow on Robinhood).
 4. Every network 0.107.0 exported is exactly what it was. The snapshots below
    are the lists as 0.107.0 built them, written out rather than derived from the
    code under test.

@@ -107,3 +107,11 @@ def test_the_helpers_answer_like_the_typescript_ones(network):
     assert _wire(network) == TS["wireNetwork"][network]
     assert supports_relayed_feedback(network) is TS["supportsRelayedFeedback"][network]
     assert supports_solana_feedback(network) is TS["supportsSolanaFeedback"][network]
+
+
+def test_every_declared_alias_has_recorded_runtime_answers():
+    # The 2.98.0 fixture predates CAIP-2 aliases; the next release must record
+    # every literal member. Do not silently miss a declared alias in NAMES.
+    for name in TS["erc8004Network"]:
+        for helper in ("wireNetwork", "supportsRelayedFeedback", "supportsSolanaFeedback"):
+            assert name in TS[helper], (name, helper)

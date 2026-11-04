@@ -167,3 +167,10 @@ def test_commitment_is_hmac_sha256():
         commitment(SALT, "login", "x")
         == "0x" + hmac.new(SALT, b"login|x", hashlib.sha256).hexdigest()
     )
+
+
+def test_a_caip2_alias_writes_the_same_evidence_as_its_plain_network():
+    plain, alias = build(network="base"), build(network="eip155:8453")
+    assert alias.document["network"] == "base"
+    assert json.loads(alias.body)["network"] == "base"
+    assert alias.body == plain.body and alias.content_hash == plain.content_hash

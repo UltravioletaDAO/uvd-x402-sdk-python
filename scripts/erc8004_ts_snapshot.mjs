@@ -23,7 +23,9 @@
 //   exported values of `uvd-x402-sdk/backend`, as loaded by Node.
 // - wireNetwork, supportsRelayedFeedback, supportsSolanaFeedback: what the
 //   exported functions answer for every network name above, so the Python
-//   helpers are compared on behaviour, not only on list contents.
+//   helpers are compared on behaviour, not only on list contents. Includes
+//   chainToCAIP2(name) for every EVM registry, even if absent from the type.
+//   A release must spell the closed CAIP-2 union as quoted literals.
 
 import { execFileSync } from 'node:child_process';
 import {
@@ -33,6 +35,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkAnswers } from './erc8004_ts_snapshot_helpers.mjs';
 
 const PACKAGE = 'uvd-x402-sdk';
 const DEFAULT_VERSION = '2.98.0';
@@ -112,10 +115,10 @@ function snapshot(version) {
   try {
     const source = install(version, dir);
     const pkgDir = join(dir, 'node_modules', PACKAGE);
-    const backend = createRequire(join(dir, 'index.js'))(`${PACKAGE}/backend`);
+    const require = createRequire(join(dir, 'index.js'));
+    const backend = require(`${PACKAGE}/backend`);
+    const { chainToCAIP2 } = require(PACKAGE);
     const networks = readNetworkUnion(pkgDir);
-    const names = [...new Set([...networks, ...Object.keys(backend.ERC8004_CONTRACTS)])];
-    const answer = (fn) => Object.fromEntries(names.map((n) => [n, fn(n)]));
     return {
       generatedBy: `node scripts/erc8004_ts_snapshot.mjs --version ${version}`,
       source: { package: PACKAGE, version, ...source },
@@ -123,9 +126,7 @@ function snapshot(version) {
       erc8004Contracts: backend.ERC8004_CONTRACTS,
       relayedFeedbackNetworks: [...backend.RELAYED_FEEDBACK_NETWORKS],
       solanaFeedbackNetworks: [...backend.SOLANA_FEEDBACK_NETWORKS],
-      wireNetwork: answer(backend.wireNetwork),
-      supportsRelayedFeedback: answer(backend.supportsRelayedFeedback),
-      supportsSolanaFeedback: answer(backend.supportsSolanaFeedback),
+      ...networkAnswers(backend, networks, chainToCAIP2),
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
