@@ -11,10 +11,12 @@ Pinned here, walking the whole table:
 
 1. The chain ids. They are read from the payment registry wherever it carries the
    network, and from ``_CHAIN_IDS_NOT_IN_THE_PAYMENT_REGISTRY`` (exactly the
-   networks it lacks) otherwise. Both are checked against the facilitator's ids,
-   written out below from x402-rs ``src/chain/evm.rs`` (main, 2.55.0; the eight
-   outside the registry confirmed with ``eth_chainId`` on 2026-11-04), and
-   against the relay table of the rating rail.
+   networks it lacks) otherwise. Both are checked against the facilitator's ids
+   as RECORDED in ``tests/fixtures/x402rs-evm-chain-ids.json`` (x402-rs
+   ``src/network.rs`` + ``src/chain/evm.rs`` at the commit it cites, written by
+   ``scripts/x402rs_evm_chain_ids.py``, never by hand; the eight outside the
+   registry were also confirmed with ``eth_chainId`` on 2026-11-04), and against
+   the relay table of the rating rail.
 2. Every alias resolves locally like its network, and every read and write sends
    the plain name.
 3. Nothing else is an alias: another form of the same chain id, a chain id the
@@ -27,6 +29,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, get_args
 
 import httpx
@@ -46,33 +49,11 @@ from uvd_x402_sdk.erc8004 import (
 )
 from uvd_x402_sdk.networks.base import get_network, normalize_network, to_caip2_network
 
-#: The facilitator's chain id of every EVM network of the ERC-8004 table
-#: (x402-rs src/chain/evm.rs, ``Network::* => EvmChain::new(value, <id>)``).
-FACILITATOR_CHAIN_IDS = {
-    "ethereum": 1,
-    "base": 8453,
-    "polygon": 137,
-    "arbitrum": 42161,
-    "optimism": 10,
-    "celo": 42220,
-    "bsc": 56,
-    "monad": 143,
-    "avalanche": 43114,
-    "scroll": 534352,
-    "skale-base": 1187947933,
-    "arc": 5042,
-    "robinhood": 4663,
-    "ethereum-sepolia": 11155111,
-    "base-sepolia": 84532,
-    "polygon-amoy": 80002,
-    "arbitrum-sepolia": 421614,
-    "optimism-sepolia": 11155420,
-    "celo-sepolia": 11142220,
-    "avalanche-fuji": 43113,
-    "skale-base-sepolia": 324705682,
-    "arc-testnet": 5042002,
-    "robinhood-testnet": 46630,
-}
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "x402rs-evm-chain-ids.json"
+
+#: The facilitator's chain ids, as recorded from x402-rs at one commit.
+FACILITATOR = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+FACILITATOR_CHAIN_IDS: dict[str, int] = FACILITATOR["chainIds"]
 
 EVM_NETWORKS = sorted(
     name
@@ -80,8 +61,9 @@ EVM_NETWORKS = sorted(
     if contracts.identity_registry is not None and name != "base-mainnet"
 )
 
-#: (alias, network) for every EVM network of the table.
-ALIASES = [(f"eip155:{FACILITATOR_CHAIN_IDS[n]}", n) for n in sorted(FACILITATOR_CHAIN_IDS)]
+#: (alias, network) for every EVM network of the table, the id taken from the
+#: facilitator's recording (a network missing there fails at collection).
+ALIASES = [(f"eip155:{FACILITATOR_CHAIN_IDS[n]}", n) for n in EVM_NETWORKS]
 ALIAS_IDS = [a for a, _ in ALIASES]
 
 #: Strings that look like an alias and are not one.
@@ -120,8 +102,27 @@ def test_every_evm_network_of_the_table_has_a_chain_id():
     assert sorted(_ERC8004_CHAIN_IDS) == EVM_NETWORKS
 
 
+def test_the_fixture_is_the_recorded_facilitator():
+    source = FACILITATOR["source"]
+    assert source["repository"] == "UltravioletaDAO/x402-rs"
+    assert source["commit"] == "3ed3a956473abd2c52098bbe77a1a397318a7508"
+    assert source["version"] == "2.55.0"
+    assert source["files"] == ["src/network.rs", "src/chain/evm.rs"]
+    assert FACILITATOR["generatedBy"] == (
+        "python scripts/x402rs_evm_chain_ids.py --x402rs <x402-rs checkout> "
+        f"--ref {source['commit']}"
+    )
+
+
 def test_the_chain_ids_are_the_facilitators():
-    assert dict(_ERC8004_CHAIN_IDS) == FACILITATOR_CHAIN_IDS
+    # Every EVM network of the table, the eight of the supplement included.
+    for network, chain_id in _ERC8004_CHAIN_IDS.items():
+        assert FACILITATOR_CHAIN_IDS[network] == chain_id, network
+
+
+def test_the_supplement_is_the_facilitators_too():
+    for network, chain_id in _CHAIN_IDS_NOT_IN_THE_PAYMENT_REGISTRY.items():
+        assert FACILITATOR_CHAIN_IDS[network] == chain_id, network
 
 
 def test_no_two_networks_share_a_chain_id():

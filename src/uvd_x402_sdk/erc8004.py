@@ -440,10 +440,11 @@ _DEPRECATED_NETWORK_NAMES: Mapping[str, str] = MappingProxyType({"base-mainnet":
 # Chain ids of the ERC-8004 EVM networks that the payment registry
 # (``uvd_x402_sdk.networks``) does not carry: BSC and the seven testnets are not
 # payment networks of this SDK. Values are the facilitator's (x402-rs
-# ``src/chain/evm.rs``), each confirmed with ``eth_chainId`` on 2026-11-04. Every
-# other chain id is read from the payment registry, and a network it gains must
-# leave this table (tests/test_erc8004_caip2_aliases.py), so the registry stays
-# the one source wherever it has the network.
+# ``src/chain/evm.rs`` at 3ed3a956, 2.55.0, recorded in
+# tests/fixtures/x402rs-evm-chain-ids.json), each confirmed with ``eth_chainId``
+# on 2026-11-04. Every other chain id is read from the payment registry, and a
+# network it gains must leave this table (tests/test_erc8004_caip2_aliases.py),
+# so the registry stays the one source wherever it has the network.
 _CHAIN_IDS_NOT_IN_THE_PAYMENT_REGISTRY: Mapping[str, int] = MappingProxyType({
     "bsc": 56,
     "ethereum-sepolia": 11155111,

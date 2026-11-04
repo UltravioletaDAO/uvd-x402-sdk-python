@@ -1,0 +1,46 @@
+{
+  "generatedBy": "python scripts/x402rs_evm_chain_ids.py --x402rs <x402-rs checkout> --ref 3ed3a956473abd2c52098bbe77a1a397318a7508",
+  "source": {
+    "repository": "UltravioletaDAO/x402-rs",
+    "commit": "3ed3a956473abd2c52098bbe77a1a397318a7508",
+    "version": "2.55.0",
+    "files": [
+      "src/network.rs",
+      "src/chain/evm.rs"
+    ]
+  },
+  "chainIds": {
+    "arbitrum": 42161,
+    "arbitrum-sepolia": 421614,
+    "arc": 5042,
+    "arc-testnet": 5042002,
+    "avalanche": 43114,
+    "avalanche-fuji": 43113,
+    "base": 8453,
+    "base-sepolia": 84532,
+    "bsc": 56,
+    "celo": 42220,
+    "celo-sepolia": 11142220,
+    "ethereum": 1,
+    "ethereum-sepolia": 11155111,
+    "hashkey": 177,
+    "hashkey-testnet": 133,
+    "hyperevm": 999,
+    "hyperevm-testnet": 998,
+    "monad": 143,
+    "optimism": 10,
+    "optimism-sepolia": 11155420,
+    "polygon": 137,
+    "polygon-amoy": 80002,
+    "robinhood": 4663,
+    "robinhood-testnet": 46630,
+    "scroll": 534352,
+    "sei": 1329,
+    "sei-testnet": 1328,
+    "skale-base": 1187947933,
+    "skale-base-sepolia": 324705682,
+    "unichain": 130,
+    "unichain-sepolia": 1301,
+    "xdc": 50
+  }
+}
