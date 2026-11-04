@@ -72,11 +72,69 @@ def mutations(source):
             "NEAR_REGISTRY_ESCROWS: Mapping[str, tuple[str, ...]] = dict(",
         ),
     ]
+    # Refuter R9/R11/R13: canonical bytes, exact event version, error precedence.
+    replacements += [
+        (
+            'args = _json(params["args"])',
+            'args = _json(descriptor["actions"][0]["params"]["args"])',
+        ),
+        ('value.get("version") != "1.0.0"', 'not str(value.get("version")).startswith("1.")'),
+        (
+            "    _require(amount >= 1, RegistryErrorCode.E06)\n"
+            "    _uri(agent_uri, RegistryErrorCode.E01)\n    _metadata(metadata)",
+            "    _uri(agent_uri, RegistryErrorCode.E01)\n    _metadata(metadata)\n"
+            "    _require(amount >= 1, RegistryErrorCode.E06)",
+        ),
+        ('return _valid(_account, value, "account")', "return True"),
+        ("return _valid(_uri, value, RegistryErrorCode.E01)", "return True"),
+        ('"metadata": lambda v: _valid(_metadata, v)', '"metadata": lambda v: True'),
+        ('"tag1": lambda v: _valid(_tag, v)', '"tag1": lambda v: True'),
+        ('"tag2": lambda v: _valid(_tag, v)', '"tag2": lambda v: True'),
+        ('"feedback_uri": _nullable(_uri_check)', '"feedback_uri": lambda v: True'),
+        ('return len(value.encode("utf-8")) <= 64', "return True"),
+        ('return len(value.encode("utf-8")) <= 64', "return len(value) <= 64"),
+        ('return len(value.encode("utf-8")) <= 64', 'return len(value.encode("utf-8")) <= 65'),
+        ("if not isinstance(receipts_outcome, list):", "if False:"),
+        ("if not isinstance(receipt, dict):", "if False:"),
+        (
+            'if not isinstance(outcome, dict) or outcome.get("executor_id") not in contracts:',
+            "if not isinstance(outcome, dict):",
+        ),
+        (
+            "contracts = NEAR_REGISTRY_CONTRACTS[network]\n    result = []",
+            'contracts = NEAR_REGISTRY_CONTRACTS["near:mainnet"]\n    result = []',
+        ),
+        ("not any(lo <= ord(c) <= hi for lo, hi in _DISPLAY_REMOVED_RANGES)", "True"),
+    ]
     for old, new in replacements:
         assert source.count(old) == 1, ("mutation site moved", old, source.count(old))
         yield old + " -> " + new, source.replace(old, new)
+    # Payment validation appears in both given and revoked events; mutate each
+    # site independently, so one event's coverage cannot hide the other's gap.
+    old = '"payment_id": lambda v: _valid(_payment, v)'
+    start = 0
+    while (index := source.find(old, start)) != -1:
+        yield (
+            f"disable payment content at offset {index}",
+            (source[:index] + '"payment_id": lambda v: True' + source[index + len(old) :]),
+        )
+        start = index + len(old)
     for check in ("_agent_view", "_feedback_view", "_summary_view", "_config_view"):
         yield f"disable {check}", source + f"\n{check} = lambda value: True\n"
+
+    parity_path = ROOT / "scripts/near_registry_parity.py"
+    parity_source = parity_path.read_text(encoding="utf-8-sig")
+    guard = "if ours.read_bytes() != theirs.read_bytes():"
+    assert parity_source.count(guard) == 1, "parity mutation site moved"
+    # Import the actual parity module in the child, replacing only its guard.
+    # This still changes no files, and runs the same byte-drift regression tests.
+    patch = (
+        "\nfrom scripts import near_registry_parity as parity\n"
+        + "exec(compile("
+        + repr(parity_source.replace(guard, "if False:"))
+        + ", parity.__file__, 'exec'), parity.__dict__)\n"
+    )
+    yield "disable cross-SDK fixture byte comparison", source + patch
 
 
 def child():
@@ -84,6 +142,7 @@ def child():
 
     import uvd_x402_sdk
 
+    sys.path.insert(0, str(ROOT))
     source = json.load(sys.stdin)
     name = "uvd_x402_sdk.near_registry"
     module = types.ModuleType(name)
@@ -94,7 +153,13 @@ def child():
     uvd_x402_sdk.near_registry = module
     raise SystemExit(
         pytest.main(
-            ["-q", "--tb=short", "--disable-warnings", str(ROOT / "tests/test_near_registry.py")]
+            [
+                "-q",
+                "--tb=short",
+                "--disable-warnings",
+                str(ROOT / "tests/test_near_registry.py"),
+                str(ROOT / "tests/test_near_registry_parity.py"),
+            ]
         )
     )
 

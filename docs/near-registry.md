@@ -91,7 +91,9 @@ it must return the complete JSON-RPC response dict. The default uses httpx and
 the SDK network RPC URL with a 30-second timeout. All reads use final finality.
 `get_agent`, `get_feedback`, and `get_feedback_for_payment` may return `None`.
 `list_agents`, `list_feedback`, `get_summary`, `get_summary_by_operator`,
-`get_config`, and `is_feedback_pending` validate their complete response shape.
+`get_config`, and `is_feedback_pending` validate their complete response shape and content: NEAR accounts, URIs, metadata,
+tags, payment ids and operator ids (at most 64 UTF-8 bytes, empty allowed).
+Invalid content raises `ValueError`; fields are never normalized.
 U128/U64 fields stay decimal strings; feedback ids and counts are u32 numbers.
 Page args are u32 integers; the contract clamps `limit` to 50. Fetch successive
 pages once, stopping at an empty page.
@@ -107,8 +109,14 @@ success alone does not imply accepted feedback.
 `feedback_given`, `feedback_revoked` under `arras-registry` / `1.0.0`.
 Like `parse_arras_events`, it skips unknown or malformed logs, rejects malformed
 batches atomically, preserves extra data fields, and bounds JSON before parsing.
-Verify receipt executor/provenance independently; parsing logs does not prove
-who emitted them or that a payment settled.
+Use `parse_registry_receipt_events(result["receipts_outcome"], "near:mainnet")`
+for a transaction result from a trusted RPC. It parses only receipts whose
+`outcome.executor_id` exactly matches `NEAR_REGISTRY_CONTRACTS` for that network;
+identical logs from another contract are ignored. Malformed receipts are skipped,
+unknown networks raise `ValueError`, and a known network without a registry returns
+no events. The low-level `parse_registry_events(logs)` is safe only when the caller
+has already filtered by executor. Neither helper authenticates the RPC itself or
+proves a payment settled.
 
 ## Execution Market and trust
 
@@ -136,13 +144,22 @@ NEAR account inherits the name's profile and reputation.
 
 Treat profile text as untrusted display data. `safe_link(uri)` preserves a valid
 URI only for `https`, `ipfs`, or `ar`; otherwise it returns `None`.
-`display_text(s)` strips controls, bidi and zero-width formatting. Render its
+`display_text(s)` strips Unicode 17.0.0 controls, format/bidi characters,
+surrogates and all `Default_Ignorable_Code_Point` ranges. The versioned Unicode
+data sources are linked next to the table in `near_registry.py`, independent of
+the Unicode version bundled with Python. Render its
 result through a text API, with normal HTML escaping when applicable.
 
 ## Offline verification
 
 `tests/fixtures/near-registry.json` contains fixed synthetic inputs, exact args
-hex, two signed transactions and the four contract event examples.
+JSON/hex, two signed transactions and the four contract event examples. It is a
+byte-identical copy of TypeScript PR #69 at `b4b703061` (SHA-256
+`80eeb72f0ee5a4a933b8592f88387d6c4a1f2234a97b02a1f94969878294be38`).
+`python scripts/near_registry_parity.py --ts-root <TS checkout>` checks those
+bytes; CI pins that fixture's reviewed commit separately while the other
+cross-language checks continue to follow TS main. Update the fixture and CI pin
+together when adopting a new shared vector.
 `python scripts/near_registry_vectors.py --check` verifies the independent
 serializer's output. `python scripts/near_registry_mutations.py` requires a clean
 worktree, runs each mutant in memory with closed proxies and a 120s timeout, and

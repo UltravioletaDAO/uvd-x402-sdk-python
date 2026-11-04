@@ -411,8 +411,14 @@ def independent_wire(tx, public_key):
 def test_parity_vectors_and_independent_borsh():
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     signer = NearEd25519Signer(bytes([1]) * 32)
-    assert fixture["inputs"]["public_key"] == "ed25519:" + _b58encode(signer.public_key)
-    assert fixture["inputs"]["block_hash"] == BLOCK
+    assert fixture["seed_hex"] == (bytes([1]) * 32).hex()
+    assert fixture["public_key_hex"] == signer.public_key.hex()
+    assert fixture["nonce"] == "1"
+    assert fixture["network"] == NETWORK
+    assert fixture["receiver_id"] == RECEIVER
+    assert fixture["signer_id"] == COMMON["signer_id"]
+    assert fixture["public_key"] == "ed25519:" + _b58encode(signer.public_key)
+    assert fixture["block_hash"] == BLOCK
     transactions = {
         "register": register(),
         "give_feedback": feedback(
@@ -424,10 +430,14 @@ def test_parity_vectors_and_independent_borsh():
         "revoke_feedback": revoke(),
     }
     for method, tx in transactions.items():
-        vector = fixture["vectors"][method]
+        vector = fixture["calls"][method]
+        assert params(tx)["args"] == vector["args"]
+        assert params(tx)["deposit"] == vector["deposit"]
+        assert params(tx)["gas"] == vector["gas"]
+        assert r.registry_args_json(tx).decode() == vector["args_json"]
         assert r.registry_args_json(tx).hex() == vector["args_hex"]
         if method != "revoke_feedback":
-            signed = r.sign_registry_transaction(tx, signer, 1, BLOCK)
+            signed = r.sign_registry_transaction(tx, signer, fixture["nonce"], BLOCK)
             assert signed == vector["signed_transaction_base64"]
             wire = base64.b64decode(signed)
             assert wire[:-65] == independent_wire(tx, signer.public_key)
@@ -435,7 +445,9 @@ def test_parity_vectors_and_independent_borsh():
             Ed25519PublicKey.from_public_bytes(signer.public_key).verify(
                 wire[-64:], hashlib.sha256(wire[:-65]).digest()
             )
-    assert r.parse_registry_events(fixture["event_logs"]) == fixture["events"]
+    assert r.parse_registry_events([row["log"] for row in fixture["events"]]) == [
+        row["parsed"] for row in fixture["events"]
+    ]
 
 
 def agent_view():
@@ -714,9 +726,9 @@ def test_httpx_default_transport_uses_network_rpc(monkeypatch):
 
 def test_events_exact_and_malformed_batches():
     fixture = json.loads(FIXTURE.read_text())
-    logs = fixture["event_logs"]
+    logs = [row["log"] for row in fixture["events"]]
     assert len(logs) == 4
-    assert r.parse_registry_events(logs) == fixture["events"]
+    assert r.parse_registry_events(logs) == [row["parsed"] for row in fixture["events"]]
     for value in [None, "EVENT_JSON:{}", b"bytes", {}]:
         assert r.parse_registry_events(value) == []
     malformed = [
@@ -727,7 +739,7 @@ def test_events_exact_and_malformed_batches():
         "EVENT_JSON:[]",
         "EVENT_JSON:" + "[" * 65 + "0" + "]" * 65,
     ]
-    for event in fixture["events"]:
+    for event in [row["parsed"] for row in fixture["events"]]:
         for key, value in [
             ("standard", "arras"),
             ("version", "2.0.0"),
@@ -742,8 +754,8 @@ def test_events_exact_and_malformed_batches():
             malformed.append("EVENT_JSON:" + json.dumps(event | {"data": [event["data"][0], row]}))
             row[field] = []
             malformed.append("EVENT_JSON:" + json.dumps(event | {"data": [row]}))
-    assert r.parse_registry_events(malformed + logs) == fixture["events"]
-    event = fixture["events"][0]
+    assert r.parse_registry_events(malformed + logs) == [row["parsed"] for row in fixture["events"]]
+    event = fixture["events"][0]["parsed"]
     event["data"][0]["extra"] = "retained"
     assert r.parse_registry_events(["EVENT_JSON:" + json.dumps(event)]) == [event]
     assert len(r.parse_registry_events(["EVENT_JSON:" + json.dumps(event | {"data": []})])) == 1
@@ -975,4 +987,236 @@ def test_simple_average_uses_floor():
             "average_x100"
         ]
         == 33
+    )
+
+
+def fixture_events():
+    return [row["parsed"] for row in json.loads(FIXTURE.read_text(encoding="utf-8"))["events"]]
+
+
+def test_signing_rebuilds_reordered_args_to_the_shared_vector():
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    vector = fixture["calls"]["give_feedback"]
+    tx = feedback(**vector["args"])
+    order = ("feedback_hash", "score", "payment_id", "escrow", "tag2", "tag1", "feedback_uri")
+    params(tx)["args"] = {field: vector["args"][field] for field in order}
+    signer = NearEd25519Signer(bytes.fromhex(fixture["seed_hex"]))
+    assert (
+        r.sign_registry_transaction(tx, signer, fixture["nonce"], BLOCK)
+        == vector["signed_transaction_base64"]
+    )
+
+
+def test_signing_omits_an_explicit_null_optional_from_wire_bytes():
+    tx = feedback(tag1="quality")
+    signer = NearEd25519Signer(bytes([1]) * 32)
+    canonical = independent_wire(tx, signer.public_key)
+    expected = base64.b64encode(
+        canonical + bytes([0]) + signer.sign(hashlib.sha256(canonical).digest())
+    ).decode()
+    params(tx)["args"]["tag2"] = None
+    assert b'"tag2"' not in canonical
+    assert r.sign_registry_transaction(tx, signer, 1, BLOCK) == expected
+
+
+@pytest.mark.parametrize("version", ["1.0.1", "1.0", "1.0.0 ", 1])
+def test_event_version_must_be_exact(version):
+    for event in fixture_events():
+        log = "EVENT_JSON:" + json.dumps(event | {"version": version})
+        assert r.parse_registry_events([log]) == []
+
+
+@pytest.mark.parametrize(
+    "bad", [{"agent_uri": ""}, {"agent_uri": "https://a.example", "metadata": "\n"}]
+)
+@pytest.mark.parametrize("via_descriptor", [False, True])
+def test_update_deposit_error_precedes_uri_and_metadata(bad, via_descriptor):
+    with pytest.raises(r.RegistryError, match="ARRAS_REG_E06"):
+        if via_descriptor:
+            tx = update()
+            params(tx)["deposit"] = "0"
+            params(tx)["args"].update(bad)
+            r.registry_args_json(tx)
+        else:
+            update(deposit=0, **bad)
+
+
+def receipt(executor, logs):
+    return {"outcome": {"executor_id": executor, "logs": logs}}
+
+
+@pytest.mark.parametrize(
+    "executor",
+    [
+        "attacker.near",
+        ESCROW,
+        RECEIVER.upper(),
+        " " + RECEIVER,
+        RECEIVER + "\n",
+        "sub." + RECEIVER,
+        RECEIVER + ".evil",
+        None,
+        [],
+        {},
+    ],
+)
+def test_receipt_events_ignore_impersonated_registry_logs(executor):
+    events = fixture_events()
+    logs = ["EVENT_JSON:" + json.dumps(event) for event in events]
+    assert r.parse_registry_receipt_events([receipt(executor, logs)], NETWORK) == []
+    assert (
+        r.parse_registry_receipt_events([receipt(executor, logs), receipt(RECEIVER, logs)], NETWORK)
+        == events
+    )
+    # The same name on another network must not authenticate the emitter.
+    assert r.parse_registry_receipt_events([receipt(RECEIVER, logs)], "near:testnet") == []
+
+
+@pytest.mark.parametrize("network", ["near", "NEAR:MAINNET", "near:mainnet ", "", None, []])
+def test_receipt_events_reject_unknown_networks(network):
+    with pytest.raises(ValueError, match="unsupported NEAR registry network"):
+        r.parse_registry_receipt_events([], network)
+
+
+@pytest.mark.parametrize("receipts", [None, {}, "receipts", 1])
+def test_receipt_events_ignore_non_array_containers(receipts):
+    assert r.parse_registry_receipt_events(receipts, NETWORK) == []
+
+
+def test_receipt_events_skip_malformed_receipts_and_keep_batch_order():
+    events = fixture_events()
+
+    def log(event):
+        return "EVENT_JSON:" + json.dumps(event)
+
+    malformed = [
+        None,
+        1,
+        {},
+        {"outcome": None},
+        {"outcome": []},
+        {"outcome": {"logs": [log(events[0])]}},
+        receipt(RECEIVER, None),
+    ]
+    receipts = malformed + [
+        receipt(RECEIVER, ["bad", log(events[0])]),
+        receipt(RECEIVER, [log(events[2]), log(events[1])]),
+    ]
+    assert r.parse_registry_receipt_events(receipts, NETWORK) == [events[0], events[2], events[1]]
+    import uvd_x402_sdk
+
+    assert callable(uvd_x402_sdk.parse_registry_receipt_events)
+    assert "parse_registry_receipt_events" in r.__all__
+    assert "parse_registry_receipt_events" in uvd_x402_sdk.__all__
+
+
+BAD_ACCOUNTS = ["", "a", "A.near", "a.near ", "a.near\n", "a..near", "a" * 65, "é.near"]
+BAD_CONTENT = [
+    *[(field, value) for field in ("rater", "ratee", "escrow") for value in BAD_ACCOUNTS],
+    *[("payment_id", value) for value in ("", "a b", "x\n", "x" * 65, "é")],
+    *[(field, value) for field in ("tag1", "tag2") for value in ("", "a b", "x\n", "x" * 65, "é")],
+    *[("feedback_uri", value) for value in ("", "noscheme", "a:\n", "a:" + "x" * 511)],
+    *[("operator_id", value) for value in (None, 1, "x" * 65, "é" * 33, "\ud800")],
+]
+
+
+@pytest.mark.parametrize("field,value", BAD_CONTENT)
+def test_feedback_content_rejected_in_views_and_events(field, value):
+    row = feedback_view(**{field: value})
+    client = r.NearRegistryClient(rpc=FakeRPC(row))
+    with pytest.raises(ValueError, match="registry view"):
+        client.get_feedback(0)
+    with pytest.raises(ValueError, match="registry view"):
+        client.get_feedback_for_payment(ESCROW, PAYMENT, "payer.near")
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC([row])).list_feedback("worker.near")
+    for event in fixture_events():
+        if not event["event"].startswith("feedback_") or field not in event["data"][0]:
+            continue
+        changed = event["data"][0] | {field: value}
+        bad = event | {"data": [event["data"][0], changed]}
+        log = "EVENT_JSON:" + json.dumps(bad)
+        assert r.parse_registry_events([log]) == []
+        assert r.parse_registry_receipt_events([receipt(RECEIVER, [log])], NETWORK) == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        *[("account_id", value) for value in BAD_ACCOUNTS],
+        *[("agent_uri", value) for value in ("", "noscheme", "a:\n", "a:" + "x" * 511)],
+        *[("metadata", value) for value in ("", "\n", "é" * 513, "\ud800")],
+    ],
+)
+def test_agent_content_rejected_in_views_and_events(field, value):
+    row = agent_view() | {field: value}
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC(row)).get_agent("agente.near")
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC([row])).list_agents()
+    for event in fixture_events()[:2]:
+        event["data"][0][field] = value
+        assert r.parse_registry_events(["EVENT_JSON:" + json.dumps(event)]) == []
+
+
+@pytest.mark.parametrize("value", BAD_ACCOUNTS)
+def test_summary_and_config_validate_accounts(value):
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC(summary_view() | {"account_id": value})).get_summary(
+            "a.near"
+        )
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC(config_view() | {"escrows": [ESCROW, value]})).get_config()
+
+
+@pytest.mark.parametrize("value", ["x" * 65, "é" * 33, "\ud800"])
+def test_operator_summary_rejects_invalid_operator_content(value):
+    row = summary_view() | {"operator_id": value}
+    with pytest.raises(ValueError, match="registry view"):
+        r.NearRegistryClient(rpc=FakeRPC(row)).get_summary_by_operator(
+            "worker.near", "em" if value == "\ud800" else value
+        )
+
+
+@pytest.mark.parametrize("operator", ["", "x" * 64, "é" * 32, "👩" * 16, "em\n"])
+def test_view_content_accepts_contract_boundaries(operator):
+    row = feedback_view(
+        rater="a" * 64,
+        ratee="ab",
+        escrow="future.near",
+        payment_id="!" * 64,
+        operator_id=operator,
+        tag1="Z" * 64,
+        tag2=None,
+        feedback_uri="a:" + "x" * 510,
+    )
+    assert r.NearRegistryClient(rpc=FakeRPC(row)).get_feedback(0) == row
+    event = fixture_events()[2] | {"data": [row]}
+    assert r.parse_registry_events(["EVENT_JSON:" + json.dumps(event)]) == [event]
+    summary = summary_view() | {"operator_id": operator}
+    assert (
+        r.NearRegistryClient(rpc=FakeRPC(summary)).get_summary_by_operator("worker.near", operator)
+        == summary
+    )
+    agent = agent_view() | {"agent_uri": "a:" + "x" * 510, "metadata": "é" * 512}
+    assert r.NearRegistryClient(rpc=FakeRPC(agent)).get_agent("agente.near") == agent
+
+
+@pytest.mark.parametrize("point", [0x180B, 0x180C, 0x180D, 0x180F, 0x2065, 0xFFF0, 0xE0001])
+def test_display_text_default_ignorable_regressions(point):
+    assert r.display_text("a" + chr(point) + "b") == "ab"
+
+
+def test_display_text_unicode17_removed_set_is_pinned():
+    # Independently measured with Node 20 / Unicode 17's property regex over
+    # every code point, including reserved ranges and lone surrogates.
+    removed = [cp for cp in range(0x110000) if r.display_text(chr(cp)) == ""]
+    assert len(removed) == 6319
+    assert (
+        hashlib.sha256(json.dumps(removed, separators=(",", ":")).encode()).hexdigest()
+        == "251c1660b4b186e06521914d267179392d18934e764a526e320eb78496961fbe"
+    )
+    assert (
+        r.display_text("\u180a\u1810\u205f\uffef\ufffc\U000e1000")
+        == "\u180a\u1810\u205f\uffef\ufffc\U000e1000"
     )

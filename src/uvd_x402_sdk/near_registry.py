@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import re
-import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +20,7 @@ import httpx
 
 from .bounded_json import loads_bounded
 from .near_escrow import NearLocalSigner, Unsigned, _account, _json, _uint
-from .near_events import _boolean, _integer, _record, _string
+from .near_events import _boolean, _integer, _record
 from .networks.near import NEAR, BorshSerializer
 from .solana_signing import _b58decode
 
@@ -479,23 +478,55 @@ def _number(bits: int) -> Check:
     return lambda value: type(value) is int and 0 <= value < 1 << bits
 
 
+def _valid(validator: Callable[..., None], *args: object) -> bool:
+    """Use the write validators on untrusted view/event content as predicates."""
+    try:
+        validator(*args)
+    except ValueError:
+        return False
+    return True
+
+
+def _operator(value: object) -> bool:
+    # Arras v1 allows empty and Unicode operator ids, bounded in UTF-8 bytes.
+    if not isinstance(value, str):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= 64
+    except UnicodeEncodeError:
+        return False
+
+
 _u32, _u64, _u128 = _number(32), _integer(64), _integer(128)
-_optional_text = _nullable(_string)
-_agent_fields = {"account_id": _string, "agent_uri": _string, "metadata": _optional_text}
+
+
+def _account_check(value: object) -> bool:
+    return _valid(_account, value, "account")
+
+
+def _uri_check(value: object) -> bool:
+    return _valid(_uri, value, RegistryErrorCode.E01)
+
+
+_agent_fields = {
+    "account_id": _account_check,
+    "agent_uri": _uri_check,
+    "metadata": lambda v: _valid(_metadata, v),
+}
 _agent_view = _record({**_agent_fields, "registered_at": _u64, "updated_at": _u64})
 _feedback_fields = {
     "feedback_id": _u32,
-    "rater": _string,
-    "ratee": _string,
+    "rater": _account_check,
+    "ratee": _account_check,
     "ratee_role": lambda v: v in ("payer", "receiver"),
-    "escrow": _string,
-    "payment_id": _string,
-    "operator_id": _string,
+    "escrow": _account_check,
+    "payment_id": lambda v: _valid(_payment, v),
+    "operator_id": _operator,
     "released": _u128,
     "score": lambda v: type(v) is int and 0 <= v <= 100,
-    "tag1": _optional_text,
-    "tag2": _optional_text,
-    "feedback_uri": _optional_text,
+    "tag1": lambda v: _valid(_tag, v),
+    "tag2": lambda v: _valid(_tag, v),
+    "feedback_uri": _nullable(_uri_check),
     "feedback_hash": lambda v: (
         v is None or (isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) is not None)
     ),
@@ -511,18 +542,18 @@ _role_fields = {
 _summary_view = _record(
     {
         **_role_fields,
-        "account_id": _string,
+        "account_id": _account_check,
         "as_payer": _record(_role_fields),
         "as_receiver": _record(_role_fields),
         "last_feedback_id": _nullable(_u32),
         "last_at": _nullable(_u64),
     },
-    {"operator_id": _string},
+    {"operator_id": _operator},
 )
 _config_view = _record(
     {
         "version": lambda v: v == "arras-registry-v1",
-        "escrows": lambda v: isinstance(v, list) and all(_string(s) for s in v),
+        "escrows": lambda v: isinstance(v, list) and all(_account_check(s) for s in v),
         "agents": _u32,
         "feedbacks": _u32,
         "register_deposit": _u128,
@@ -554,10 +585,10 @@ _EVENT_CHECKS = {
     "feedback_revoked": _record(
         {
             "feedback_id": _u32,
-            "rater": _string,
-            "ratee": _string,
-            "escrow": _string,
-            "payment_id": _string,
+            "rater": _account_check,
+            "ratee": _account_check,
+            "escrow": _account_check,
+            "payment_id": lambda v: _valid(_payment, v),
             "revoked_at": _u64,
         }
     ),
@@ -708,8 +739,10 @@ class NearRegistryClient:
 def parse_registry_events(logs: Iterable[object]) -> list[RegistryEvent]:
     """Like parse_arras_events: skip foreign/malformed logs and invalid batches.
 
-    Unknown fields are retained in data; integer strings stay strings. Parsing
-    proves neither receipt provenance nor settlement: verify the executor too.
+    Unknown fields are retained in data; integer strings stay strings. Safe only
+    when the caller has already filtered receipts by the registry executor_id.
+    Prefer parse_registry_receipt_events for RPC receipts_outcome arrays. Neither
+    parser proves settlement or authenticates an untrusted RPC.
     """
     result = []
     if not isinstance(logs, Iterable) or isinstance(logs, (str, bytes, dict)):
@@ -740,6 +773,30 @@ def parse_registry_events(logs: Iterable[object]) -> list[RegistryEvent]:
                 "data": value["data"],
             }
         )
+    return result
+
+
+def parse_registry_receipt_events(receipts_outcome: object, network: str) -> list[RegistryEvent]:
+    """Parse only receipts emitted by a registered contract on this network.
+
+    Pass the JSON-RPC transaction result's receipts_outcome array. Malformed
+    receipts and logs are skipped; an unknown network raises ValueError. A known
+    network with no registered deployment yields no events. The RPC must still
+    be trusted: executor_id is provenance within its response, not a proof.
+    """
+    if not isinstance(network, str) or network not in NEAR_REGISTRY_CONTRACTS:
+        raise ValueError("unsupported NEAR registry network")
+    contracts = NEAR_REGISTRY_CONTRACTS[network]
+    result = []
+    if not isinstance(receipts_outcome, list):
+        return result
+    for receipt in receipts_outcome:
+        if not isinstance(receipt, dict):
+            continue
+        outcome = receipt.get("outcome")
+        if not isinstance(outcome, dict) or outcome.get("executor_id") not in contracts:
+            continue
+        result.extend(parse_registry_events(outcome.get("logs")))
     return result
 
 
@@ -863,17 +920,49 @@ def safe_link(uri: str) -> str | None:
     return uri if uri.split(":", 1)[0].lower() in ("https", "ipfs", "ar") else None
 
 
+# Unicode 17.0.0: Cc/Cf/Cs union Default_Ignorable_Code_Point, adjacent
+# ranges merged. Pinning also removes dependence on Python's Unicode version.
+# Sources: https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt
+# https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt
+_DISPLAY_REMOVED_RANGES = (
+    (0x0000, 0x001F),
+    (0x007F, 0x009F),
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x0600, 0x0605),
+    (0x061C, 0x061C),
+    (0x06DD, 0x06DD),
+    (0x070F, 0x070F),
+    (0x0890, 0x0891),
+    (0x08E2, 0x08E2),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xD800, 0xDFFF),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFFB),
+    (0x110BD, 0x110BD),
+    (0x110CD, 0x110CD),
+    (0x13430, 0x1343F),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+
+
 def display_text(s: str) -> str:
-    """Remove Unicode controls, format/bidi/zero-width and invisible fillers.
+    """Remove controls, bidi, surrogates and Unicode default-ignorable points.
 
     This is plain text, not HTML escaping. Render through the UI's text API.
     """
     return "".join(
-        c
-        for c in s
-        if unicodedata.category(c) not in ("Cc", "Cf", "Cs")
-        and c not in "\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0"
-        and not (0xFE00 <= ord(c) <= 0xFE0F or 0xE0100 <= ord(c) <= 0xE01EF)
+        c for c in s if not any(lo <= ord(c) <= hi for lo, hi in _DISPLAY_REMOVED_RANGES)
     )
 
 
@@ -907,6 +996,7 @@ __all__ = [
     "FeedbackSummary",
     "parse_give_feedback_outcome",
     "parse_registry_events",
+    "parse_registry_receipt_events",
     "summarize_feedback",
     "safe_link",
     "display_text",

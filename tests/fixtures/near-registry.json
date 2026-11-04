@@ -1,22 +1,21 @@
 {
-  "inputs": {
-    "network": "near:mainnet",
-    "receiver_id": "registry.arras-escrow.near",
-    "signer_id": "payer.near",
-    "seed_byte": 1,
-    "seed_length": 32,
-    "public_key": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
-    "nonce": 1,
-    "block_hash": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR"
-  },
-  "vectors": {
+  "network": "near:mainnet",
+  "receiver_id": "registry.arras-escrow.near",
+  "signer_id": "payer.near",
+  "seed_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+  "public_key": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+  "public_key_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+  "nonce": "1",
+  "block_hash": "8qbHbw2BbbTHBW1sbeqakYXVKRQM8Ne7pLK7m6CVfeR",
+  "calls": {
     "register": {
       "args": {
         "agent_uri": "https://agente.example/card.json"
       },
-      "deposit": "17510000000000000000000",
-      "gas": "30000000000000",
+      "args_json": "{\"agent_uri\":\"https://agente.example/card.json\"}",
       "args_hex": "7b226167656e745f757269223a2268747470733a2f2f6167656e74652e6578616d706c652f636172642e6a736f6e227d",
+      "gas": "30000000000000",
+      "deposit": "17510000000000000000000",
       "signed_transaction_base64": "CgAAAHBheWVyLm5lYXIAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1wBAAAAAAAAABoAAAByZWdpc3RyeS5hcnJhcy1lc2Nyb3cubmVhcgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAQAAAAIIAAAAcmVnaXN0ZXIwAAAAeyJhZ2VudF91cmkiOiJodHRwczovL2FnZW50ZS5leGFtcGxlL2NhcmQuanNvbiJ9AOBX60gbAAAAANhBC4QQOLUDAAAAAAAAAHBDIgkSb13lzXJL3V9ufmknH7W/OaRW9MKTo/y8hg/+v89IijW9/XttssNuDH7diDvBN9m1JbCCJyMhLOdHLw4="
     },
     "give_feedback": {
@@ -29,9 +28,10 @@
         "feedback_uri": "https://agente.example/f/1.json",
         "feedback_hash": "abababababababababababababababababababababababababababababababab"
       },
-      "deposit": "18640000000000000000000",
-      "gas": "100000000000000",
+      "args_json": "{\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"11111111111111111111111111111111\",\"score\":90,\"tag1\":\"quality\",\"tag2\":\"successRate\",\"feedback_uri\":\"https://agente.example/f/1.json\",\"feedback_hash\":\"abababababababababababababababababababababababababababababababab\"}",
       "args_hex": "7b22657363726f77223a2276312e61727261732d657363726f772e6e656172222c227061796d656e745f6964223a223131313131313131313131313131313131313131313131313131313131313131222c2273636f7265223a39302c2274616731223a227175616c697479222c2274616732223a227375636365737352617465222c22666565646261636b5f757269223a2268747470733a2f2f6167656e74652e6578616d706c652f662f312e6a736f6e222c22666565646261636b5f68617368223a2261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162616261626162227d",
+      "gas": "100000000000000",
+      "deposit": "18640000000000000000000",
       "signed_transaction_base64": "CgAAAHBheWVyLm5lYXIAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1wBAAAAAAAAABoAAAByZWdpc3RyeS5hcnJhcy1lc2Nyb3cubmVhcgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAQAAAAINAAAAZ2l2ZV9mZWVkYmFjawYBAAB7ImVzY3JvdyI6InYxLmFycmFzLWVzY3Jvdy5uZWFyIiwicGF5bWVudF9pZCI6IjExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExIiwic2NvcmUiOjkwLCJ0YWcxIjoicXVhbGl0eSIsInRhZzIiOiJzdWNjZXNzUmF0ZSIsImZlZWRiYWNrX3VyaSI6Imh0dHBzOi8vYWdlbnRlLmV4YW1wbGUvZi8xLmpzb24iLCJmZWVkYmFja19oYXNoIjoiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiJ9AEB6EPNaAAAAAEAhDPn2efIDAAAAAAAAAJ+lhCSalO0Stdr5L1WjFpcSioLFzcNNpTolKb0jPj0Ii/uooLH/nhPDjcyfKUnhu5Rtxja5b80pKXB303jxEwQ="
     },
     "revoke_feedback": {
@@ -39,81 +39,88 @@
         "escrow": "v1.arras-escrow.near",
         "payment_id": "11111111111111111111111111111111"
       },
-      "deposit": "1",
+      "args_json": "{\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"11111111111111111111111111111111\"}",
+      "args_hex": "7b22657363726f77223a2276312e61727261732d657363726f772e6e656172222c227061796d656e745f6964223a223131313131313131313131313131313131313131313131313131313131313131227d",
       "gas": "30000000000000",
-      "args_hex": "7b22657363726f77223a2276312e61727261732d657363726f772e6e656172222c227061796d656e745f6964223a223131313131313131313131313131313131313131313131313131313131313131227d"
+      "deposit": "1"
     }
   },
-  "event_logs": [
-    "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"agent_registered\",\"data\":[{\"account_id\":\"agente.near\",\"agent_uri\":\"https://agente.example/card.json\",\"metadata\":null,\"at\":\"5\"}]}",
-    "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"agent_updated\",\"data\":[{\"account_id\":\"agente.near\",\"agent_uri\":\"ipfs://bafy\",\"metadata\":\"{\\\"k\\\":\\\"v\\\"}\",\"at\":\"6\"}]}",
-    "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"feedback_given\",\"data\":[{\"feedback_id\":0,\"rater\":\"payer.near\",\"ratee\":\"worker.near\",\"ratee_role\":\"receiver\",\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M\",\"operator_id\":\"em\",\"released\":\"1000000\",\"score\":90,\"tag1\":\"quality\",\"tag2\":null,\"feedback_uri\":null,\"feedback_hash\":null,\"created_at\":\"7\"}]}",
-    "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"feedback_revoked\",\"data\":[{\"feedback_id\":0,\"rater\":\"payer.near\",\"ratee\":\"worker.near\",\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"x\",\"revoked_at\":\"8\"}]}"
-  ],
   "events": [
     {
-      "standard": "arras-registry",
-      "version": "1.0.0",
-      "event": "agent_registered",
-      "data": [
-        {
-          "account_id": "agente.near",
-          "agent_uri": "https://agente.example/card.json",
-          "metadata": null,
-          "at": "5"
-        }
-      ]
+      "log": "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"agent_registered\",\"data\":[{\"account_id\":\"agente.near\",\"agent_uri\":\"https://agente.example/card.json\",\"metadata\":null,\"at\":\"5\"}]}",
+      "parsed": {
+        "standard": "arras-registry",
+        "version": "1.0.0",
+        "event": "agent_registered",
+        "data": [
+          {
+            "account_id": "agente.near",
+            "agent_uri": "https://agente.example/card.json",
+            "metadata": null,
+            "at": "5"
+          }
+        ]
+      }
     },
     {
-      "standard": "arras-registry",
-      "version": "1.0.0",
-      "event": "agent_updated",
-      "data": [
-        {
-          "account_id": "agente.near",
-          "agent_uri": "ipfs://bafy",
-          "metadata": "{\"k\":\"v\"}",
-          "at": "6"
-        }
-      ]
+      "log": "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"agent_updated\",\"data\":[{\"account_id\":\"agente.near\",\"agent_uri\":\"ipfs://bafy\",\"metadata\":\"{\\\"k\\\":\\\"v\\\"}\",\"at\":\"6\"}]}",
+      "parsed": {
+        "standard": "arras-registry",
+        "version": "1.0.0",
+        "event": "agent_updated",
+        "data": [
+          {
+            "account_id": "agente.near",
+            "agent_uri": "ipfs://bafy",
+            "metadata": "{\"k\":\"v\"}",
+            "at": "6"
+          }
+        ]
+      }
     },
     {
-      "standard": "arras-registry",
-      "version": "1.0.0",
-      "event": "feedback_given",
-      "data": [
-        {
-          "feedback_id": 0,
-          "rater": "payer.near",
-          "ratee": "worker.near",
-          "ratee_role": "receiver",
-          "escrow": "v1.arras-escrow.near",
-          "payment_id": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M",
-          "operator_id": "em",
-          "released": "1000000",
-          "score": 90,
-          "tag1": "quality",
-          "tag2": null,
-          "feedback_uri": null,
-          "feedback_hash": null,
-          "created_at": "7"
-        }
-      ]
+      "log": "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"feedback_given\",\"data\":[{\"feedback_id\":0,\"rater\":\"payer.near\",\"ratee\":\"worker.near\",\"ratee_role\":\"receiver\",\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M\",\"operator_id\":\"em\",\"released\":\"1000000\",\"score\":90,\"tag1\":\"quality\",\"tag2\":null,\"feedback_uri\":null,\"feedback_hash\":null,\"created_at\":\"7\"}]}",
+      "parsed": {
+        "standard": "arras-registry",
+        "version": "1.0.0",
+        "event": "feedback_given",
+        "data": [
+          {
+            "feedback_id": 0,
+            "rater": "payer.near",
+            "ratee": "worker.near",
+            "ratee_role": "receiver",
+            "escrow": "v1.arras-escrow.near",
+            "payment_id": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M",
+            "operator_id": "em",
+            "released": "1000000",
+            "score": 90,
+            "tag1": "quality",
+            "tag2": null,
+            "feedback_uri": null,
+            "feedback_hash": null,
+            "created_at": "7"
+          }
+        ]
+      }
     },
     {
-      "standard": "arras-registry",
-      "version": "1.0.0",
-      "event": "feedback_revoked",
-      "data": [
-        {
-          "feedback_id": 0,
-          "rater": "payer.near",
-          "ratee": "worker.near",
-          "escrow": "v1.arras-escrow.near",
-          "payment_id": "x",
-          "revoked_at": "8"
-        }
-      ]
+      "log": "EVENT_JSON:{\"standard\":\"arras-registry\",\"version\":\"1.0.0\",\"event\":\"feedback_revoked\",\"data\":[{\"feedback_id\":0,\"rater\":\"payer.near\",\"ratee\":\"worker.near\",\"escrow\":\"v1.arras-escrow.near\",\"payment_id\":\"x\",\"revoked_at\":\"8\"}]}",
+      "parsed": {
+        "standard": "arras-registry",
+        "version": "1.0.0",
+        "event": "feedback_revoked",
+        "data": [
+          {
+            "feedback_id": 0,
+            "rater": "payer.near",
+            "ratee": "worker.near",
+            "escrow": "v1.arras-escrow.near",
+            "payment_id": "x",
+            "revoked_at": "8"
+          }
+        ]
+      }
     }
   ]
 }

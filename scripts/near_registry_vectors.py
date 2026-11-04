@@ -1,5 +1,7 @@
 """Reproduce public, synthetic registry parity vectors without SDK serialization.
 
+The fixture is an exact copy from TypeScript PR #69 (b4b703061);
+this independent serializer reproduces its format without importing either SDK.
 Inputs fixed by the registry handoff; event strings are the contract's four
 formato_exacto_de_cada_evento examples. --check detects fixture drift, offline.
 """
@@ -60,17 +62,15 @@ def vectors():
         "revoke_feedback": payment,
     }
     result = {
-        "inputs": {
-            "network": "near:mainnet",
-            "receiver_id": receiver,
-            "signer_id": "payer.near",
-            "seed_byte": 1,
-            "seed_length": 32,
-            "public_key": "ed25519:" + base58(public),
-            "nonce": 1,
-            "block_hash": base58(bytes([2]) * 32),
-        },
-        "vectors": {},
+        "network": "near:mainnet",
+        "receiver_id": receiver,
+        "signer_id": "payer.near",
+        "seed_hex": (bytes([1]) * 32).hex(),
+        "public_key": "ed25519:" + base58(public),
+        "public_key_hex": public.hex(),
+        "nonce": "1",
+        "block_hash": base58(bytes([2]) * 32),
+        "calls": {},
     }
     for method, args in calls.items():
         deposit = {
@@ -80,7 +80,13 @@ def vectors():
         }[method]
         gas = "100000000000000" if method == "give_feedback" else "30000000000000"
         raw = json.dumps(args, separators=(",", ":"), ensure_ascii=False).encode()
-        row = {"args": args, "deposit": deposit, "gas": gas, "args_hex": raw.hex()}
+        row = {
+            "args": args,
+            "args_json": raw.decode(),
+            "args_hex": raw.hex(),
+            "gas": gas,
+            "deposit": deposit,
+        }
         if method != "revoke_feedback":
             wire = (
                 blob("payer.near")
@@ -98,9 +104,8 @@ def vectors():
             )
             signed = wire + bytes([0]) + key.sign(hashlib.sha256(wire).digest())
             row["signed_transaction_base64"] = base64.b64encode(signed).decode()
-        result["vectors"][method] = row
-    result["event_logs"] = EVENT_LOGS
-    result["events"] = [json.loads(log[11:]) for log in EVENT_LOGS]
+        result["calls"][method] = row
+    result["events"] = [{"log": log, "parsed": json.loads(log[11:])} for log in EVENT_LOGS]
     return json.dumps(result, ensure_ascii=False, indent=2) + "\n"
 
 

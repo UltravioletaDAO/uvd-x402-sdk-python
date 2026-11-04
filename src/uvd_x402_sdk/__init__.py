@@ -885,7 +885,7 @@ __all__ += [
 ]
 
 # Arras registry: offline writes and explicitly requested read-only RPC views.
-from uvd_x402_sdk.near_registry import (
+from uvd_x402_sdk.near_registry import (  # noqa: E402
     NEAR_REGISTRY_CONTRACTS,
     NEAR_REGISTRY_ESCROWS,
     FeedbackOutcome,
@@ -900,6 +900,7 @@ from uvd_x402_sdk.near_registry import (
     display_text,
     parse_give_feedback_outcome,
     parse_registry_events,
+    parse_registry_receipt_events,
     registry_args_json,
     safe_link,
     sign_registry_transaction,
@@ -909,7 +910,8 @@ from uvd_x402_sdk.near_registry import (
 __all__ += [
     "NEAR_REGISTRY_CONTRACTS", "NEAR_REGISTRY_ESCROWS", "FeedbackOutcome",
     "NearRegistryClient", "NearRegistryTransaction", "RegistryError", "RegistryErrorCode",
-    "build_give_feedback", "build_registry_register", "build_registry_update", "build_revoke_feedback",
+    "build_give_feedback", "build_registry_register", "build_registry_update",
+    "build_revoke_feedback", "parse_registry_receipt_events",
     "display_text", "parse_give_feedback_outcome", "parse_registry_events", "registry_args_json",
     "safe_link", "sign_registry_transaction", "summarize_feedback",
 ]
