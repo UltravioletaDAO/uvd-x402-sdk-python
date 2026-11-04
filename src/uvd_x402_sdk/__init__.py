@@ -883,3 +883,33 @@ __all__ += [
     "ArrasOperatorData", "ArrasPauseData", "ArrasPaymentAmountData", "ArrasReleasedData",
     "ArrasWithdrawnData", "parse_arras_events",
 ]
+
+# Arras registry: offline writes and explicitly requested read-only RPC views.
+from uvd_x402_sdk.near_registry import (
+    NEAR_REGISTRY_CONTRACTS,
+    NEAR_REGISTRY_ESCROWS,
+    FeedbackOutcome,
+    NearRegistryClient,
+    NearRegistryTransaction,
+    RegistryError,
+    RegistryErrorCode,
+    build_give_feedback,
+    build_registry_register,
+    build_registry_update,
+    build_revoke_feedback,
+    display_text,
+    parse_give_feedback_outcome,
+    parse_registry_events,
+    registry_args_json,
+    safe_link,
+    sign_registry_transaction,
+    summarize_feedback,
+)
+
+__all__ += [
+    "NEAR_REGISTRY_CONTRACTS", "NEAR_REGISTRY_ESCROWS", "FeedbackOutcome",
+    "NearRegistryClient", "NearRegistryTransaction", "RegistryError", "RegistryErrorCode",
+    "build_give_feedback", "build_registry_register", "build_registry_update", "build_revoke_feedback",
+    "display_text", "parse_give_feedback_outcome", "parse_registry_events", "registry_args_json",
+    "safe_link", "sign_registry_transaction", "summarize_feedback",
+]
