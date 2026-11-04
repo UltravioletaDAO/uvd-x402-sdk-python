@@ -136,6 +136,34 @@ def mutations(source):
     )
     yield "disable cross-SDK fixture byte comparison", source + patch
 
+    # Round 2: every condition of the receipt success filter, plus plausible
+    # truthiness, AND and exact-key-count regressions. TS accepts extra fields.
+    status_guard = """        if (
+            not isinstance(status, dict)
+            or "Failure" in status
+            or not (
+                isinstance(status.get("SuccessValue"), str)
+                or isinstance(status.get("SuccessReceiptId"), str)
+            )
+        ):"""
+    for old, new in [
+        (status_guard, "        if False:"),
+        ("not isinstance(status, dict)", "False"),
+        ('or "Failure" in status', "or False"),
+        ('or "Failure" in status', 'or bool(status.get("Failure"))'),
+        ('isinstance(status.get("SuccessValue"), str)', '"SuccessValue" in status'),
+        ('isinstance(status.get("SuccessReceiptId"), str)', '"SuccessReceiptId" in status'),
+        ('isinstance(status.get("SuccessValue"), str)', "False"),
+        ('isinstance(status.get("SuccessReceiptId"), str)', "False"),
+        (
+            'or isinstance(status.get("SuccessReceiptId"), str)',
+            'and isinstance(status.get("SuccessReceiptId"), str)',
+        ),
+        ('or "Failure" in status', 'or "Failure" in status or len(status) != 1'),
+    ]:
+        assert source.count(old) == 1, ("receipt status mutation site moved", old)
+        yield "receipt status: " + old + " -> " + new, source.replace(old, new)
+
 
 def child():
     import pytest
@@ -159,6 +187,7 @@ def child():
                 "--disable-warnings",
                 str(ROOT / "tests/test_near_registry.py"),
                 str(ROOT / "tests/test_near_registry_parity.py"),
+                str(ROOT / "tests/test_near_registry_receipts.py"),
             ]
         )
     )

@@ -112,11 +112,19 @@ batches atomically, preserves extra data fields, and bounds JSON before parsing.
 Use `parse_registry_receipt_events(result["receipts_outcome"], "near:mainnet")`
 for a transaction result from a trusted RPC. It parses only receipts whose
 `outcome.executor_id` exactly matches `NEAR_REGISTRY_CONTRACTS` for that network;
-identical logs from another contract are ignored. Malformed receipts are skipped,
-unknown networks raise `ValueError`, and a known network without a registry returns
-no events. The low-level `parse_registry_events(logs)` is safe only when the caller
-has already filtered by executor. Neither helper authenticates the RPC itself or
-proves a payment settled.
+identical logs from another contract are ignored. The function also filters by
+`outcome.status`: it must be an object with a string `SuccessValue` or
+`SuccessReceiptId`, and no `Failure` key. `Failure` always wins, including a null
+or empty failure alongside a success field. Failed receipts (including
+`LackBalanceForState` or `ExecutionError` after emitting logs), `Unknown`, missing,
+null and malformed statuses discard the entire receipt. Empty success strings
+are valid; success strings are not decoded, and additional fields are allowed,
+matching TypeScript. Successful receipts and their logs keep their input order.
+Malformed receipts are skipped, unknown networks raise `ValueError`, and a known
+network without a registry returns no events. The low-level
+`parse_registry_events(logs)` requires the caller to filter by executor and receipt
+success first. Neither helper authenticates the RPC itself or proves a payment
+settled.
 
 ## Execution Market and trust
 

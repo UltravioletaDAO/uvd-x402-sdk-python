@@ -1042,7 +1042,7 @@ def test_update_deposit_error_precedes_uri_and_metadata(bad, via_descriptor):
 
 
 def receipt(executor, logs):
-    return {"outcome": {"executor_id": executor, "logs": logs}}
+    return {"outcome": {"executor_id": executor, "logs": logs, "status": {"SuccessValue": ""}}}
 
 
 @pytest.mark.parametrize(

@@ -777,11 +777,15 @@ def parse_registry_events(logs: Iterable[object]) -> list[RegistryEvent]:
 
 
 def parse_registry_receipt_events(receipts_outcome: object, network: str) -> list[RegistryEvent]:
-    """Parse only receipts emitted by a registered contract on this network.
+    """Parse only successful receipts from a registered contract on this network.
 
     Pass the JSON-RPC transaction result's receipts_outcome array. Malformed
-    receipts and logs are skipped; an unknown network raises ValueError. A known
-    network with no registered deployment yields no events. The RPC must still
+    receipts and logs are skipped; an unknown network raises ValueError. This
+    function requires a string SuccessValue or SuccessReceiptId in outcome.status
+    and rejects any status containing Failure, even alongside a success field.
+    Missing, unknown and malformed statuses discard the entire receipt. Other
+    fields are allowed, matching TypeScript; success strings are not decoded.
+    A known network with no registered deployment yields no events. The RPC must still
     be trusted: executor_id is provenance within its response, not a proof.
     """
     if not isinstance(network, str) or network not in NEAR_REGISTRY_CONTRACTS:
@@ -795,6 +799,16 @@ def parse_registry_receipt_events(receipts_outcome: object, network: str) -> lis
             continue
         outcome = receipt.get("outcome")
         if not isinstance(outcome, dict) or outcome.get("executor_id") not in contracts:
+            continue
+        status = outcome.get("status")
+        if (
+            not isinstance(status, dict)
+            or "Failure" in status
+            or not (
+                isinstance(status.get("SuccessValue"), str)
+                or isinstance(status.get("SuccessReceiptId"), str)
+            )
+        ):
             continue
         result.extend(parse_registry_events(outcome.get("logs")))
     return result
