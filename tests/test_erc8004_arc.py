@@ -16,7 +16,8 @@ added it in 2.98.0. What is pinned here:
 3. Every network 0.89.0 exported is exactly what it was. The snapshots below
    are the lists as 0.89.0 built them, written out rather than derived from
    the code under test, so an edit that "tidies" another entry fails here
-   instead of shipping.
+   instead of shipping. What later releases added is named in
+   ``ADDED_AFTER_0_90_0`` and pinned in its own file.
 """
 
 from typing import get_args
@@ -88,6 +89,12 @@ RELAYED_0_89_0 = {
 # ``SOLANA_FEEDBACK_NETWORKS`` as 0.89.0 exported it.
 SOLANA_0_89_0 = {"solana", "solana-devnet"}
 
+# Networks added after 0.90.0, each pinned by its own test file: Robinhood
+# (Unreleased after 0.107.0, tests/test_erc8004_robinhood.py). The table gains
+# the two plain names; ``Erc8004Network`` also gains their CAIP-2 aliases.
+ADDED_AFTER_0_90_0 = {"robinhood", "robinhood-testnet"}
+TYPE_ADDED_AFTER_0_90_0 = ADDED_AFTER_0_90_0 | {"eip155:4663", "eip155:46630"}
+
 
 # -- Arc in the ERC-8004 table ------------------------------------------------
 
@@ -139,7 +146,8 @@ def test_the_closing_check_prints_true_false(capsys):
 
 
 def test_the_table_adds_exactly_arc_and_arc_testnet():
-    assert set(ERC8004_CONTRACTS) - set(CONTRACTS_0_89_0) == {"arc", "arc-testnet"}
+    added = set(ERC8004_CONTRACTS) - set(CONTRACTS_0_89_0)
+    assert added == {"arc", "arc-testnet"} | ADDED_AFTER_0_90_0
 
 
 def test_the_table_removes_nothing():
@@ -152,7 +160,9 @@ def test_every_0_89_0_entry_is_unchanged():
 
 
 def test_the_network_type_adds_exactly_arc_and_arc_testnet():
-    assert set(get_args(Erc8004Network)) == NETWORKS_0_89_0 | {"arc", "arc-testnet"}
+    assert set(get_args(Erc8004Network)) == (
+        NETWORKS_0_89_0 | {"arc", "arc-testnet"} | TYPE_ADDED_AFTER_0_90_0
+    )
 
 
 def test_the_relayed_rail_adds_exactly_arc():

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Added: ERC-8004 on Robinhood Chain.** `robinhood` (chain 4663) and `robinhood-testnet` (chain 46630) are now `Erc8004Network`s, and `ERC8004_CONTRACTS` carries their singleton registries: on `robinhood`, identity `0x8004A169…a432`, reputation `0x8004BAa1…9b63` and validation `0x8004Cc84…AB58`; on `robinhood-testnet`, identity `0x8004A818…BD9e` and reputation `0x8004B663…8713`. Each was read on-chain on 2026-11-04 (`eth_chainId` 0x1237 / 0xb626): a 130-byte EIP-1967 proxy, `getVersion()` = 2.0.0. The testnet entry carries the two registries asked for, the same two as the TypeScript SDK (PR #70); the canonical testnet validation address also answers there and is left out until both SDKs add it.
+- **Added: the CAIP-2 names `eip155:4663` and `eip155:46630`** are `Erc8004Network`s too. Like `base-mainnet`, they are aliases: `get_contracts()` and `is_available()` resolve them to the Robinhood entry, and every read and write sends the plain name (the facilitator answers `400 "Invalid network: eip155:4663"`). Exact strings only, the same table as the TypeScript SDK's: `EIP155:4663`, `eip155:04663` or ` robinhood` are not Robinhood. `get_contracts()` / `is_available()` of a value that is not a string answer `None` / `False`.
+- **Not served by the facilitator yet.** Facilitator 2.55.0 (2026-11-04) lists the same 23 networks in `GET /feedback` and answers `400 "ERC-8004 is not supported on network robinhood"` to every read and write on either network. Neither is in `RELAYED_FEEDBACK_NETWORKS` (no `FeedbackDelegate`), so the rating rail refuses both with `unknown_network` before signing; no escrow row is added for either chain.
+- **Fixed: `submit_feedback()` sent the network as the caller wrote it.** It was the one write that skipped the wire rewrite, so `submit_feedback("base-mainnet", ...)` reached the facilitator as `base-mainnet` (a 400). It now sends `base`, as every other write does.
+- Tests: `tests/test_erc8004_robinhood.py` pins the registries, the four spellings, every read and write against a double of facilitator 2.55.0, the refusals of the rating rail and that nothing else moved since 0.107.0. `tests/test_erc8004_networks.py` names Robinhood as ahead of the facilitator; `tests/test_erc8004_arc.py` names it as added after 0.90.0. `tests/test_erc8004_ts_parity.py` and its fixture are unchanged: they compare against `uvd-x402-sdk` 2.98.0 as published and stay red on the new networks until the fixture is regenerated from a TypeScript release that carries them.
+
 ## [0.107.0] - 2026-11-04
 
 ### Added
