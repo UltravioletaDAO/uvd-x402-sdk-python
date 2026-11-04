@@ -11,9 +11,10 @@ The private checkout stayed outside this repository. No chain calls were made.
   validation; four wallet-selector builders; ordinary NEAR V0 signing with
   Ed25519 signature verification and descriptor revalidation before key access.
 - `NearRegistryClient`: all nine views, injectable synchronous JSON-RPC transport,
-  bounded decoding, complete shape checks and preserved U64/U128 strings.
+  bounded decoding, complete shape/content checks and preserved U64/U128 strings.
 - Error enum and final execution outcome parsing; strict four-event parsing;
-  deterministic filtered/weighted reputation summaries and display sanitation.
+  receipt parsing restricted to the registered executor on the selected network;
+  deterministic filtered/weighted summaries and Unicode 17.0.0 display sanitation.
 - Root exports, usage guide, 0.107.0 manifest, changelog, independent fixture
   generator and guard mutation runner.
 - `near_escrow.py` and `near_events.py` are unchanged. Their signer/account/uint/
@@ -54,45 +55,43 @@ Outputs include each args object's UTF-8 hex; signed register/give_feedback Bors
 base64; all four exact contract event logs and parsed JSON. The fixture generator
 uses `struct` and cryptography independently of SDK serialization. Tests also
 independently rebuild the transaction bytes and verify signatures.
-The TypeScript worker's registry fixture is a separate deliverable for c0der to
-compare; this change does not modify its worktree or claim that comparison ran.
+The fixture is now byte-identical to TypeScript PR #69 at b4b703061:
+6,784 bytes, SHA-256 `80eeb72f0ee5a4a933b8592f88387d6c4a1f2234a97b02a1f94969878294be38`.
+CI runs `scripts/near_registry_parity.py` against a separate checkout of that
+reviewed commit; its other cross-language checks keep following TS main.
+The independent serializer reproduces the same `calls`, `args_json`, decimal
+string nonce and `events[{log, parsed}]` format.
 
 ## Verification and self-review
 
-Tests use closed HTTP(S) proxies and no production credentials. Validation cases
-cover exact limits/+1, lowercase/uppercase, whitespace, `0x`/`0X`, null/empty,
-ASCII/Unicode/UTF-8 bytes, bool vs int, u32/u64/u128 limits, mixed-case schemes,
-Windows/POSIX-like links, exact receiver and escrow isolation, malformed RPC
-containers, partial view records, invalid event batches, pending outcomes,
-all known panic/rejection codes, floor rounding and totals above U128.
+Python 3.11.4, Node 20.20.2, ruff 0.17.3. Tests ran with closed HTTP(S) proxies.
+Base e118463: **8008 passed, 76 skipped**, zero failures.
+Final branch: **8535 passed, 76 skipped**, zero failures.
+No new failures or skips. Focused registry and parity tests: **526 passed**.
 
-`python scripts/near_registry_mutations.py` disables every direct rejection guard
-and each input validation call independently, adds boundary/signature/table/
-aggregation mutations, and disables each view schema. Every subprocess is limited
-to 120 seconds; source files are never modified. A clean tree is mandatory.
+The mutation runner kills **118/118** mutations (M1-M118), with no timeouts.
+It includes canonical signing of reordered/null args (M95/R9), exact event
+version (M96/R11), E06 precedence (M97/R13), content validators, receipt emitter
+and network isolation, Unicode removal and the cross-SDK byte comparison.
+Four additional in-memory mutations of predicate/type/surrogate error handling
+also fail their regression tests. Each child is bounded to 120 seconds; source
+files are never modified and the tracked tree stays clean.
 
-The registry suite passes 402 tests; the earlier focused NEAR/version run passes
-935. All **97/97 mutations are killed** (M1-M97), none by timeout. The initial
-90/97 round identified seven missing isolated cases; all seven were added without
-removing mutations or changing production code.
+Boundary tests cover exact limits/+1, uppercase/whitespace, empty/null values,
+ASCII/UTF-8 lengths, malformed RPC receipts, lookalike executors, wrong networks,
+invalid event batches and the refuter's Unicode cases. One independent
+adversarial reviewer found no P1/P2: 2,790 content cases against the real TS
+module give identical verdicts, and all 1,114,112 Unicode positions give the same
+6,319 removed points (SHA-256 pinned in the test).
 
-The fixture check and formatting/lint pass. Both signed parity transactions also
-match `@near-js/transactions` and `@near-js/crypto` 2.5.1 byte for byte; all four
-event strings match the contract's exact-format test. CI cross-language passes
-512 checks, and the NEAR golden-flow conformance passes against TypeScript main
-f19902b78ab230cdd4c3e8809caf450a7436de28 (2.110.0), built with Node 20.20.2.
+The fixture check and formatting/lint pass. The new package export block adds
+no ruff findings: 43 baseline findings remain outside it. Cross-language
+conformance passes **512 checks**; NEAR golden-flow conformance and ERC-8128
+fixture checks pass against TypeScript main f19902b (2.110.0), built with Node 20.
 
 `preci.py --ejecutar` exits 0 with no cheap steps selected for this repository;
-the actual CI test/conformance commands are run explicitly. `import ows` cannot
-run on Windows (1.4.2 ships only Linux/macOS wheels); its existing platform skips
-remain and the real-library gate is left to CI Linux. Full-suite totals and
-baseline differences are recorded in the PR and local delivery report.
+the actual CI test/conformance commands ran explicitly. `import ows` cannot run
+on Windows (1.4.2 ships only Linux/macOS wheels); the existing platform skips
+remain and the real-library gate is unchanged for CI Linux.
 
-Complete offline suite: base **8008 passed, 76 skipped** (895.51s); branch
-**8397 passed, 76 skipped** (907.27s). No new failures or skips. The branch suite
-was collected before the 14 final guard-isolation cases were added; those cases
-pass in the final 402-test registry run, with unchanged production source.
-The package was reinstalled offline and reports 0.107.0.
-
-No subagents were used (the specific assignment requires none).
 No merge of the PR, deploy or package publication was performed.
