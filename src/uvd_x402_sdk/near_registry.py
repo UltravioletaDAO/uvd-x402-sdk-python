@@ -740,9 +740,10 @@ def parse_registry_events(logs: Iterable[object]) -> list[RegistryEvent]:
     """Like parse_arras_events: skip foreign/malformed logs and invalid batches.
 
     Unknown fields are retained in data; integer strings stay strings. Safe only
-    when the caller has already filtered receipts by the registry executor_id.
-    Prefer parse_registry_receipt_events for RPC receipts_outcome arrays. Neither
-    parser proves settlement or authenticates an untrusted RPC.
+    when the caller has already filtered receipts by the registry executor_id
+    and successful status. Prefer parse_registry_receipt_events for RPC
+    receipts_outcome arrays: it applies both filters. Neither parser proves
+    settlement or authenticates an untrusted RPC.
     """
     result = []
     if not isinstance(logs, Iterable) or isinstance(logs, (str, bytes, dict)):

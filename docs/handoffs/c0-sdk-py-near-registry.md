@@ -62,7 +62,7 @@ reviewed commit; its other cross-language checks keep following TS main.
 The independent serializer reproduces the same `calls`, `args_json`, decimal
 string nonce and `events[{log, parsed}]` format.
 
-## Verification and self-review
+## Verification and self-review (round 1)
 
 Python 3.11.4, Node 20.20.2, ruff 0.17.3. Tests ran with closed HTTP(S) proxies.
 Base e118463: **8008 passed, 76 skipped**, zero failures.
@@ -95,3 +95,33 @@ on Windows (1.4.2 ships only Linux/macOS wheels); the existing platform skips
 remain and the real-library gate is unchanged for CI Linux.
 
 No merge of the PR, deploy or package publication was performed.
+
+## Round 2: receipt execution status
+
+`parse_registry_receipt_events` now checks both the registered executor and
+`outcome.status`. A string `SuccessValue` or `SuccessReceiptId` is required;
+any `Failure` key discards the entire receipt, including null/false failures
+and ambiguous success/failure objects. Unknown, absent, null and malformed
+statuses are skipped. Empty success strings and extra non-Failure fields are
+accepted, matching TypeScript PR #69 at `14d7196` (the owner's later parity
+requirement supersedes the earlier one-key suggestion). The log-only helper's
+docstring also names both prerequisites.
+
+Python 3.11.14, Node 20.20.2: base **8008 passed, 76 skipped**, original head
+**8535 passed, 76 skipped**, final **8597 passed, 76 skipped**, no failures.
+The 62 new tests give 52 failures before the fix and all pass after it; the
+focused suite has 588 passing cases. M1-M128 all die, including the 10 new
+status mutations M119-M128; no timeouts. The tests retain the previous R9/R11/R13
+regressions and successful receipt/log ordering through rejected receipts.
+
+Actual TS/Python status comparison: 4,464 cases, zero differences after the fix
+(712 before). An independent adversarial review found no P1/P2: 4,226 additional
+JSON/batch/network/executor cases agree, 14 Failure/order invariants pass, and
+five alternative mutations die. All tests and mutations run with closed
+HTTP(S) proxies and bounded subprocess timeouts.
+
+After integrating `origin/main` e118463, the 512 cross-language checks, NEAR
+golden-flow conformance, ERC-8128 vectors, registry byte parity and independent
+serializer pass. The registry fixture and its CI pin are unchanged. OWS still
+has no Windows wheel; its Linux CI gate remains intact. No PR merge, deployment
+or package publication is part of this round.
