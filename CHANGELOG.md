@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.107.0] - 2026-11-04
+
+### Added
+- NEAR Arras registry v1 identity and payment-backed reputation helpers: offline
+  wallet descriptors, ordinary Ed25519 transactions, injected RPC views, strict
+  events/outcomes, filtered reputation summaries and safe display helpers.
+- Receipt executor filtering and contract content validation for views/events.
+- Unicode 17.0.0 display sanitization including default-ignorable code points.
+- Synthetic parity vectors, validation boundary tests and an offline mutation runner.
+- Registry usage and integration handoff documentation. Deployment and publishing
+  remain separate release steps.
+
 ## [0.106.0] - 2026-11-03
 
 - Add offline `sign_nep413` and `nep413_preimage` with the NEP-413 domain prefix, Borsh callback option and locally verified Ed25519 signatures. Pin the official message example plus Unicode and absent/empty callback vectors shared with TypeScript.

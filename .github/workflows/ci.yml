@@ -22,7 +22,8 @@ on:
     #   interop/**        the interop contract: tests/interop validates its
     #                     schemas, fixtures and vectors, and reads the rules its
     #                     *.md write down
-    #   scripts/near_kk_parity.py  run by cross-language against the TypeScript SDK
+    #   scripts/near_kk_parity.py and scripts/near_registry_parity.py
+    #                     run by cross-language against the TypeScript SDK
     #   scripts/release_tag.py  run by publish.yml's tag job, and against a
     #                     local remote by tests/test_release_tag.py
     # Everything else is left out: docs/, CHANGELOG.md and the other root *.md,
@@ -41,6 +42,7 @@ on:
       - 'interop/**'
       - 'scripts/release_tag.py'
       - 'scripts/near_kk_parity.py'
+      - 'scripts/near_registry_parity.py'
   pull_request:
     # The same list as `push`, entry for entry.
     paths:
@@ -55,6 +57,7 @@ on:
       - 'interop/**'
       - 'scripts/release_tag.py'
       - 'scripts/near_kk_parity.py'
+      - 'scripts/near_registry_parity.py'
 
 # Both jobs only read: this checkout, and the TypeScript SDK, which is public.
 permissions:
@@ -149,3 +152,18 @@ jobs:
       - name: NEAR golden-flow conformance (NEP-413, exact, storage, Arras logs)
         working-directory: uvd-x402-sdk-python
         run: python scripts/near_kk_parity.py --ts-root ../uvd-x402-sdk-typescript
+
+      # Registry PR #69 owns these bytes. Pin its reviewed head while that PR
+      # is separate from TS main; the other conformance checks keep following main.
+      - name: Check out the shared registry fixture
+        uses: actions/checkout@v4
+        with:
+          repository: UltravioletaDAO/uvd-x402-sdk-typescript
+          ref: b4b70306125b69294d6b60bd79df60da44d68f1c
+          path: uvd-x402-sdk-typescript-registry
+          sparse-checkout: src/providers/near/vectors/near-registry.json
+          sparse-checkout-cone-mode: false
+
+      - name: NEAR registry vectors are the same file in both repos
+        working-directory: uvd-x402-sdk-python
+        run: python scripts/near_registry_parity.py --ts-root ../uvd-x402-sdk-typescript-registry
