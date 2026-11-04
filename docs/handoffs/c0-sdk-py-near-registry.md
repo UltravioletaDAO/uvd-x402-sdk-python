@@ -71,9 +71,22 @@ and each input validation call independently, adds boundary/signature/table/
 aggregation mutations, and disables each view schema. Every subprocess is limited
 to 120 seconds; source files are never modified. A clean tree is mandatory.
 
-The focused suite, fixture check and formatting/lint pass. Full suite, mutation
-counts, baseline differences and CI command results are recorded in the PR and
-local delivery report after the final base refresh.
+The registry suite passes 402 tests; the earlier focused NEAR/version run passes
+935. All **97/97 mutations are killed** (M1-M97), none by timeout. The initial
+90/97 round identified seven missing isolated cases; all seven were added without
+removing mutations or changing production code.
+
+The fixture check and formatting/lint pass. Both signed parity transactions also
+match `@near-js/transactions` and `@near-js/crypto` 2.5.1 byte for byte; all four
+event strings match the contract's exact-format test. CI cross-language passes
+512 checks, and the NEAR golden-flow conformance passes against TypeScript main
+f19902b78ab230cdd4c3e8809caf450a7436de28 (2.110.0), built with Node 20.20.2.
+
+`preci.py --ejecutar` exits 0 with no cheap steps selected for this repository;
+the actual CI test/conformance commands are run explicitly. `import ows` cannot
+run on Windows (1.4.2 ships only Linux/macOS wheels); its existing platform skips
+remain and the real-library gate is left to CI Linux. Full-suite totals and
+baseline differences are recorded in the PR and local delivery report.
 
 No subagents were used (the specific assignment requires none).
 No merge of the PR, deploy or package publication was performed.
