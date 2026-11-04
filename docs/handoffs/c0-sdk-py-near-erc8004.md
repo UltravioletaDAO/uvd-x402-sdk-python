@@ -44,15 +44,26 @@ feedback, verified summaries, explicit storage budgets and local signing. The
 package exports the new surface and declares 0.108.0. No existing registry/EVM
 module or fixture is modified.
 
-## Verification in progress
+## Verification
 
 Python 3.11.4 and ruff 0.17.3 from a fresh CI-extras environment; Node 20.20.2.
-The original base suite reached 83% without failures before its 900-second limit;
-a complete run is underway in a separate checkout of the exact base commit.
-OWS 1.4.2 has no Windows wheel, so its Linux import gate is not reproducible here.
-The existing platform skips remain unchanged.
+Tests ran with closed HTTP(S) proxies. The complete isolated base suite passed
+8597 tests with 76 skips; the final suite passed 9141 tests with the same 76
+skips and zero failures (978.43 seconds). The 543 focused tests pass with 96%
+branch-aware coverage. All 102 guard mutations are killed, with no timeouts.
 
-Cross-language conformance against TS main f15b4295: 512 checks pass. ERC-8128
-vector comparison, NEAR golden-flow conformance and legacy registry parity against
-CI's pinned b4b7030 fixture pass. The new focused suite and mutation evidence are
-reported in the PR after final verification.
+Cross-language conformance against TS main f15b4295 passes all 512 checks.
+ERC-8128 vector comparison, NEAR golden-flow conformance and legacy registry
+parity against CI's pinned b4b7030 fixture pass. Lint and formatting pass for
+all six new Python files; the package export file adds no lint findings.
+The three-point diff passes the secret scanner and whitespace check.
+
+`preci.py --repo . --base origin/main --ejecutar` exits 0 with no cheap steps
+selected; the CI commands were therefore run independently. OWS 1.4.2 has no
+Windows wheel, so its Linux import gate cannot be reproduced on this host.
+The Linux CI gate remains unchanged.
+
+Fixture: 212059 bytes; SHA-256
+`07e8a80665811afe9ad6c95bf9a811b3cd4b31cb81a9f7ec57caadf7331a7b6c`.
+Byte equality with the concurrent TypeScript ERC-8004 fixture remains pending
+until that fixture is available. Existing cross-language checks pass locally.
