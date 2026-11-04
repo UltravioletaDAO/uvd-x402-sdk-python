@@ -88,5 +88,11 @@ run on Windows (1.4.2 ships only Linux/macOS wheels); its existing platform skip
 remain and the real-library gate is left to CI Linux. Full-suite totals and
 baseline differences are recorded in the PR and local delivery report.
 
+Complete offline suite: base **8008 passed, 76 skipped** (895.51s); branch
+**8397 passed, 76 skipped** (907.27s). No new failures or skips. The branch suite
+was collected before the 14 final guard-isolation cases were added; those cases
+pass in the final 402-test registry run, with unchanged production source.
+The package was reinstalled offline and reports 0.107.0.
+
 No subagents were used (the specific assignment requires none).
 No merge of the PR, deploy or package publication was performed.
