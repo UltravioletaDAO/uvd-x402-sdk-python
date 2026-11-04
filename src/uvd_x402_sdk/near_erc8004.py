@@ -230,7 +230,10 @@ def parse_erc8004_config(value: object, *, network: str, role: str) -> Erc8004Co
     _require(isinstance(role, str) and role in contracts, "unknown contract role")
     _require(isinstance(value, Mapping), "config must be an object")
     # Snapshot without retaining caller-owned nested containers.
-    raw = loads_bounded(_json(dict(value)))
+    snapshot = dict(value)
+    if isinstance(snapshot.get("limits"), Mapping):
+        snapshot["limits"] = dict(snapshot["limits"])
+    raw = loads_bounded(_json(snapshot))
     expected = "erc8004-arras-verifier" if role == "verifier" else f"erc8004-{role}"
     _require(raw.get("contract") == expected, "unexpected config contract")
     if role != "verifier":
@@ -1030,6 +1033,8 @@ class NearErc8004Client:
             _require(
                 value == _contracts(self.network)["identity"], "identity registry network mismatch"
             )
+        if method == "get_metadata" and data["metadata_key"] == "agentWallet" and value is not None:
+            _require(_acc(base64.b64decode(value).decode("utf-8")), "invalid agentWallet metadata")
         if method == "nft_token" and value is not None:
             _require(value["token_id"] == data["token_id"], "token result mismatch")
         if method == "get_proof_feedback" and value is not None:

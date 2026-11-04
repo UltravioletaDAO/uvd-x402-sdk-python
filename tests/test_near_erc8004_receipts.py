@@ -573,3 +573,164 @@ def test_http_transport_bounds_before_json_and_no_other_methods(monkeypatch):
     monkeypatch.setattr(httpx, "stream", lambda *a, **k: Response())
     with pytest.raises(ValueError, match="too large"):
         erc.NearErc8004Client().nft_total_supply()
+
+
+@pytest.mark.parametrize("role", ["validation", None, []])
+def test_config_role_never_reaches_rpc(role):
+    def rpc(*args):
+        pytest.fail("invalid role reached RPC")
+
+    with pytest.raises(ValueError, match="unknown contract role"):
+        erc.NearErc8004Client(rpc=rpc).get_config(role)
+
+
+def test_proof_ref_and_list_ref_binding():
+    result = {"agent_id": "0", "client_address": "other.near", "feedback_index": "1"}
+    client = erc.NearErc8004Client(rpc=lambda m, p: envelope(result))
+    with pytest.raises(ValueError):
+        client.get_proof_feedback("verifier.near", "proof", "payer.near")
+    result = [{"agent_id": "1", "client_address": "payer.near", "feedback_index": "1"}]
+    with pytest.raises(ValueError):
+        client.list_verified_feedback("0", "verifier.near")
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        None,
+        [],
+        1,
+        {"result": None},
+        {"result": []},
+        {"result": {}, "error": None},
+        {"status": None},
+    ],
+)
+def test_invalid_outcome_types(outcome):
+    with pytest.raises(ValueError):
+        parse(outcome)
+
+
+def test_invalid_outcome_method_and_error_envelope():
+    outcome = feedback_outcome()
+    for method in [None, [], "validation_request"]:
+        with pytest.raises(ValueError):
+            parse(outcome, method=method)
+    with pytest.raises(ValueError):
+        parse({"error": None, "result": outcome})
+    outcome["status"] = None
+    with pytest.raises(ValueError):
+        parse(outcome)
+    outcome["status"] = {"Failure": {"ExecutionError": "unknown panic"}}
+    with pytest.raises(ValueError):
+        parse(outcome)
+
+
+def rejected_outcome():
+    outcome = feedback_outcome()
+    outcome["status"] = {"SuccessValue": "bnVsbA=="}
+    outcome["receipts_outcome"] = [
+        {
+            "outcome": {
+                "executor_id": erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["reputation"],
+                "status": {"SuccessValue": "bnVsbA=="},
+                "logs": ["erc8004:rechazo:" + erc.Erc8004Rejection.E23.value],
+            }
+        }
+    ]
+    return outcome
+
+
+def test_null_requires_canonical_base64_and_actual_null_bytes():
+    for bad in ["bnVsbB==", ""]:
+        outcome = rejected_outcome()
+        outcome["status"]["SuccessValue"] = bad
+        with pytest.raises(ValueError):
+            parse(outcome)
+
+
+def test_transaction_args_decode_and_size_guard():
+    outcome = feedback_outcome()
+    call = outcome["transaction"]["actions"][0]["FunctionCall"]
+    original = base64.b64decode(call["args"])
+    for bad in [
+        None,
+        [],
+        "!",
+        base64.b64encode(b" " * 400000 + original).decode(),
+        base64.b64encode(b"{").decode(),
+    ]:
+        call["args"] = bad
+        with pytest.raises(ValueError):
+            parse(outcome)
+
+
+@pytest.mark.parametrize(
+    "method,good,bad_values,role",
+    [
+        ("set_agent_wallet", False, [0, "false", None], "identity"),
+        ("nft_transfer_call", True, [1, "true", None], "identity"),
+        (
+            "verify_feedback_proof",
+            {"counterparty": "worker.near", "role": "receiver", "context": "em", "weight": "1"},
+            [
+                {},
+                {
+                    "counterparty": "worker.near",
+                    "role": "receiver",
+                    "context": "em",
+                    "weight": "01",
+                },
+            ],
+            "verifier",
+        ),
+        ("nft_transfer", None, [True, "0"], "identity"),
+    ],
+)
+def test_other_method_results(method, good, bad_values, role):
+    outcome = feedback_outcome()
+    outcome["transaction"]["receiver_id"] = erc.NEAR_ERC8004_CONTRACTS["near:mainnet"][role]
+    outcome["transaction"]["actions"][0]["FunctionCall"]["method_name"] = method
+    for value in [good, *bad_values]:
+        outcome["status"] = {"SuccessValue": base64.b64encode(json.dumps(value).encode()).decode()}
+        if value is good:
+            assert parse(outcome, method).value == good
+        else:
+            with pytest.raises(ValueError):
+                parse(outcome, method)
+
+
+def test_transaction_receiver_and_method_are_checked_independently():
+    outcome = feedback_outcome()
+    outcome["transaction"]["receiver_id"] = "foreign.near"
+    with pytest.raises(ValueError):
+        parse(outcome)
+    outcome = feedback_outcome()
+    outcome["transaction"]["actions"][0]["FunctionCall"]["method_name"] = "give_feedback"
+    with pytest.raises(ValueError):
+        parse(outcome)
+
+
+def test_large_but_valid_success_json_is_rejected_before_decoding():
+    outcome = feedback_outcome()
+    outcome["status"]["SuccessValue"] = base64.b64encode(b" " * 400000 + b'"1"').decode()
+    with pytest.raises(ValueError, match="outcome too large"):
+        parse(outcome)
+
+
+def test_identifier_error_is_distinct_from_missing_event():
+    outcome = feedback_outcome()
+    outcome["status"]["SuccessValue"] = base64.b64encode(b'"01"').decode()
+    with pytest.raises(ValueError, match="invalid result identifier"):
+        parse(outcome)
+
+
+def test_agent_wallet_metadata_is_a_near_account():
+    for value in [
+        base64.b64encode(b"INVALID").decode(),
+        base64.b64encode(bytes([255])).decode(),
+        "",
+    ]:
+        client = erc.NearErc8004Client(rpc=lambda m, p: envelope(value))
+        with pytest.raises(ValueError):
+            client.get_metadata("0", "agentWallet")

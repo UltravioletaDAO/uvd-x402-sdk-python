@@ -677,3 +677,150 @@ def test_signer_cannot_mutate_prepared_args():
 
     signed = base64.b64decode(sign(tx, MutatingSigner()))
     assert b"YQ==" in signed[:-65] and b"Yg==" not in signed[:-65]
+
+
+@pytest.mark.parametrize("role", [None, [], "validation", "Identity", "identity "])
+def test_config_role_type_guard(role):
+    with pytest.raises(ValueError, match="unknown contract role"):
+        erc.parse_erc8004_config({}, network="near:mainnet", role=role)
+
+
+@pytest.mark.parametrize("raw", [None, [], True, 1, "config"])
+def test_config_object_type_guard(raw):
+    with pytest.raises(ValueError, match="config must be an object"):
+        erc.parse_erc8004_config(raw, network="near:mainnet", role="identity")
+
+
+def test_identity_config_limits_and_window():
+    original = raw_config()
+    for key, value in original["limits"].items():
+        for bad in [None, True, 0, str(int(value) + 1) if isinstance(value, str) else value + 1]:
+            raw = copy.deepcopy(original)
+            raw["limits"][key] = bad
+            with pytest.raises(ValueError):
+                erc.parse_erc8004_config(raw, network="near:mainnet", role="identity")
+
+
+def test_tighter_config_limits_are_enforced():
+    for limit, args in [
+        ("max_agent_uri_len", {"agent_uri": "a:long"}),
+        ("max_register_metadata", {"metadata": [{"metadata_key": "k", "metadata_value": ""}] * 2}),
+        ("max_metadata_key_len", {"metadata": [{"metadata_key": "long", "metadata_value": ""}]}),
+        ("max_metadata_value_len", {"metadata": [{"metadata_key": "k", "metadata_value": "YWI="}]}),
+    ]:
+        raw = raw_config()
+        raw["limits"][limit] = 1
+        cfg = erc.parse_erc8004_config(raw, network="near:mainnet", role="identity")
+        with pytest.raises(ValueError):
+            erc.build_erc8004_register(
+                network="near:mainnet", signer_id="payer.near", config=cfg, **args
+            )
+
+
+@pytest.mark.parametrize("args", [None, [], 1, "args"])
+def test_args_are_an_object(args):
+    with pytest.raises(ValueError, match="args must be an object"):
+        erc.build_erc8004_call(
+            network="near:mainnet",
+            signer_id="payer.near",
+            config=config(),
+            method="register",
+            args=args,
+        )
+
+
+def test_growth_without_deposit_is_explicit_error():
+    with pytest.raises(ValueError, match="storage growth requires an explicit deposit"):
+        build("set_agent_uri", {"agent_id": "0", "new_uri": ""})
+
+
+def test_transaction_params_are_closed():
+    tx = build()
+    tx["actions"][0]["params"]["unexpected"] = True
+    with pytest.raises(ValueError):
+        sign(tx)
+
+
+@pytest.mark.parametrize(
+    "nonce,block,message",
+    [
+        ("0", "1" * 32, "nonce must be positive"),
+        ("1", "1" * 31, "invalid block hash"),
+        ("1", "1" * 45, "invalid block hash"),
+        ("1", "1" * 33, "block hash must decode to 32 bytes"),
+        ("1", None, "invalid block hash"),
+    ],
+)
+def test_nonce_and_block_checks_before_key(nonce, block, message):
+    with pytest.raises(ValueError, match=message):
+        erc.sign_erc8004_transaction(
+            build(), NoKey(), nonce, block, network="near:mainnet", config=config()
+        )
+
+
+def test_invalid_signer_public_key_and_signature_types():
+    class BadKey(Signer):
+        @property
+        def public_key(self):
+            return bytes(31)
+
+    with pytest.raises(ValueError, match="invalid Ed25519 public key"):
+        sign(build(), BadKey())
+    for signature in ["x" * 64, bytes(63), None]:
+        signer = Signer()
+        signer.sign = lambda _: signature
+        with pytest.raises(ValueError, match="invalid Ed25519 signature"):
+            sign(build(), signer)
+
+
+@pytest.mark.parametrize(
+    "field,good,bad",
+    [
+        ("endpoint", "a:" + "x" * 1022, "a:" + "x" * 1023),
+        ("feedback_uri", "a:" + "x" * 4094, "a:" + "x" * 4095),
+        ("feedback_hash", "00" * 32, "0X" + "00" * 32),
+    ],
+)
+def test_feedback_field_boundaries(field, good, bad):
+    args = {"agent_id": "0", "value": "0", "value_decimals": 0, field: good}
+    build("give_feedback", args, "reputation")
+    args[field] = bad
+    with pytest.raises(ValueError):
+        build("give_feedback", args, "reputation")
+
+
+def test_metadata_memo_response_and_message_boundaries():
+    entry = {"metadata_key": "k" * 64, "metadata_value": base64.b64encode(b"x" * 1024).decode()}
+    build(args={"metadata": [entry] * 4, "agent_uri": "a:" + "x" * 8190})
+    txargs = {
+        "token_id": str(2**64 - 1),
+        "receiver_id": "w" * 64,
+        "memo": "ñ" * 128,
+        "approval_id": 2**64 - 1,
+    }
+    build("nft_transfer", txargs)
+    for field, value in [("memo", "ñ" * 129), ("approval_id", True), ("approval_id", 2**64)]:
+        with pytest.raises(ValueError):
+            build("nft_transfer", {**txargs, field: value})
+    response = {
+        "agent_id": "0",
+        "client_address": "client.near",
+        "feedback_index": "1",
+        "response_uri": "a:" + "x" * 4094,
+    }
+    build("append_response", response, "reputation", deposit="1")
+    for bad in ["", None, "a:" + "x" * 4095]:
+        with pytest.raises(ValueError):
+            build("append_response", {**response, "response_uri": bad}, "reputation", deposit="1")
+    with pytest.raises(ValueError):
+        build("nft_transfer_call", {"receiver_id": "w.near", "token_id": "0", "msg": "x" * 65537})
+
+
+def test_config_snapshot_can_be_revalidated_without_mutable_aliases():
+    cfg = config()
+    again = erc.parse_erc8004_config(cfg.data, network="near:mainnet", role="identity")
+    assert again == cfg and again is not cfg
+    raw = raw_config()
+    snapshot = erc.parse_erc8004_config(raw, network="near:mainnet", role="identity")
+    raw["limits"]["max_agent_uri_len"] = 0
+    assert snapshot.data["limits"]["max_agent_uri_len"] == 8192
