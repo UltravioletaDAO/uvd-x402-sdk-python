@@ -911,3 +911,68 @@ def test_feedback_zero_gas_is_e17():
 def test_malformed_outcome_log_containers(change):
     with pytest.raises(ValueError, match="logs"):
         r.parse_give_feedback_outcome(outcome(None) | change)
+
+
+@pytest.mark.parametrize("method", ["delete_account", [], None])
+def test_unsupported_method_has_its_own_diagnostic(method):
+    tx = register()
+    params(tx)["methodName"] = method
+    with pytest.raises(ValueError, match="unsupported registry method"):
+        r.sign_registry_transaction(tx, UntouchedSigner(), 1, BLOCK)
+
+
+def test_non_object_args_have_their_own_diagnostic():
+    tx = register()
+    params(tx)["args"] = []
+    with pytest.raises(ValueError, match="registry args must be an object"):
+        r.sign_registry_transaction(tx, UntouchedSigner(), 1, BLOCK)
+
+
+def test_block_hash_bound_applies_before_base58_decode(monkeypatch):
+    def never_decode(value):
+        pytest.fail("oversized block hash reached the base58 decoder")
+
+    monkeypatch.setattr(r, "_b58decode", never_decode)
+    with pytest.raises(ValueError, match="block_hash must be base58 of 32 bytes"):
+        r.sign_registry_transaction(register(), UntouchedSigner(), 1, "1" * 45)
+
+
+@pytest.mark.parametrize(
+    "method,args",
+    [
+        ("list_feedback", ("Invalid.near",)),
+        ("get_summary_by_operator", ("Invalid.near", "em")),
+    ],
+)
+def test_view_account_validation_precedes_transport(method, args):
+    def never_query(*args):
+        pytest.fail("invalid account reached RPC")
+
+    with pytest.raises(ValueError, match="invalid NEAR account"):
+        getattr(r.NearRegistryClient(rpc=never_query), method)(*args)
+
+
+def test_outcome_bound_applies_before_base64_decode(monkeypatch):
+    def never_decode(*args, **kwargs):
+        pytest.fail("oversized outcome reached the base64 decoder")
+
+    monkeypatch.setattr(r.base64, "b64decode", never_decode)
+    with pytest.raises(ValueError, match="too large"):
+        r.parse_give_feedback_outcome({"status": {"SuccessValue": "A" * (512 * 1024 + 1)}})
+
+
+@pytest.mark.parametrize("value", [True, -1, "0", {}, 2**32])
+def test_rejection_log_cannot_explain_a_non_null_result(value):
+    with pytest.raises(ValueError, match="expected u32 feedback_id or null"):
+        r.parse_give_feedback_outcome(
+            outcome(value, ["arras-registry:rechazo:E22_PAGO_INEXISTENTE"])
+        )
+
+
+def test_simple_average_uses_floor():
+    assert (
+        r.summarize_feedback([feedback_view(score=s) for s in (0, 0, 1)], ESCROW, "em")[
+            "average_x100"
+        ]
+        == 33
+    )
