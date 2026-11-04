@@ -1332,6 +1332,31 @@ class Erc8004Outcome:
     panic: Erc8004PanicCode | None = None
 
 
+def _result_matches(data, args, method):
+    if method == "register":
+        return data["agent_uri"] == args.get("agent_uri", "")
+    for field in (
+        "agent_id",
+        "value",
+        "value_decimals",
+        "tag1",
+        "tag2",
+        "endpoint",
+        "feedback_uri",
+        "feedback_hash",
+    ):
+        if data[field] != args.get(field, None if field == "feedback_hash" else ""):
+            return False
+    if method == "give_feedback":
+        return data["proof"] is None
+    proof = data["proof"]
+    return (
+        isinstance(proof, dict)
+        and proof["verifier"] == args["verifier"]
+        and proof["proof"] == args["proof"]
+    )
+
+
 def parse_erc8004_outcome(outcome: object, *, network: str, method: str) -> Erc8004Outcome:
     """Decode a final RPC transaction outcome, bound to method and deployment.
 
@@ -1404,6 +1429,17 @@ def parse_erc8004_outcome(outcome: object, *, network: str, method: str) -> Erc8
             _require(len(codes) == 1, "null feedback requires one recognized rejection")
             return Erc8004Outcome("rejected", rejection=codes.pop())
         _require(_decimal(value, positive=method != "register"), "invalid result identifier")
+        encoded_args = actions[0]["FunctionCall"].get("args")
+        _require(
+            isinstance(encoded_args, str) and len(encoded_args) <= MAX_VIEW_BYTES,
+            "invalid transaction args",
+        )
+        try:
+            tx_args = loads_bounded(base64.b64decode(encoded_args, validate=True))
+        except ValueError:
+            raise ValueError("invalid transaction args") from None
+        _, required, optional = _WRITE_ARGS[method]
+        tx_args = _arguments(tx_args, required, optional)
         events = parse_erc8004_receipt_events(outcome.get("receipts_outcome"), network)
         name = "registered" if method == "register" else "new_feedback"
         key = "agent_id" if method == "register" else "feedback_index"
@@ -1413,6 +1449,7 @@ def parse_erc8004_outcome(outcome: object, *, network: str, method: str) -> Erc8
                 e["event"] == name
                 and e["data"][0][key] == value
                 and e["data"][0][author] == tx["signer_id"]
+                and _result_matches(e["data"][0], tx_args, method)
                 for e in events
             ),
             "result identifier lacks matching receipt event",
