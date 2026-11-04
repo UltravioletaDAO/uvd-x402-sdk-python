@@ -47,7 +47,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from uvd_x402_sdk.exceptions import LookupInconclusiveError, RegistrationPendingError
-from uvd_x402_sdk.networks.base import to_base_units
+from uvd_x402_sdk.networks.base import get_network, to_base_units
 from uvd_x402_sdk.stack_key import (
     refuse_redirect_hook,
     stack_key_request_kwargs,
@@ -62,40 +62,38 @@ AgentId = Union[int, str]
 
 # Supported networks for ERC-8004 (25 networks: 23 EVM + 2 Solana)
 #
-# 23 of them are the names the FACILITATOR accepts, verified against
-# GET /feedback -> supportedNetworks (all 23, facilitator 2.39.1, 2026-09-23;
-# the same 23 on 2.55.0, 2026-11-04). ``robinhood`` and ``robinhood-testnet``
-# carry registries read on-chain on 2026-11-04, but facilitator 2.55.0 does not
-# serve them yet: it answers ``400 "ERC-8004 is not supported on network
-# robinhood"`` to every read and write there until x402-rs adds them.
+# These are the names the FACILITATOR accepts, verified against
+# GET /feedback -> supportedNetworks (all 23, facilitator 2.39.1, 2026-09-23),
+# plus ``robinhood`` and ``robinhood-testnet``, served from the x402-rs release
+# that adds them (2.55.0 did not yet: ``400 "ERC-8004 is not supported on
+# network robinhood"``, 2026-11-04).
 # "base-mainnet" is kept only as a
 # deprecated alias: the facilitator rejects it outright (400 "Invalid network"),
 # so anything passed through this module is normalised to "base" before it
-# reaches the wire. Use "base". The CAIP-2 names of Robinhood are aliases too:
-# the facilitator answers ``400 "Invalid network: eip155:4663"``, so they are
-# rewritten to the plain name the same way (see ``_ERC8004_NETWORK_ALIASES``).
+# reaches the wire. Use "base". The CAIP-2 name of every EVM network
+# (``eip155:<chain id>``) is an alias too: the facilitator does not parse it
+# (``400 "Invalid network: eip155:8453"``), so it is rewritten to the plain name
+# the same way. Those names are derived from the chain ids
+# (``_ERC8004_NETWORK_ALIASES``); the list below is what a type checker needs,
+# and tests/test_erc8004_caip2_aliases.py pins it to the derived table.
 Erc8004Network = Literal[
     # EVM Mainnets
     "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc", "monad", "avalanche",
     "scroll", "skale-base", "arc", "robinhood",
-    # Aliases, rewritten to the plain name for lookups and on the wire
-    "base-mainnet", "eip155:4663", "eip155:46630",
+    # Deprecated alias, normalised to "base" on the wire
+    "base-mainnet",
     # EVM Testnets
-    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia", "celo-sepolia", "avalanche-fuji",
-    "skale-base-sepolia", "arc-testnet", "robinhood-testnet",
+    "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia", "optimism-sepolia",
+    "celo-sepolia", "avalanche-fuji", "skale-base-sepolia", "arc-testnet", "robinhood-testnet",
+    # CAIP-2 aliases of the EVM networks above, in the same order
+    "eip155:1", "eip155:8453", "eip155:137", "eip155:42161", "eip155:10", "eip155:42220",
+    "eip155:56", "eip155:143", "eip155:43114", "eip155:534352", "eip155:1187947933",
+    "eip155:5042", "eip155:4663",
+    "eip155:11155111", "eip155:84532", "eip155:80002", "eip155:421614", "eip155:11155420",
+    "eip155:11142220", "eip155:43113", "eip155:324705682", "eip155:5042002", "eip155:46630",
     # Solana (uses QuantuLabs 8004-solana Anchor program + ATOM Engine)
     "solana", "solana-devnet",
 ]
-
-# Names this module accepts for a network but the facilitator does not, and the
-# name it does. Exact strings only: no case folding, no trimming, no other
-# CAIP-2 form (``eip155:04663``, ``EIP155:4663`` and ``eip155:0x1237`` are not
-# Robinhood). The same table as the TypeScript SDK's ``ERC8004_NETWORK_ALIASES``.
-_ERC8004_NETWORK_ALIASES: Mapping[str, str] = MappingProxyType({
-    "base-mainnet": "base",
-    "eip155:4663": "robinhood",
-    "eip155:46630": "robinhood-testnet",
-})
 
 
 # Networks where the facilitator serves the RELAYED feedback rail, i.e. where
@@ -180,12 +178,12 @@ def _wire(network: str) -> str:
 
     ``base-mainnet`` reads like the canonical spelling and is not: the
     facilitator answers ``400 {"error": "Invalid network: base-mainnet"}``.
-    Neither does it parse ``eip155:4663`` / ``eip155:46630`` (``400 "Invalid
-    network"``), the CAIP-2 names the payment side of this SDK gives Robinhood.
-    Every name is passed through here before it reaches a URL, a request body
-    or a lookup in ``ERC8004_CONTRACTS``, so callers holding either spelling
-    keep working instead of being rejected at the edge. Anything that is not
-    an alias (a non-string included) comes back unchanged.
+    Neither does it parse a CAIP-2 name (``eip155:8453``: ``400 "Invalid
+    network"``), the form v2 payment requirements carry. Every name is passed
+    through here before it reaches a URL, a request body or a lookup in
+    ``ERC8004_CONTRACTS``, so callers holding either spelling keep working
+    instead of being rejected at the edge. Anything that is not an alias (a
+    non-string included) comes back unchanged.
     """
     if isinstance(network, str):
         return _ERC8004_NETWORK_ALIASES.get(network, network)
@@ -351,8 +349,9 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
     # Robinhood Chain (Arbitrum Orbit, chain 4663). Read on 2026-11-04 against
     # rpc.mainnet.chain.robinhood.com: each is a 130-byte EIP-1967 proxy and
     # getVersion() answers 2.0.0; identity and reputation run the implementation
-    # Base runs. Facilitator 2.55.0 does not serve ERC-8004 here yet, and no
-    # FeedbackDelegate is deployed, so it is not in RELAYED_FEEDBACK_NETWORKS.
+    # Base runs, and the validation registry's getIdentityRegistry() is this
+    # identity registry. No FeedbackDelegate is deployed, so it is not in
+    # RELAYED_FEEDBACK_NETWORKS.
     "robinhood": Erc8004ContractAddresses(
         identity_registry=_MAINNET_IDENTITY,
         reputation_registry=_MAINNET_REPUTATION,
@@ -414,16 +413,15 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         reputation_registry=_TESTNET_REPUTATION,
         validation_registry=_TESTNET_VALIDATION,
     ),
-    # Robinhood Chain testnet (chain 46630): the identity and reputation proxies
-    # Base Sepolia runs, read on 2026-11-04 against rpc.testnet.chain.robinhood.com.
-    # These two are the deployment this entry was asked for, and the TypeScript
-    # SDK carries the same two (the parity test pins both tables equal). The
-    # canonical testnet validation address answers there too (130-byte proxy,
-    # getVersion() 2.0.0, same day); it is left out until both SDKs add it
-    # together. Reads only, like arc-testnet: no FeedbackDelegate.
+    # Robinhood Chain testnet (chain 46630). Read on 2026-11-04 against
+    # rpc.testnet.chain.robinhood.com: the three proxies Base Sepolia runs
+    # (130 bytes, getVersion() 2.0.0), and the validation registry's
+    # getIdentityRegistry() is this identity registry. Reads only, like
+    # arc-testnet: no FeedbackDelegate.
     "robinhood-testnet": Erc8004ContractAddresses(
         identity_registry=_TESTNET_IDENTITY,
         reputation_registry=_TESTNET_REPUTATION,
+        validation_registry=_TESTNET_VALIDATION,
     ),
     # Solana (2) - uses QuantuLabs 8004-solana Anchor program + ATOM Engine
     "solana": Erc8004ContractAddresses(
@@ -435,6 +433,64 @@ ERC8004_CONTRACTS: dict[str, Erc8004ContractAddresses] = {
         atom_engine_program=_SOLANA_ATOM_ENGINE,
     ),
 }
+
+# Deprecated names that are not CAIP-2, and the network they stand for.
+_DEPRECATED_NETWORK_NAMES: Mapping[str, str] = MappingProxyType({"base-mainnet": "base"})
+
+# Chain ids of the ERC-8004 EVM networks that the payment registry
+# (``uvd_x402_sdk.networks``) does not carry: BSC and the seven testnets are not
+# payment networks of this SDK. Values are the facilitator's (x402-rs
+# ``src/chain/evm.rs``), each confirmed with ``eth_chainId`` on 2026-11-04. Every
+# other chain id is read from the payment registry, and a network it gains must
+# leave this table (tests/test_erc8004_caip2_aliases.py), so the registry stays
+# the one source wherever it has the network.
+_CHAIN_IDS_NOT_IN_THE_PAYMENT_REGISTRY: Mapping[str, int] = MappingProxyType({
+    "bsc": 56,
+    "ethereum-sepolia": 11155111,
+    "base-sepolia": 84532,
+    "polygon-amoy": 80002,
+    "arbitrum-sepolia": 421614,
+    "optimism-sepolia": 11155420,
+    "celo-sepolia": 11142220,
+    "avalanche-fuji": 43113,
+})
+
+
+def _evm_chain_id(network: str) -> Optional[int]:
+    registered = get_network(network)
+    if registered is not None:
+        return registered.chain_id
+    return _CHAIN_IDS_NOT_IN_THE_PAYMENT_REGISTRY.get(network)
+
+
+def _erc8004_chain_ids() -> dict[str, int]:
+    """Chain id of every EVM network of ERC8004_CONTRACTS (plain names only).
+
+    A network without one is left out rather than failing the import, and the
+    test that walks the table fails instead.
+    """
+    chain_ids = {}
+    for name, contracts in ERC8004_CONTRACTS.items():
+        if contracts.identity_registry is None or name in _DEPRECATED_NETWORK_NAMES:
+            continue
+        chain_id = _evm_chain_id(name)
+        if chain_id is not None:
+            chain_ids[name] = chain_id
+    return chain_ids
+
+
+_ERC8004_CHAIN_IDS: Mapping[str, int] = MappingProxyType(_erc8004_chain_ids())
+
+# Names this module accepts for a network but the facilitator does not, and the
+# name it does: the deprecated ``base-mainnet`` and the CAIP-2 name of every EVM
+# network, derived from its chain id. Exact strings only: no case folding, no
+# trimming, no other form of the same chain id (``EIP155:8453``,
+# ``eip155:08453`` and ``eip155:0x2105`` are not Base), and a chain id with no
+# ERC-8004 network (``eip155:999``) is no alias.
+_ERC8004_NETWORK_ALIASES: Mapping[str, str] = MappingProxyType({
+    **_DEPRECATED_NETWORK_NAMES,
+    **{f"eip155:{chain_id}": name for name, chain_id in _ERC8004_CHAIN_IDS.items()},
+})
 
 
 class ProofOfPayment(BaseModel):
@@ -1335,7 +1391,7 @@ class Erc8004Client:
         request = FeedbackRequest(
             x402_version=x402_version,
             # Through _wire like every other write: the caller's spelling as is
-            # ("base-mainnet", "eip155:4663") is a 400 at the facilitator.
+            # ("base-mainnet", "eip155:8453") is a 400 at the facilitator.
             network=_wire(network),
             feedback=FeedbackParams(
                 agent_id=agent_id,
@@ -1926,7 +1982,7 @@ class Erc8004Client:
 
         Returns:
             Contract addresses or None if not deployed. An alias
-            (``eip155:4663``, ``base-mainnet``) answers its network's entry.
+            (``eip155:8453``, ``base-mainnet``) answers its network's entry.
         """
         canonical = _wire(network)
         return ERC8004_CONTRACTS.get(canonical) if isinstance(canonical, str) else None

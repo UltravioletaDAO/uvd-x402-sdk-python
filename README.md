@@ -1906,14 +1906,15 @@ Build verifiable on-chain reputation for AI agents and services. Supports **25 n
 Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; see
 [ERC-8004 on Arc](docs/networks/arc.md#erc-8004-on-arc-0900).
 
-Robinhood Chain (`robinhood`, chain 4663, and `robinhood-testnet`, chain 46630) is in the
-table with its singleton registries (Unreleased): identity, reputation and validation on
-mainnet, identity and reputation on testnet. Their CAIP-2 names `eip155:4663` /
-`eip155:46630` are accepted too and sent to the facilitator as the plain name.
-`get_contracts()` / `is_available()` answer offline. Facilitator 2.55.0 does not serve
-ERC-8004 there yet: every read and write answers `400 "ERC-8004 is not supported on network
-robinhood"` until it does. Neither network is on the relayed rail, and there is no escrow
-on Robinhood.
+Robinhood Chain (`robinhood`, chain 4663, and `robinhood-testnet`, chain 46630) since
+Unreleased, with the singleton identity, reputation and validation registries on both. It
+needs a facilitator that serves ERC-8004 there (x402-rs 2.55.0 did not yet). Neither network
+is on the relayed rail, and there is no escrow on Robinhood.
+
+Every EVM network also takes its CAIP-2 name (`eip155:8453`, `eip155:4663`, ...), the form v2
+payment requirements carry: `get_contracts()` / `is_available()` resolve it, and every read
+and write sends the plain name, which is the only one the facilitator parses. Exact strings
+only (`EIP155:8453` or `eip155:0x2105` are not Base).
 
 > Name Base as `"base"`. The old `"base-mainnet"` spelling is rejected by the facilitator
 > (`400 Invalid network`); the SDK now rewrites it for you, but new code should use `"base"`.

@@ -8,8 +8,6 @@ Two things get checked here that no other test covered:
    spelling the type offered for Base was the one that could not work.
 2. Every mainnet except SKALE Base carries a validation registry. That address
    was deployed after the identity/reputation pair and was simply missing.
-3. The table carries a network the facilitator does not serve only when it is
-   named below as ahead of it, with the registries measured on-chain.
 """
 
 from uvd_x402_sdk.erc8004 import (
@@ -20,21 +18,18 @@ from uvd_x402_sdk.erc8004 import (
     _wire,
 )
 
-# Exactly what GET /feedback -> supportedNetworks returns: all 23, read from
-# facilitator 2.39.1 on 2026-09-23, and the same 23 from 2.55.0 on 2026-11-04.
+# Exactly what GET /feedback -> supportedNetworks returns: the 23 read from
+# facilitator 2.39.1 on 2026-09-23, plus robinhood and robinhood-testnet, which
+# the facilitator serves from the x402-rs release that adds them (2.55.0 did not
+# yet, 2026-11-04; this table is merged only once production serves them).
 FACILITATOR_NETWORKS = {
     "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc",
-    "monad", "avalanche", "scroll", "skale-base", "arc",
+    "monad", "avalanche", "scroll", "skale-base", "arc", "robinhood",
     "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia",
     "optimism-sepolia", "celo-sepolia", "avalanche-fuji", "skale-base-sepolia",
-    "arc-testnet",
+    "arc-testnet", "robinhood-testnet",
     "solana", "solana-devnet",
 }
-
-# Registries deployed and read on-chain (2026-11-04) that facilitator 2.55.0
-# does not serve yet: it answers 400 "ERC-8004 is not supported on network
-# robinhood". When the facilitator lists them, move them into the set above.
-AHEAD_OF_THE_FACILITATOR = {"robinhood", "robinhood-testnet"}
 
 EVM_MAINNETS = {
     "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc",
@@ -48,17 +43,9 @@ def test_every_facilitator_network_is_in_the_table():
 
 
 def test_the_table_invents_no_network_the_facilitator_rejects():
-    # "base-mainnet" is the one deliberate extra name: a deprecated alias. The
-    # others are networks named as ahead of the facilitator, and only those.
+    # "base-mainnet" is the one deliberate extra: a deprecated alias.
     extra = set(ERC8004_CONTRACTS) - FACILITATOR_NETWORKS
-    assert extra == {"base-mainnet"} | AHEAD_OF_THE_FACILITATOR, (
-        f"unexpected network names: {extra}"
-    )
-
-
-def test_a_network_ahead_of_the_facilitator_is_not_one_it_serves():
-    # Once the facilitator serves one, it belongs in FACILITATOR_NETWORKS.
-    assert not AHEAD_OF_THE_FACILITATOR & FACILITATOR_NETWORKS
+    assert extra == {"base-mainnet"}, f"unexpected network names: {extra}"
 
 
 def test_base_mainnet_is_rewritten_to_the_name_the_facilitator_parses():
@@ -67,7 +54,7 @@ def test_base_mainnet_is_rewritten_to_the_name_the_facilitator_parses():
 
 
 def test_every_other_name_passes_through_untouched():
-    for name in FACILITATOR_NETWORKS | AHEAD_OF_THE_FACILITATOR:
+    for name in FACILITATOR_NETWORKS:
         assert _wire(name) == name
 
 

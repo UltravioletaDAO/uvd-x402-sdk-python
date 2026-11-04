@@ -89,11 +89,18 @@ RELAYED_0_89_0 = {
 # ``SOLANA_FEEDBACK_NETWORKS`` as 0.89.0 exported it.
 SOLANA_0_89_0 = {"solana", "solana-devnet"}
 
-# Networks added after 0.90.0, each pinned by its own test file: Robinhood
-# (Unreleased after 0.107.0, tests/test_erc8004_robinhood.py). The table gains
-# the two plain names; ``Erc8004Network`` also gains their CAIP-2 aliases.
+# Names added after 0.90.0, each pinned by its own test file (Unreleased after
+# 0.107.0): Robinhood (tests/test_erc8004_robinhood.py) in the table, and in
+# ``Erc8004Network`` also the CAIP-2 alias of every EVM network
+# (tests/test_erc8004_caip2_aliases.py), written out here.
 ADDED_AFTER_0_90_0 = {"robinhood", "robinhood-testnet"}
-TYPE_ADDED_AFTER_0_90_0 = ADDED_AFTER_0_90_0 | {"eip155:4663", "eip155:46630"}
+TYPE_ADDED_AFTER_0_90_0 = ADDED_AFTER_0_90_0 | {
+    "eip155:1", "eip155:8453", "eip155:137", "eip155:42161", "eip155:10", "eip155:42220",
+    "eip155:56", "eip155:143", "eip155:43114", "eip155:534352", "eip155:1187947933",
+    "eip155:5042", "eip155:4663",
+    "eip155:11155111", "eip155:84532", "eip155:80002", "eip155:421614", "eip155:11155420",
+    "eip155:11142220", "eip155:43113", "eip155:324705682", "eip155:5042002", "eip155:46630",
+}
 
 
 # -- Arc in the ERC-8004 table ------------------------------------------------
