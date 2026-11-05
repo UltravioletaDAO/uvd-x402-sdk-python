@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.108.0] - 2026-11-04
+
+### Added
+- Separate NEAR ERC-8004 identity, reputation and Arras verifier deployments for
+  mainnet and testnet, with sponsor-funded registration and identity transfer.
+- Config-bound wallet builders and locally verified Ed25519 signing, deposit
+  ceilings, nanosecond wallet deadlines and canonical ABI validation.
+- Bounded injectable RPC views, proof-backed feedback summaries, strict receipt
+  provenance and distinct callback rejection results.
+- Public chain recordings, an explicit read-only vector generator, offline tests,
+  guard mutations and an Execution Market integration guide.
+
 ## [0.107.0] - 2026-11-04
 
 ### Added
