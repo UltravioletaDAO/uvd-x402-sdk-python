@@ -50,7 +50,10 @@ locally before return. `sign_nep413`, `sign_escrow_authorization` and
 `sign_exact_near_delegate` accept the same signer. Until OWS provides native
 NEP-413/366 envelopes, their SDK-built digest goes through OWS
 `sign_message(encoding="hex")`. A token must permit that operation; transaction
-policy parsing does not apply to a raw message digest.
+policy parsing does not apply to a raw message digest. This OWS version also
+lacks NEAR receiver/method/deposit transaction policy context; enforce those
+limits in the application before signing, including when OWS receives the
+whole transaction.
 
 `send_near_transaction` has no signing capability. It retries only the same
 bytes (at most three attempts) after transport errors, HTTP 429/5xx or RPC
