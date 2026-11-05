@@ -340,6 +340,9 @@ def validate_escrow_authorization_delegate(
 
 def _sign_delegate(options: NearEscrowDelegateOptions, delegate: dict) -> dict:
     # Snapshot every byte BEFORE invoking a caller-supplied signer.
+    from .near_transactions import _check_signer_network
+
+    _check_signer_network(options.signer, options.network)
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 

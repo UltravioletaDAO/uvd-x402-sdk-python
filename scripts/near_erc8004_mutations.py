@@ -100,8 +100,6 @@ def mutations(source):
         ('len(event["data"]) != 1', 'len(event["data"]) < 1'),
         ('not check(event["data"][0])', "False"),
         ('if receipt["executor_id"] != contracts["reputation"]:', "if False:"),
-        ("Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)", "pass"),
-        (".write_u8(2)", ".write_u8(0)"),
         ("return loads_bounded(_json(result))", "return result"),
     ]:
         if source.count(old) != 1:
@@ -115,14 +113,18 @@ def child():
     import uvd_x402_sdk
 
     sys.path.insert(0, str(ROOT))
-    source = json.load(sys.stdin)
-    name = "uvd_x402_sdk.near_erc8004"
+    short_name, source = json.load(sys.stdin)
+    name = "uvd_x402_sdk." + short_name
     module = types.ModuleType(name)
     module.__file__ = str(SOURCE)
     module.__package__ = "uvd_x402_sdk"
     sys.modules[name] = module
     exec(compile(source, str(SOURCE), "exec"), module.__dict__)
-    uvd_x402_sdk.near_erc8004 = module
+    setattr(uvd_x402_sdk, short_name, module)
+    if short_name == "near_transactions":
+        uvd_x402_sdk.near_erc8004._sign_function_call_transaction = (
+            module._sign_function_call_transaction
+        )
     raise SystemExit(
         pytest.main(
             [
@@ -149,13 +151,24 @@ def main():
         "NO_PROXY": "127.0.0.1,localhost",
     }
     survivors = []
-    rows = list(mutations(SOURCE.read_text(encoding="utf-8")))
-    for number, (label, source) in enumerate(rows, 1):
+    rows = [
+        ("near_erc8004", label, source)
+        for label, source in mutations(SOURCE.read_text(encoding="utf-8"))
+    ]
+    signing = (ROOT / "src/uvd_x402_sdk/near_transactions.py").read_text(encoding="utf-8")
+    for old, new in [
+        ("Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)", "pass"),
+        (".write_u8(2)", ".write_u8(0)"),
+    ]:
+        if signing.count(old) != 1:
+            raise RuntimeError("mutation site moved: " + old)
+        rows.append(("near_transactions", old, signing.replace(old, new)))
+    for number, (name, label, source) in enumerate(rows, 1):
         compile(source, str(SOURCE), "exec")
         try:
             result = subprocess.run(
                 [sys.executable, str(Path(__file__).resolve()), "--child"],
-                input=json.dumps(source),
+                input=json.dumps([name, source]),
                 text=True,
                 encoding="utf-8",
                 capture_output=True,

@@ -988,3 +988,10 @@ __all__ += [
     "parse_erc8004_receipt_events",
     "sign_erc8004_transaction",
 ]
+
+# Optional OWS import is lazy in the constructor; base installs stay importable.
+from uvd_x402_sdk.near_ows import OwsNearSigner
+from uvd_x402_sdk.near_storage import sign_storage_transaction
+from uvd_x402_sdk.near_transactions import NearTransactionError, send_near_transaction
+
+__all__ += ["OwsNearSigner", "sign_storage_transaction", "NearTransactionError", "send_near_transaction"]

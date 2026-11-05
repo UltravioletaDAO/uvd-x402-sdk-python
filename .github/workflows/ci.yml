@@ -26,6 +26,11 @@ on:
     #                     run by cross-language against the TypeScript SDK
     #   scripts/release_tag.py  run by publish.yml's tag job, and against a
     #                     local remote by tests/test_release_tag.py
+    #   scripts/near_ows_vectors.py, scripts/near_ows_mutations.py and
+    #   scripts/near_erc8004_mutations.py
+    #                     read by tests/test_near_ows.py: it runs the vector
+    #                     generator with --check and imports both mutation
+    #                     lists to prove every mutation site still exists
     # Everything else is left out: docs/, CHANGELOG.md and the other root *.md,
     # the other scripts/ (no job runs one), LICENSE. One of them IS read: test_exact_amount
     # scans docs/ for the float price form, so a docs-only change that brings it
@@ -43,6 +48,9 @@ on:
       - 'scripts/release_tag.py'
       - 'scripts/near_kk_parity.py'
       - 'scripts/near_registry_parity.py'
+      - 'scripts/near_ows_vectors.py'
+      - 'scripts/near_ows_mutations.py'
+      - 'scripts/near_erc8004_mutations.py'
   pull_request:
     # The same list as `push`, entry for entry.
     paths:
@@ -58,6 +66,9 @@ on:
       - 'scripts/release_tag.py'
       - 'scripts/near_kk_parity.py'
       - 'scripts/near_registry_parity.py'
+      - 'scripts/near_ows_vectors.py'
+      - 'scripts/near_ows_mutations.py'
+      - 'scripts/near_erc8004_mutations.py'
 
 # Both jobs only read: this checkout, and the TypeScript SDK, which is public.
 permissions:
@@ -92,6 +103,13 @@ jobs:
         run: python -c "import ows"
 
       - name: Test
+        env:
+          AWS_SHARED_CREDENTIALS_FILE: /dev/null
+          AWS_CONFIG_FILE: /dev/null
+          AWS_EC2_METADATA_DISABLED: 'true'
+          HTTPS_PROXY: http://127.0.0.1:9
+          HTTP_PROXY: http://127.0.0.1:9
+          NO_PROXY: 127.0.0.1,localhost
         run: python -m pytest -q
 
   # The one check this repo's own suite cannot make. Both SDK suites were green
