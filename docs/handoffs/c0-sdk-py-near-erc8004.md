@@ -36,8 +36,10 @@ outputs, receipt emitters and callback outcomes have independent validation.
 The generator recorded 20 public views and six historical transaction outcomes
 on 2026-11-04. The new fixture includes real on-chain events and exact view
 arguments. `--compare` checks a supplied TypeScript fixture byte for byte without
-network access. The concurrent TypeScript ERC-8004 fixture has not yet been
-available for comparison; this remains a coordination item.
+network access. Byte equality was measured against the TypeScript ERC-8004
+fixture in PR #71 at head `2542ad95008dc9e93c16dc9ccc47fe0437754b7a`:
+both files have SHA-256
+`07e8a80665811afe9ad6c95bf9a811b3cd4b31cb81a9f7ec57caadf7331a7b6c`.
 
 `docs/near-erc8004.md` documents the sponsor registration/transfer flow, proof
 feedback, verified summaries, explicit storage budgets and local signing. The
@@ -65,5 +67,7 @@ The Linux CI gate remains unchanged.
 
 Fixture: 212059 bytes; SHA-256
 `07e8a80665811afe9ad6c95bf9a811b3cd4b31cb81a9f7ec57caadf7331a7b6c`.
-Byte equality with the concurrent TypeScript ERC-8004 fixture remains pending
-until that fixture is available. Existing cross-language checks pass locally.
+Byte-identical to `src/providers/near/vectors/near-erc8004.json` in TypeScript
+PR #71 at head `2542ad95008dc9e93c16dc9ccc47fe0437754b7a`, with the same SHA-256
+above. The offline `--compare` check passes. Existing cross-language checks pass
+locally.
