@@ -105,7 +105,11 @@ Use `parse_erc8004_outcome(..., method="give_feedback_with_proof")` after the
 wallet returns a final outcome. It distinguishes `accepted` (decimal index),
 `rejected` (`Erc8004Rejection`) and `error` (`Erc8004PanicCode`). A successful NEAR
 transaction with a null feedback result can be a refunded callback rejection.
-Pending or inconsistent outcomes raise `ValueError`.
+Pending or inconsistent outcomes raise `ValueError`. This release accepts only
+`NEAR_ERC8004_CONTRACTS[network]["verifier"]` in `give_feedback_with_proof`;
+another account, including the other network's verifier, raises `ValueError`
+before signing. A `new_feedback` event with another proof verifier is skipped
+and cannot substantiate an accepted proof-feedback outcome.
 
 ## Configuration and spending limits
 
@@ -130,6 +134,9 @@ budgets are capped by the validated identity registration budget or reputation
 proof budget, respectively. This conservative ceiling is not a storage quote:
 the contract charges actual growth and returns the remainder. Use 1 yocto only
 when growth is known to be zero. Gas is capped at 300 TGas per descriptor.
+Configuration minima must be at least 50 TGas for transfer-call, 40 TGas for
+feedback, 120 TGas for proof feedback and 25 TGas for verifier preflight;
+smaller minima are rejected when parsing or revalidating the snapshot.
 
 The verifier's `verify_feedback_proof` performs cross-contract callbacks. It is
 available as an offline builder, `build_erc8004_verify_feedback_proof`, and is
@@ -180,6 +187,15 @@ before an NFT transfer. Unknown or malformed events are skipped. The lower-level
 `parse_erc8004_events` requires an explicit executor and assumes success has
 already been checked. These helpers trust the supplied RPC's provenance fields;
 they do not authenticate a node or prove settlement.
+
+When consuming `new_feedback` or `read_feedback_proof`, count a proof as verified
+Execution Market reputation only when it is non-null,
+`proof.verifier == NEAR_ERC8004_CONTRACTS[network]["verifier"]` and
+`proof.context == "em"`. Apply both filters even when indexing parsed events.
+`read_feedback_proof` returns the recorded proof without restricting its verifier
+or context; a non-null proof alone does not establish verified EM reputation.
+For aggregate reads, use `get_verified_summary` with the network's verifier and
+`context="em"`, as in the example above.
 
 ## Local signing
 
