@@ -824,3 +824,66 @@ def test_config_snapshot_can_be_revalidated_without_mutable_aliases():
     snapshot = erc.parse_erc8004_config(raw, network="near:mainnet", role="identity")
     raw["limits"]["max_agent_uri_len"] = 0
     assert snapshot.data["limits"]["max_agent_uri_len"] == 8192
+
+
+@pytest.mark.parametrize(
+    "field,literal",
+    [
+        ("register_deposit", 139429500000000000000000),
+        ("feedback_deposit", 6205500000000000000000),
+        ("feedback_proof_deposit", 15456000000000000000000),
+    ],
+)
+def test_deposit_ceilings_are_pinned_yocto_literals(field, literal):
+    assert erc.ERC8004_DEPOSIT_CEILINGS[field] == literal
+
+
+@pytest.mark.parametrize("network", NETWORKS)
+@pytest.mark.parametrize(
+    "method,role,args,literal",
+    [
+        ("register", "identity", {}, 139429500000000000000000),
+        (
+            "give_feedback",
+            "reputation",
+            {"agent_id": "0", "value": "1", "value_decimals": 0},
+            6205500000000000000000,
+        ),
+        (
+            "give_feedback_with_proof",
+            "reputation",
+            {"agent_id": "0", "value": "1", "value_decimals": 0, "proof": "proof-id"},
+            15456000000000000000000,
+        ),
+    ],
+)
+def test_literal_deposit_ceiling_at_build_and_before_signing(network, method, role, args, literal):
+    args = dict(args)
+    if method == "give_feedback_with_proof":
+        args["verifier"] = erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
+    cfg = config(role, network)
+    options = dict(network=network, signer_id="payer.near", config=cfg, method=method, args=args)
+    tx = erc.build_erc8004_call(**options, deposit=str(literal))
+    assert tx["actions"][0]["params"]["deposit"] == str(literal)
+    assert erc.sign_erc8004_transaction(tx, Signer(), "1", "1" * 32, network=network, config=cfg)
+    with pytest.raises(ValueError, match="deposit outside SDK bounds"):
+        erc.build_erc8004_call(**options, deposit=str(literal + 1))
+    tx["actions"][0]["params"]["deposit"] = str(literal + 1)
+    with pytest.raises(ValueError, match="deposit outside SDK bounds"):
+        erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=cfg)
+
+
+@pytest.mark.parametrize("network", NETWORKS)
+def test_growth_deposit_is_capped_by_recorded_config_before_signing(network):
+    cfg = config(network=network)
+    maximum = int(cfg.data["register_deposit"])
+    options = dict(
+        network=network, signer_id="payer.near", config=cfg, agent_id="0", new_uri="ipfs://new"
+    )
+    tx = erc.build_erc8004_set_agent_uri(**options, deposit=str(maximum))
+    assert tx["actions"][0]["params"]["deposit"] == str(maximum)
+    with pytest.raises(ValueError, match="deposit outside SDK bounds"):
+        erc.build_erc8004_set_agent_uri(**options, deposit=str(maximum + 1))
+    tx["actions"][0]["params"]["deposit"] = str(maximum + 1)
+    with pytest.raises(ValueError, match="deposit outside SDK bounds"):
+        erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=cfg)

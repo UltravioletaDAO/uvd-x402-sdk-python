@@ -59,6 +59,22 @@ def mutations(source):
         target.body = [ast.Return(ast.Constant(True))]
         yield name, ast.unparse(ast.fix_missing_locations(mutant))
     for old, new in [
+        (
+            '"register_deposit": 132790000000000000000000 * 105 // 100,',
+            '"register_deposit": 132790000000000000000000 * 200 // 100,',
+        ),
+        (
+            '"feedback_deposit": 5910000000000000000000 * 105 // 100,',
+            '"feedback_deposit": 5910000000000000000000 * 200 // 100,',
+        ),
+        (
+            '"feedback_proof_deposit": 14720000000000000000000 * 105 // 100,',
+            '"feedback_proof_deposit": 14720000000000000000000 * 200 // 100,',
+        ),
+        (
+            "maximum = min(int(cfg[ceiling_field]), ERC8004_DEPOSIT_CEILINGS[ceiling_field])",
+            "maximum = ERC8004_DEPOSIT_CEILINGS[ceiling_field]",
+        ),
         ('and "Failure" not in status', "and True"),
         ('and _successful(outcome.get("status"))', "and True"),
         ("executor_id != contracts[role]", "False"),
