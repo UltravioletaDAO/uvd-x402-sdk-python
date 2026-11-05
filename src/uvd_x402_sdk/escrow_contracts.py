@@ -21,6 +21,9 @@ row, a payment config that contradicts it is refused before anything is
 signed; a chain without a row in each of them (and in
 ``escrow_signing.VERIFIED_USDC_DOMAINS``) is refused too (since 0.97.0;
 until 0.96.0 it was signed with a logged warning).
+
+The ``usdc`` key of a row is the token the escrow moves, whatever its symbol:
+USDC everywhere but Robinhood Chain (4663), whose row carries Paxos USDG.
 """
 
 from __future__ import annotations
@@ -155,6 +158,20 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
         "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
         "usdc": "0x3600000000000000000000000000000000000000",
     },
+    # Robinhood Chain: the same canonical set as Arc. Its token is Paxos USDG
+    # (``usdc`` is the token the escrow moves, whatever its symbol: it is the
+    # domain's verifyingContract and paymentInfo.token). Read on-chain on
+    # 2026-11-05 (L2 block 106891112) and in x402-rs (CANONICAL_V1_NETWORKS,
+    # USDG_ROBINHOOD): tests/test_robinhood_escrow.py. Its testnet (46630) has no row: the
+    # canonical set has code there, Execution Market's operator does not.
+    4663: {  # Robinhood Chain
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "operator_factory": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "protocol_fee_config": "0xBe2d24614F339a1eB103A399F93AA2a39Ca815Bc",
+        "refund_request": "0xe971C674fD5c3462023f3F891dF6289DFbC9CEFC",
+        "usdc": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",  # USDG
+    },
 }
 
 # ============================================================
@@ -172,7 +189,10 @@ ESCROW_CONTRACTS: dict[int, dict[str, str]] = {
 # escrows in flight there (and AdvancedEscrowClient's default operator on
 # SKALE Base); and EM's registry has no Arc
 # Testnet entry: that row is the factory's computeAddress for the same
-# operator, the same address as Arc's. On Base,
+# operator, the same address as Arc's. EM's Robinhood Chain entry is
+# deployment configuration, not a literal of its registry, so that row was read
+# on-chain instead: the factory's getOperator for EM's config
+# (tests/test_robinhood_escrow.py). On Base,
 # SKALE Base, Arc and Arc Testnet (advanced_escrow._DEFAULT_OPERATOR_CHAINS)
 # AdvancedEscrowClient reads its default operator from here
 # (tests/test_escrow_signing_registry.py pins that); on the other chains the
@@ -188,6 +208,10 @@ ESCROW_OPERATORS: dict[int, str] = {
     # (computeAddress on the v1.0.2 factory, tests/fixtures/arc-escrow-d.json).
     5042: "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
     5042002: "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+    # Robinhood Chain: the same EM PaymentOperator, the factory's getOperator for
+    # the config Arc's comes from (read on-chain on 2026-11-05). Not an
+    # AdvancedEscrowClient default (see _DEFAULT_OPERATOR_CHAINS).
+    4663: "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
     # EM PaymentOperators of the other escrow mainnets, as EM's network registry
     # serves them (mcp_server/integrations/x402/network_registry.py at EM commit
     # f75d4171, relayed in the review of this table). Not AdvancedEscrowClient
@@ -219,6 +243,7 @@ ESCROW_MAX_FEE_BPS: dict[int, int] = {
     1187947933: 1800,  # SKALE Base
     5042: 1800,  # Arc
     5042002: 1800,  # Arc Testnet
+    4663: 1800,  # Robinhood Chain
     1: 1800,  # Ethereum
     10: 1800,  # Optimism
     137: 1800,  # Polygon

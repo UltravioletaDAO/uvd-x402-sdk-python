@@ -73,7 +73,10 @@ DAY = 24 * HOUR
 EM_MAX_DEADLINE_SEC = 720 * HOUR
 
 # Networks of the SDK's registry that have no escrow deployment it knows.
-WITHOUT_ROWS = {"hyperevm": 999, "unichain": 130, "scroll": 534352, "robinhood": 4663}
+# Robinhood Chain mainnet (4663) has its rows since the release after 0.110.0;
+# its testnet has none: Execution Market's operator has no code there
+# (tests/test_robinhood_escrow.py).
+WITHOUT_ROWS = {"hyperevm": 999, "unichain": 130, "scroll": 534352, "robinhood-testnet": 46630}
 # Rows in ESCROW_CONTRACTS only: no operator, no fee ceiling, no verified domain.
 TESTNETS = {"base-sepolia": 84532, "ethereum-sepolia": 11155111}
 TABLES = ("ESCROW_CONTRACTS", "ESCROW_OPERATORS", "ESCROW_MAX_FEE_BPS", "VERIFIED_USDC_DOMAINS")

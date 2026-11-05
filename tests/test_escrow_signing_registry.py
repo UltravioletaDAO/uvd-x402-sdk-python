@@ -237,8 +237,17 @@ EM_OPERATORS_F75D4171 = {
 }
 
 
+# Robinhood Chain's row is not from f75d4171 (EM had no escrow there yet): its
+# second copy is tests/test_robinhood_escrow.py, read against EM's chain reads.
+ROBINHOOD_CHAIN_ID = 4663
+
+
 def test_the_other_operator_rows_are_execution_markets_at_f75d4171():
-    rows = {c: a for c, a in ESCROW_OPERATORS.items() if c not in CLIENT_DEFAULT_CHAINS}
+    rows = {
+        c: a
+        for c, a in ESCROW_OPERATORS.items()
+        if c not in CLIENT_DEFAULT_CHAINS and c != ROBINHOOD_CHAIN_ID
+    }
     assert rows == EM_OPERATORS_F75D4171
     for address in rows.values():
         assert to_checksum_address(address) == address

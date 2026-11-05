@@ -102,7 +102,8 @@ importer turns a test red here first.
   ``PAYMENT_INFO_TYPE``, ``PAYMENT_INFO_ABI``,
   ``ESCROW_PAYMENT_INFO_TYPEHASH`` and the ``LIFECYCLE_*`` constants.
 * The guards' tables: ``VERIFIED_USDC_DOMAINS`` (chain id -> the USDC
-  EIP-712 name/version read on-chain), ``REQUIRED_NETWORK_KEYS``,
+  EIP-712 name/version read on-chain; on Robinhood Chain the token is USDG,
+  ``Global Dollar`` / ``1``), ``REQUIRED_NETWORK_KEYS``,
   ``ESCROW_DEPOSIT_LIMIT_USD``, ``OPERATOR_FEE_BPS``,
   ``DEFAULT_MIN_FEE_BPS`` / ``DEFAULT_MAX_FEE_BPS``, ``USDC_DECIMALS``.
 * The windows: ``ESCROW_TIER_WINDOWS``, ``REVIEW_WINDOW_SEC``,
@@ -194,6 +195,10 @@ VERIFIED_USDC_DOMAINS: dict[int, tuple[str, str]] = {
     1187947933: ("Bridged USDC (SKALE Bridge)", "2"),  # skale
     5042: ("USDC", "2"),                              # arc (networks/evm.py ARC)
     5042002: ("USDC", "2"),                           # arc-testnet (networks/evm.py)
+    # robinhood: Paxos USDG, not USDC (networks/evm.py ROBINHOOD). Su version()
+    # revierte, asi que el par no se lee con name()/version(): x402-rs lo verifico
+    # contra DOMAIN_SEPARATOR() (src/network.rs, USDG_ROBINHOOD).
+    4663: ("Global Dollar", "1"),
 }
 
 

@@ -115,7 +115,8 @@ DEPOSIT_LIMIT_USDC = 100_000_000  # $100 in atomic units (6 decimals)
 # defaults ``max_fee_bps`` to 800, below the 1300 bps that Execution Market's
 # operators charge, so a silent default on another chain would turn a
 # ValueError into a lock whose release reverts. Elsewhere the client keeps
-# asking for the operator.
+# asking for the operator: Robinhood Chain (4663) included, although its row is
+# Arc's operator (a row added after 0.95.0 is not a client default).
 _DEFAULT_OPERATOR_CHAINS = frozenset({8453, 1187947933, 5042, 5042002})
 
 # Human-readable chain names for diagnostics and error messages.
@@ -133,6 +134,7 @@ ESCROW_CHAIN_NAMES: dict[int, str] = {
     1187947933: "SKALE Base",
     5042: "Arc",
     5042002: "Arc Testnet",
+    4663: "Robinhood Chain",
 }
 
 # Operator generation per chain. It picks the operator ABI and the calls
@@ -156,6 +158,7 @@ ESCROW_GENERATIONS: dict[int, str] = {
     1187947933: "v2",
     5042: "v3",
     5042002: "v3",
+    4663: "v3",  # Robinhood Chain: the canonical set, Arc's factory and operator
 }
 
 
