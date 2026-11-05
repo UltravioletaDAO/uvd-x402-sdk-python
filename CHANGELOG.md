@@ -8,6 +8,18 @@
 - **Fixed: the reputation worker checks relay support before starting a row.** Every network without a relay, including Robinhood, Avalanche, Scroll, SKALE Base and their testnets/CAIP-2 aliases, becomes `local_only` with `unknown_network` before RPC, payment signing or evidence publication. A second queued row can progress. `tests/test_reputation_networks.py` covers every EVM registry without a relay, with positive and zero amounts; M30 in `tests/test_reputation_mutations.py` removes the guard and demonstrates the payment. Payment retries and public evidence under `eip155:8453` are pinned to the canonical `base` name.
 - Tests: `tests/test_erc8004_robinhood.py` pins the registries, the four Robinhood spellings, the refusals of the rating rail and that nothing else moved since 0.107.0. `tests/test_erc8004_caip2_aliases.py` walks every EVM network of the table: its chain id against the facilitator's and the rating rail's relay table, its alias, and every read and write in both spellings. The facilitator's chain ids are a recorded fixture, `tests/fixtures/x402rs-evm-chain-ids.json` (x402-rs `src/network.rs` + `src/chain/evm.rs` at `3ed3a956`, 2.55.0), written by `python scripts/x402rs_evm_chain_ids.py --x402rs <checkout> [--ref origin/main] [--check]`, never by hand. `tests/test_erc8004_networks.py` lists Robinhood among the facilitator's networks; `tests/test_erc8004_arc.py` names what was added after 0.90.0. The TypeScript fixture stays at published `uvd-x402-sdk` 2.98.0, with two expected parity failures. The owner chose the same CLOSED union in TS: all 23 exact `eip155:<id>` literals, plus `base-mainnet`; a template literal accepting any number is not that contract. After TS publishes that union and the Robinhood rows, c0der regenerates the fixture and updates `TS_RELEASE`. The snapshot now records helper answers for `chainToCAIP2(name)` of every EVM registry as well as all declared literals; the parity tests consume those answers, and an offline Node test pins their inclusion. No fixture is regenerated in this round.
 
+## [0.108.0] - 2026-11-04
+
+### Added
+- Separate NEAR ERC-8004 identity, reputation and Arras verifier deployments for
+  mainnet and testnet, with sponsor-funded registration and identity transfer.
+- Config-bound wallet builders and locally verified Ed25519 signing, deposit
+  ceilings, nanosecond wallet deadlines and canonical ABI validation.
+- Bounded injectable RPC views, proof-backed feedback summaries, strict receipt
+  provenance and distinct callback rejection results.
+- Public chain recordings, an explicit read-only vector generator, offline tests,
+  guard mutations and an Execution Market integration guide.
+
 ## [0.107.0] - 2026-11-04
 
 ### Added
