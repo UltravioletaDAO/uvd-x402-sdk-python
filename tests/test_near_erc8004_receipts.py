@@ -841,3 +841,44 @@ def test_event_feedback_reference_index_must_be_positive(name, network):
     assert erc.parse_erc8004_receipt_events([receipt("reputation", evt, network)], network) == [evt]
     evt["data"][0]["feedback_index"] = "0"
     assert erc.parse_erc8004_receipt_events([receipt("reputation", evt, network)], network) == []
+
+
+@pytest.mark.parametrize(
+    "row,case",
+    [(row, case) for row in FIXTURE["networks"] for case in row["transactions"]],
+    ids=[
+        row["network"] + ":" + case["method"]
+        for row in FIXTURE["networks"]
+        for case in row["transactions"]
+    ],
+)
+def test_builders_match_six_recorded_transactions(row, case):
+    network = row["network"]
+    tx = case["result"]["transaction"]
+    recorded = tx["actions"][0]["FunctionCall"]
+    args = json.loads(base64.b64decode(recorded["args"]))
+    role = "reputation" if case["method"] == "give_feedback_with_proof" else "identity"
+    cfg = next(
+        c["result"]
+        for c in row["calls"]
+        if c["method"] == "get_config" and c["contract"] == tx["receiver_id"]
+    )
+    built = getattr(erc, "build_erc8004_" + case["method"])(
+        network=network,
+        signer_id=tx["signer_id"],
+        config=erc.parse_erc8004_config(cfg, network=network, role=role),
+        **args,
+    )
+    assert built["signerId"] == tx["signer_id"]
+    assert built["receiverId"] == tx["receiver_id"]
+    assert built["actions"] == [
+        {
+            "type": "FunctionCall",
+            "params": {
+                "methodName": recorded["method_name"],
+                "args": args,
+                "gas": str(recorded["gas"]),
+                "deposit": recorded["deposit"],
+            },
+        }
+    ]
