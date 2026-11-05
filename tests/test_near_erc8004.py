@@ -887,3 +887,74 @@ def test_growth_deposit_is_capped_by_recorded_config_before_signing(network):
     tx["actions"][0]["params"]["deposit"] = str(maximum + 1)
     with pytest.raises(ValueError, match="deposit outside SDK bounds"):
         erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=cfg)
+
+
+@pytest.mark.parametrize("network", NETWORKS)
+@pytest.mark.parametrize(
+    "role,field,floor,method,args",
+    [
+        (
+            "identity",
+            "min_gas_nft_transfer_call",
+            50000000000000,
+            "nft_transfer_call",
+            {"receiver_id": "worker.near", "token_id": "0", "msg": ""},
+        ),
+        (
+            "reputation",
+            "min_gas_give_feedback",
+            40000000000000,
+            "give_feedback",
+            {"agent_id": "0", "value": "1", "value_decimals": 0},
+        ),
+        (
+            "reputation",
+            "min_gas_give_feedback_with_proof",
+            120000000000000,
+            "give_feedback_with_proof",
+            {"agent_id": "0", "value": "1", "value_decimals": 0, "proof": "p"},
+        ),
+        (
+            "verifier",
+            "min_gas_verify",
+            25000000000000,
+            "verify_feedback_proof",
+            {"client": "payer.near", "proof": "p"},
+        ),
+    ],
+)
+def test_config_gas_floor_at_parse_build_and_sign(network, role, field, floor, method, args):
+    raw = dict(config(role, network).data)
+    if "limits" in raw:
+        raw["limits"] = dict(raw["limits"])
+    args = dict(args)
+    if method == "give_feedback_with_proof":
+        args["verifier"] = erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
+    raw[field] = str(floor)
+    cfg = erc.parse_erc8004_config(raw, network=network, role=role)
+    tx = erc.build_erc8004_call(
+        network=network,
+        signer_id="payer.near",
+        config=cfg,
+        method=method,
+        args=args,
+        gas=str(floor),
+    )
+    assert tx["actions"][0]["params"]["gas"] == str(floor)
+    assert erc.sign_erc8004_transaction(tx, Signer(), "1", "1" * 32, network=network, config=cfg)
+    raw[field] = str(floor - 1)
+    with pytest.raises(ValueError, match=field):
+        erc.parse_erc8004_config(raw, network=network, role=role)
+    forged = erc.Erc8004Config(network, role, raw)
+    with pytest.raises(ValueError, match=field):
+        erc.build_erc8004_call(
+            network=network,
+            signer_id="payer.near",
+            config=forged,
+            method=method,
+            args=args,
+            gas=str(floor - 1),
+        )
+    tx["actions"][0]["params"]["gas"] = str(floor - 1)
+    with pytest.raises(ValueError, match=field):
+        erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=forged)

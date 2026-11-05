@@ -257,9 +257,17 @@ def parse_erc8004_config(value: object, *, network: str, role: str) -> Erc8004Co
         "reputation": ("min_gas_give_feedback", "min_gas_give_feedback_with_proof"),
         "verifier": ("min_gas_verify", "gas_get_payment", "gas_on_payment"),
     }[role]
+    gas_floors = {
+        "min_gas_nft_transfer_call": 50 * TGAS,
+        "min_gas_give_feedback": 40 * TGAS,
+        "min_gas_give_feedback_with_proof": 120 * TGAS,
+        "min_gas_verify": 25 * TGAS,
+    }
     for name in gas:
         _require(
-            _decimal(raw.get(name), 64, True) and int(raw[name]) <= 300 * TGAS, f"invalid {name}"
+            _decimal(raw.get(name), 64, True)
+            and gas_floors.get(name, 1) <= int(raw[name]) <= 300 * TGAS,
+            f"invalid {name}",
         )
     if role == "identity":
         _require(_decimal(raw.get("total_agents")), "invalid total_agents")

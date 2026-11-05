@@ -59,6 +59,13 @@ def mutations(source):
         target.body = [ast.Return(ast.Constant(True))]
         yield name, ast.unparse(ast.fix_missing_locations(mutant))
     for old, new in [
+        ('"min_gas_nft_transfer_call": 50 * TGAS,', '"min_gas_nft_transfer_call": 1,'),
+        ('"min_gas_give_feedback": 40 * TGAS,', '"min_gas_give_feedback": 1,'),
+        (
+            '"min_gas_give_feedback_with_proof": 120 * TGAS,',
+            '"min_gas_give_feedback_with_proof": 1,',
+        ),
+        ('"min_gas_verify": 25 * TGAS,', '"min_gas_verify": 1,'),
         (
             '"register_deposit": 132790000000000000000000 * 105 // 100,',
             '"register_deposit": 132790000000000000000000 * 200 // 100,',
