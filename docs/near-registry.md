@@ -42,7 +42,10 @@ transaction, ready for the `signed_tx_base64` parameter of `send_tx`. It checks
 the descriptor again before reading the key and verifies the returned Ed25519
 signature. It neither submits nor queries anything. The caller supplies the
 selected key's next nonce and a recent base58 block hash, persists the signed
-bytes, and manages confirmation/retries.
+bytes, and manages confirmation/retries. It asks the signer for
+`sign(sha256(wire))`: an `OwsNearSigner` receives that digest through OWS
+`sign_message`, not the whole transaction, and the signer's network is not
+compared with the transaction's.
 
 **Use a FullAccess key** belonging to `signerId`: a FunctionCall access key cannot
 attach these deposits. Permissions and account ownership cannot be inferred

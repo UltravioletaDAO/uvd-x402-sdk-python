@@ -1,0 +1,122 @@
+{
+  "schema": "near-ows/1",
+  "seedRecipe": "bytes 0 through 31 (test only)",
+  "network": "near:testnet",
+  "publicKeyHex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "nonce": "7",
+  "blockHash": "1thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE",
+  "transactions": [
+    {
+      "id": "arras",
+      "descriptor": {
+        "signerId": "payer.testnet",
+        "receiverId": "arras-v1b-1101.testnet",
+        "actions": [
+          {
+            "type": "FunctionCall",
+            "params": {
+              "methodName": "storage_deposit",
+              "args": {
+                "account_id": "payer.testnet",
+                "registration_only": false
+              },
+              "gas": "30000000000000",
+              "deposit": "50000000000000000000000"
+            }
+          }
+        ]
+      },
+      "unsignedHex": "0d00000070617965722e746573746e65740003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b807000000000000001600000061727261732d7631622d313130312e746573746e6574000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f01000000020f00000073746f726167655f6465706f736974380000007b226163636f756e745f6964223a2270617965722e746573746e6574222c22726567697374726174696f6e5f6f6e6c79223a66616c73657d00e057eb481b00000000407ba5f06381960a000000000000",
+      "digestHex": "676432fbb76c65b8fc3a8f74b0274566f1187cc648af4df7ec282e8ab2505428",
+      "signedTransactionBase64": "DQAAAHBheWVyLnRlc3RuZXQAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbgHAAAAAAAAABYAAABhcnJhcy12MWItMTEwMS50ZXN0bmV0AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8BAAAAAg8AAABzdG9yYWdlX2RlcG9zaXQ4AAAAeyJhY2NvdW50X2lkIjoicGF5ZXIudGVzdG5ldCIsInJlZ2lzdHJhdGlvbl9vbmx5IjpmYWxzZX0A4FfrSBsAAAAAQHul8GOBlgoAAAAAAAAAkpwb+yRPFcEMIhD/0f14Av/N7eiJ/GmL2mkb81XQJK445G+aYafCfYZNHAs+7CA8ER9o8uRMpoQDS0KppwX9CA=="
+    },
+    {
+      "id": "usdc",
+      "descriptor": {
+        "signerId": "payer.testnet",
+        "receiverId": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
+        "actions": [
+          {
+            "type": "FunctionCall",
+            "params": {
+              "methodName": "storage_deposit",
+              "args": {
+                "account_id": "payer.testnet",
+                "registration_only": true
+              },
+              "gas": "30000000000000",
+              "deposit": "1250000000000000000000"
+            }
+          }
+        ]
+      },
+      "unsignedHex": "0d00000070617965722e746573746e65740003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b807000000000000004000000033653232313065313138346234356236346338613433346330613765376232336363303465613765623761366333633332353230643033643461666362386166000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f01000000020f00000073746f726167655f6465706f736974370000007b226163636f756e745f6964223a2270617965722e746573746e6574222c22726567697374726174696f6e5f6f6e6c79223a747275657d00e057eb481b00000000485637193cc34300000000000000",
+      "digestHex": "b7ddf0e8734ddb662d7e9d1e786d0c5b50cf25bfa1308662ab5ed980674ada96",
+      "signedTransactionBase64": "DQAAAHBheWVyLnRlc3RuZXQAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbgHAAAAAAAAAEAAAAAzZTIyMTBlMTE4NGI0NWI2NGM4YTQzNGMwYTdlN2IyM2NjMDRlYTdlYjdhNmMzYzMyNTIwZDAzZDRhZmNiOGFmAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8BAAAAAg8AAABzdG9yYWdlX2RlcG9zaXQ3AAAAeyJhY2NvdW50X2lkIjoicGF5ZXIudGVzdG5ldCIsInJlZ2lzdHJhdGlvbl9vbmx5Ijp0cnVlfQDgV+tIGwAAAABIVjcZPMNDAAAAAAAAAADnSX7WMdBjSZ4mv/m3UiLA0Kl1jBvAcyujKtY5TBJlKliyFlk7y1IHgRUxk5D/Jhiz9YmY/gWLB0de1AJgiZwN"
+    },
+    {
+      "id": "register",
+      "descriptor": {
+        "signerId": "payer.testnet",
+        "receiverId": "identity-registry.erc-8004.testnet",
+        "actions": [
+          {
+            "type": "FunctionCall",
+            "params": {
+              "methodName": "register",
+              "args": {
+                "agent_uri": "ipfs://card"
+              },
+              "gas": "30000000000000",
+              "deposit": "132790000000000000000000"
+            }
+          }
+        ]
+      },
+      "unsignedHex": "0d00000070617965722e746573746e65740003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b80700000000000000220000006964656e746974792d72656769737472792e6572632d383030342e746573746e6574000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f01000000020800000072656769737465721b0000007b226167656e745f757269223a22697066733a2f2f63617264227d00e057eb481b0000000018596d68718f1e1c000000000000",
+      "digestHex": "6ac2e76c6552edaa548d546f86e8851af8c4532da3543ee0c81d1141ee4e9adc",
+      "signedTransactionBase64": "DQAAAHBheWVyLnRlc3RuZXQAA6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbgHAAAAAAAAACIAAABpZGVudGl0eS1yZWdpc3RyeS5lcmMtODAwNC50ZXN0bmV0AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8BAAAAAggAAAByZWdpc3RlchsAAAB7ImFnZW50X3VyaSI6ImlwZnM6Ly9jYXJkIn0A4FfrSBsAAAAAGFltaHGPHhwAAAAAAAAA1oqwdMYEnfcIZt2xsWihGdb4sp1AKgjTHHMJirGzGYUWJv/n6RN1uIwJciKm3T8W/V674jlz5FsIvrZRUzODDg=="
+    }
+  ],
+  "nep413": [
+    {
+      "message": "Hola 🌎",
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "recipient": "example.com",
+      "callbackUrl": null,
+      "preimageHex": "9d01008009000000486f6c6120f09f8c8e000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0b0000006578616d706c652e636f6d00",
+      "digestHex": "9c5a956517620db5899638974bf22f310062e03faf474203c1de8663f2fbb01d",
+      "signed": {
+        "accountId": "payer.testnet",
+        "publicKey": "ed25519:FAe4sisG95oZ42w7buUn5qEE4TAnfTTFPiguZUHmhiF",
+        "signature": "HYBM5i1kU5tLm8ZXR0DzFVlNtBnE3P2jFaDb2WyIUlYfInXDRIe4wgoiwLe+nxptnvH57usyyztJZ5UImSTZDg=="
+      }
+    },
+    {
+      "message": "Hola 🌎",
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "recipient": "example.com",
+      "callbackUrl": "",
+      "preimageHex": "9d01008009000000486f6c6120f09f8c8e000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0b0000006578616d706c652e636f6d0100000000",
+      "digestHex": "6e3d2ffc934bb344fa0045f60ae3907ef962817b5cc1fc59d59329f110df30af",
+      "signed": {
+        "accountId": "payer.testnet",
+        "publicKey": "ed25519:FAe4sisG95oZ42w7buUn5qEE4TAnfTTFPiguZUHmhiF",
+        "signature": "bOGq0r5dZcY+DKQjXUTS8pgbf0t4tlw0fK09YDHMopgCXh4cz7f26fyY5S2nQ4C8KPVlk+QQfRNQ3vyounQ0Bw=="
+      }
+    },
+    {
+      "message": "Hola 🌎",
+      "nonceHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "recipient": "example.com",
+      "callbackUrl": "https://example.com/callback",
+      "preimageHex": "9d01008009000000486f6c6120f09f8c8e000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0b0000006578616d706c652e636f6d011c00000068747470733a2f2f6578616d706c652e636f6d2f63616c6c6261636b",
+      "digestHex": "715c92fb1825452d4a4f2faff29f2995fec10bbabcd0cfc61b266d6b86160fc9",
+      "signed": {
+        "accountId": "payer.testnet",
+        "publicKey": "ed25519:FAe4sisG95oZ42w7buUn5qEE4TAnfTTFPiguZUHmhiF",
+        "signature": "lN4KffnTjsHGnGdFf2uGEGpvKxS6+oOSAhXeuZsN4+fcmMohgRwmdik6E6n/LWY7pYpQAA8gZgGCCa4JE+SgBQ=="
+      }
+    }
+  ]
+}

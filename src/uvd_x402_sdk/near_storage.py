@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from typing import Literal, TypedDict
 
-from .near_escrow import NEAR_ESCROW_CONTRACTS, NEAR_ESCROW_TOKENS, Unsigned, _account, _uint
+from .near_escrow import (
+    NEAR_ESCROW_CONTRACTS,
+    NEAR_ESCROW_TOKENS,
+    NearLocalSigner,
+    Unsigned,
+    _account,
+    _uint,
+)
 
 NEAR_ARRAS_STORAGE_DEPOSIT = "50000000000000000000000"
 NEAR_USDC_STORAGE_DEPOSIT = "1250000000000000000000"
@@ -106,3 +113,43 @@ def build_usdc_storage_deposit(
     if network not in ("near:mainnet", "near:testnet"):
         raise ValueError("unsupported NEAR network")
     return _storage(network, payer_id, account_id, NEAR_ESCROW_TOKENS[network], deposit, True)
+
+
+def sign_storage_transaction(
+    descriptor: NearStorageTransaction,
+    signer: NearLocalSigner,
+    nonce: Unsigned,
+    block_hash: str,
+    *,
+    network: str,
+) -> str:
+    """Validate a storage builder's output, then sign a NEAR V0 transaction.
+
+    OWS receives the whole Borsh transaction. Other NearLocalSigner backends
+    sign its SHA-256 digest. The caller provides a recent block hash and the
+    next access-key nonce; neither this helper nor the builders allocate them.
+    """
+    from .near_transactions import _sign_function_call_transaction
+
+    try:
+        params = descriptor["actions"][0]["params"]
+        args = params["args"]
+        kwargs = dict(
+            network=network,
+            payer_id=descriptor["signerId"],
+            account_id=args["account_id"],
+            deposit=params["deposit"],
+        )
+        if descriptor["receiverId"] == NEAR_ESCROW_TOKENS.get(network):
+            expected = build_usdc_storage_deposit(**kwargs)
+        else:
+            expected = build_arras_storage_deposit(
+                escrow_contract=descriptor["receiverId"], **kwargs
+            )
+        # bool == 1 in Python: require the actual wire type as well as equality.
+        valid = type(args["registration_only"]) is bool and descriptor == expected
+    except (KeyError, IndexError, TypeError):
+        raise ValueError("invalid storage transaction descriptor") from None
+    if not valid:
+        raise ValueError("storage transaction differs from its validated builder")
+    return _sign_function_call_transaction(expected, signer, nonce, block_hash, network)

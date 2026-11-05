@@ -8,6 +8,20 @@
 - **Fixed: the reputation worker checks relay support before starting a row.** Every network without a relay, including Robinhood, Avalanche, Scroll, SKALE Base and their testnets/CAIP-2 aliases, becomes `local_only` with `unknown_network` before RPC, payment signing or evidence publication. A second queued row can progress. `tests/test_reputation_networks.py` covers every EVM registry without a relay, with positive and zero amounts; M30 in `tests/test_reputation_mutations.py` removes the guard and demonstrates the payment. Payment retries and public evidence under `eip155:8453` are pinned to the canonical `base` name.
 - Tests: `tests/test_erc8004_robinhood.py` pins the registries, the four Robinhood spellings, the refusals of the rating rail and that nothing else moved since 0.107.0. `tests/test_erc8004_caip2_aliases.py` walks every EVM network of the table: its chain id against the facilitator's and the rating rail's relay table, its alias, and every read and write in both spellings. The facilitator's chain ids are a recorded fixture, `tests/fixtures/x402rs-evm-chain-ids.json` (x402-rs `src/network.rs` + `src/chain/evm.rs` at `3ed3a956`, 2.55.0), written by `python scripts/x402rs_evm_chain_ids.py --x402rs <checkout> [--ref origin/main] [--check]`, never by hand. `tests/test_erc8004_networks.py` lists Robinhood among the facilitator's networks; `tests/test_erc8004_arc.py` names what was added after 0.90.0. The TypeScript fixture is regenerated from published `uvd-x402-sdk` 2.113.0, with `TS_RELEASE` pinned to the same release. Both SDKs enumerate the same closed union of all 23 exact `eip155:<id>` literals, plus `base-mainnet`, and carry both Robinhood registry rows. List, address and helper parity now passes with zero failures (measured 2026-11-05). The snapshot records helper answers for `chainToCAIP2(name)` of every EVM registry as well as all declared literals; the parity tests consume those answers, and an offline Node test pins their inclusion.
 
+## [0.109.0] - 2026-11-05
+
+### Added
+- Optional `ows` extra pinned to open-wallet-standard 1.4.2 and a token-only
+  `OwsNearSigner` with local Ed25519 verification and explicit network/key/vault.
+- Whole-Borsh OWS transaction signing for ERC-8004 and validated NEP-145 storage,
+  while existing local signers retain their digest interface and wire bytes.
+- NEP-413 and NEP-366 signing through OWS hex messages, shared deterministic
+  vectors, real ephemeral-vault tests and bounded adversarial mutations.
+- `send_near_transaction`: broadcast already journalled bytes with bounded
+  retries, transaction-hash-bound outcomes and explicit uncertainty on errors,
+  including an answer whose body cannot be decoded (never a bare httpx error).
+  `sign_registry_transaction` still signs the digest (see README).
+
 ## [0.108.0] - 2026-11-04
 
 ### Added
