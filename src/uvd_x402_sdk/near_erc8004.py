@@ -436,7 +436,10 @@ def build_erc8004_call(
     if method in ("revoke_feedback", "append_response"):
         _require(int(data["feedback_index"]) > 0, "feedback_index must be positive")
     if method == "give_feedback_with_proof":
-        _require(data["verifier"] != contracts["reputation"], "registry cannot verify itself")
+        _require(
+            data["verifier"] == contracts["verifier"],
+            "unsupported verifier for selected network",
+        )
     limits = cfg["limits"] if role == "identity" else cfg
     for field, limit in (
         ("agent_uri", "max_agent_uri_len"),
@@ -1277,6 +1280,12 @@ def parse_erc8004_events(logs: object, *, network: str, executor_id: str) -> lis
         ):
             continue
         data = event["data"][0]
+        if (
+            event["event"] == "new_feedback"
+            and data["proof"] is not None
+            and data["proof"]["verifier"] != contracts["verifier"]
+        ):
+            continue
         if event["event"] in ("nft_mint", "nft_transfer") and len(data["token_ids"]) != 1:
             continue
         if event["event"] == "agent_wallet_pending" and (data["wallet"] is None) != (

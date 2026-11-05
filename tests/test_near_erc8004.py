@@ -120,7 +120,7 @@ CASES = [
             "agent_id": "0",
             "value": "100",
             "value_decimals": 0,
-            "verifier": "verifier.near",
+            "verifier": erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["verifier"],
             "proof": "proof-id",
         },
         None,
@@ -170,6 +170,9 @@ def build(method="register", args=None, role="identity", **options):
 def test_each_builder_exact_wallet_shape(
     network, method, role, args, deposit, expected_deposit, tgas
 ):
+    args = dict(args)
+    if method == "give_feedback_with_proof":
+        args["verifier"] = erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
     kwargs = dict(
         network=network,
         signer_id="sponsor.near",
@@ -525,7 +528,7 @@ def test_other_input_guards():
                     "agent_id": "0",
                     "value": "0",
                     "value_decimals": 0,
-                    "verifier": "verifier.near",
+                    "verifier": erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["verifier"],
                     "proof": proof,
                 },
                 "reputation",
@@ -958,3 +961,38 @@ def test_config_gas_floor_at_parse_build_and_sign(network, role, field, floor, m
     tx["actions"][0]["params"]["gas"] = str(floor - 1)
     with pytest.raises(ValueError, match=field):
         erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=forged)
+
+
+@pytest.mark.parametrize("network", NETWORKS)
+@pytest.mark.parametrize(
+    "kind", ["other_network", "foreign", "registry", "uppercase", "space", "empty", "null"]
+)
+def test_proof_verifier_is_network_bound_before_key(network, kind):
+    verifier = erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
+    other = "near:testnet" if network == "near:mainnet" else "near:mainnet"
+    bad = {
+        "other_network": erc.NEAR_ERC8004_CONTRACTS[other]["verifier"],
+        "foreign": "other.near",
+        "registry": erc.NEAR_ERC8004_CONTRACTS[network]["reputation"],
+        "uppercase": verifier.upper(),
+        "space": verifier + " ",
+        "empty": "",
+        "null": None,
+    }[kind]
+    cfg = config("reputation", network)
+    options = dict(
+        network=network,
+        signer_id="payer.near",
+        config=cfg,
+        agent_id="0",
+        value="1",
+        value_decimals=0,
+        proof="p",
+    )
+    tx = erc.build_erc8004_give_feedback_with_proof(**options, verifier=verifier)
+    assert erc.sign_erc8004_transaction(tx, Signer(), "1", "1" * 32, network=network, config=cfg)
+    with pytest.raises(ValueError):
+        erc.build_erc8004_give_feedback_with_proof(**options, verifier=bad)
+    tx["actions"][0]["params"]["args"]["verifier"] = bad
+    with pytest.raises(ValueError):
+        erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=cfg)

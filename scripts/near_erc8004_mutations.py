@@ -59,6 +59,7 @@ def mutations(source):
         target.body = [ast.Return(ast.Constant(True))]
         yield name, ast.unparse(ast.fix_missing_locations(mutant))
     for old, new in [
+        ('and data["proof"]["verifier"] != contracts["verifier"]', "and False"),
         ('"min_gas_nft_transfer_call": 50 * TGAS,', '"min_gas_nft_transfer_call": 1,'),
         ('"min_gas_give_feedback": 40 * TGAS,', '"min_gas_give_feedback": 1,'),
         (

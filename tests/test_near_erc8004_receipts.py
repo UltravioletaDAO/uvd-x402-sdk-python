@@ -734,3 +734,30 @@ def test_agent_wallet_metadata_is_a_near_account():
         client = erc.NearErc8004Client(rpc=lambda m, p: envelope(value))
         with pytest.raises(ValueError):
             client.get_metadata("0", "agentWallet")
+
+
+@pytest.mark.parametrize("row", FIXTURE["networks"], ids=NETWORKS)
+@pytest.mark.parametrize("foreign", ["other.near", "other_network"])
+def test_foreign_proof_verifier_cannot_be_a_verified_event_or_outcome(row, foreign):
+    network = row["network"]
+    if foreign == "other_network":
+        other = "near:testnet" if network == "near:mainnet" else "near:mainnet"
+        foreign = erc.NEAR_ERC8004_CONTRACTS[other]["verifier"]
+    outcome = copy.deepcopy(row["transactions"][2]["result"])
+    assert parse(outcome, network=network).status == "accepted"
+    call = outcome["transaction"]["actions"][0]["FunctionCall"]
+    args = json.loads(base64.b64decode(call["args"]))
+    args["verifier"] = foreign
+    call["args"] = base64.b64encode(json.dumps(args).encode()).decode()
+    for item in outcome["receipts_outcome"]:
+        logs = item["outcome"]["logs"]
+        for i, log in enumerate(logs):
+            if log.startswith("EVENT_JSON:"):
+                evt = json.loads(log[11:])
+                if evt["event"] == "new_feedback":
+                    evt["data"][0]["proof"]["verifier"] = foreign
+                    logs[i] = "EVENT_JSON:" + json.dumps(evt)
+    assert erc.parse_erc8004_receipt_events(outcome["receipts_outcome"], network) == []
+    # The transaction and event agree with EACH OTHER; the network must still refuse them.
+    with pytest.raises(ValueError, match="matching receipt event"):
+        parse(outcome, network=network)
