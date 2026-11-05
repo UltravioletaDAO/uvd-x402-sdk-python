@@ -23,7 +23,22 @@ def outcome(**changes):
     return dict(jsonrpc="2.0", id="near-broadcast", result=result)
 
 
-@pytest.mark.parametrize("first", ["timeout", "transport", "500", "429", "rpc_timeout"])
+def corrupt_gzip(status, *, decoded_by_client=True):
+    """An answer whose gzip body cannot be decoded.
+
+    With ``stream=`` the client decodes the body after the status line, as with a
+    real socket. With ``content=`` httpx decodes while building the Response, so
+    the DecodingError leaves the transport itself and the status is never seen.
+    """
+    headers = {"Content-Encoding": "gzip"}
+    if decoded_by_client:
+        return httpx.Response(status, headers=headers, stream=httpx.ByteStream(b"not gzip"))
+    return httpx.Response(status, headers=headers, content=b"not gzip")
+
+
+@pytest.mark.parametrize(
+    "first", ["timeout", "transport", "500", "429", "rpc_timeout", "corrupt_503"]
+)
 async def test_accepted_but_answer_lost_retries_identical_bytes(first):
     sent = []
     landed = set()
@@ -49,6 +64,8 @@ async def test_accepted_but_answer_lost_retries_identical_bytes(first):
                         "error": {"cause": {"name": "TIMEOUT_ERROR"}},
                     },
                 )
+            if first == "corrupt_503":
+                return corrupt_gzip(503)
             return httpx.Response(int(first))
         return httpx.Response(200, json=outcome())
 
@@ -108,6 +125,63 @@ async def test_refusal_or_unreadable_outcome_never_rebuilds_or_retries(reply):
             await send_near_transaction(SIGNED, rpc_url=URL, client=client, retry_delay=0)
         assert exc.value.transaction_hash == HASH and exc.value.uncertain
     assert len(sent) == 1
+
+
+@pytest.mark.parametrize(
+    "status,sends,reason",
+    [
+        (200, 1, "unreadable RPC response"),
+        (503, 3, "broadcast unresolved"),
+        (429, 3, "broadcast unresolved"),
+        (403, 1, "RPC HTTP refusal"),
+    ],
+)
+async def test_undecodable_body_is_judged_by_the_status_it_came_with(status, sends, reason):
+    # The RPC already holds the bytes: the answer must never escape as an httpx error.
+    sent = []
+
+    def transport(request):
+        sent.append(request.content)
+        return corrupt_gzip(status)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        with pytest.raises(NearTransactionError, match=reason) as exc:
+            await send_near_transaction(SIGNED, rpc_url=URL, client=client, retry_delay=0)
+    assert exc.value.transaction_hash == HASH and exc.value.uncertain
+    assert len(sent) == sends and len(set(sent)) == 1
+    assert json.loads(sent[0])["params"] == [SIGNED]
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["decoded_in_transport_200", "decoded_in_transport_503", "redirect_loop", "client_hook"],
+)
+async def test_any_httpx_error_after_sending_is_uncertain_and_not_retried(case):
+    sent = []
+
+    async def raise_for_status(response):
+        response.raise_for_status()
+
+    def transport(request):
+        sent.append(request.content)
+        if case == "redirect_loop":
+            return httpx.Response(307, headers={"Location": URL})
+        if case == "client_hook":
+            return httpx.Response(503)
+        return corrupt_gzip(int(case[-3:]), decoded_by_client=False)
+
+    options = dict(transport=httpx.MockTransport(transport))
+    if case == "redirect_loop":
+        options["follow_redirects"] = True
+    if case == "client_hook":
+        options["event_hooks"] = {"response": [raise_for_status]}
+    async with httpx.AsyncClient(**options) as client:
+        with pytest.raises(NearTransactionError, match="unreadable RPC response") as exc:
+            await send_near_transaction(SIGNED, rpc_url=URL, client=client, retry_delay=0)
+    assert exc.value.transaction_hash == HASH and exc.value.uncertain
+    assert exc.value.__suppress_context__
+    # A redirect loop re-sends the same body (307) until httpx gives up; nothing else repeats.
+    assert len(sent) == (21 if case == "redirect_loop" else 1) and len(set(sent)) == 1
 
 
 async def test_final_execution_failure_is_returned_once():

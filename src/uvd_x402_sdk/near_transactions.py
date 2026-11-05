@@ -90,6 +90,28 @@ def _final_status(status) -> bool:
     return base64.b64encode(raw).decode("ascii") == status["SuccessValue"]
 
 
+async def _post(http: httpx.AsyncClient, rpc_url: str, content: bytes, timeout: float):
+    """One POST of the journalled content; only a 200's body is read (and decoded).
+
+    A 429/5xx is judged by its status alone, so a body that cannot be decoded
+    does not stop the retry its status allows.
+    """
+    request = http.build_request(
+        "POST",
+        rpc_url,
+        content=content,
+        headers={"Content-Type": "application/json"},
+        timeout=timeout,
+    )
+    response = await http.send(request, stream=True)
+    try:
+        if response.status_code == 200:
+            await response.aread()
+    finally:
+        await response.aclose()
+    return response
+
+
 async def send_near_transaction(
     signed_transaction: str,
     *,
@@ -105,7 +127,9 @@ async def send_near_transaction(
     restart, pass those same bytes again. This function has no signer, nonce or
     block-hash provider and cannot rebuild a transaction. Transport failures,
     HTTP 429/5xx and RPC TIMEOUT_ERROR may be retried; other RPC errors are not.
-    An unresolved result raises NearTransactionError with ``uncertain=True``.
+    An unresolved result raises NearTransactionError with ``uncertain=True``,
+    including any other httpx error once the request may have left (an answer
+    that cannot be decoded, a redirect loop): never a bare httpx exception.
     A final on-chain Failure is returned as an outcome, never retried. The caller
     must inspect status and receipts; final inclusion does not imply success.
     """
@@ -154,16 +178,17 @@ async def send_near_transaction(
         for attempt in range(max_attempts):
             try:
                 response = await asyncio.wait_for(
-                    http.post(
-                        rpc_url,
-                        content=content,
-                        headers={"Content-Type": "application/json"},
-                        timeout=timeout,
-                    ),
-                    timeout=timeout,
+                    _post(http, rpc_url, content, timeout), timeout=timeout
                 )
             except (httpx.TransportError, asyncio.TimeoutError):
                 response = None
+            except httpx.HTTPError:
+                # Sent, and something answered that cannot be used: a 200 body that
+                # does not decode, a redirect loop, a client hook's HTTPStatusError.
+                # The RPC may hold the bytes: reconcile this hash, never re-sign.
+                raise NearTransactionError(
+                    "unreadable RPC response", tx_hash, uncertain=True
+                ) from None
             retryable = (
                 response is None or response.status_code == 429 or (response.status_code >= 500)
             )

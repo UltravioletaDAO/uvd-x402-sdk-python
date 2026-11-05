@@ -1,11 +1,15 @@
 """Bounded, isolated source mutants for the OWS signing and retry guards.
 
 Only child memory is mutated; the tracked worktree must be clean. Every child
-has a 120s timeout. Collection/import failures do not count as killed mutants.
+has a timeout (120s, ``--timeout SECONDS`` to change it). A child that runs out
+of time is reported as TIMEOUT and is NOT counted as killed: a slow host is not
+coverage, so re-run it with a longer timeout. Collection/import failures do not
+count as killed mutants either.
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import copy
 import json
@@ -50,6 +54,7 @@ def mutants(name, source):
             ),
             ("self._network, payload.hex(), **kwargs", "self._network, bytes(32).hex(), **kwargs"),
             ('raise ValueError("OWS NEAR signing failed") from None', "raise"),
+            ("passphrase=self._token", 'passphrase=os.environ.get("OWS_PASSPHRASE", self._token)'),
         ],
         "near_transactions": [
             ("Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)", "pass"),
@@ -74,6 +79,10 @@ def mutants(name, source):
             ),
             ("response.status_code >= 500", "False"),
             ('cause.get("name") == "TIMEOUT_ERROR"', "False"),
+            # An httpx error after sending escapes without the hash.
+            ("except httpx.HTTPError:", "except ():"),
+            # Reading a 429/5xx body lets an undecodable one cancel the retry.
+            ("if response.status_code == 200:", "if True:"),
         ],
         "near_storage": [
             ('type(args["registration_only"]) is bool and descriptor == expected', "True")
@@ -121,6 +130,11 @@ def child():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--timeout", type=int, default=120, help="seconds per child (default 120)")
+    timeout = parser.parse_args().timeout
+    if timeout <= 0:
+        parser.error("--timeout must be positive")
     status = subprocess.check_output(
         ["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True
     )
@@ -137,7 +151,7 @@ def main():
     }
     for name in ("AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
         env.pop(name, None)
-    killed = total = 0
+    killed = timed_out = total = 0
     for name in MODULES:
         source = (ROOT / f"src/uvd_x402_sdk/{name}.py").read_text(encoding="utf-8-sig")
         for label, changed in mutants(name, source):
@@ -151,21 +165,28 @@ def main():
                     text=True,
                     encoding="utf-8",
                     capture_output=True,
-                    timeout=120,
+                    timeout=timeout,
                 )
-                ok = (
+                killed_by_test = (
                     result.returncode == 1
                     and " failed" in result.stdout
                     and "ERROR collecting" not in result.stdout
                 )
+                outcome = "KILLED" if killed_by_test else "SURVIVED/ERROR"
                 detail = result.stdout[-4000:] + result.stderr[-1000:]
             except subprocess.TimeoutExpired:
-                ok, detail = True, "timeout 120s"
-            killed += ok
-            print(f'M{total}: {"KILLED" if ok else "SURVIVED/ERROR"}: {label}', flush=True)
-            if not ok:
+                # Not a kill: nothing says a test went red before the clock ran out.
+                outcome, detail = "TIMEOUT", ""
+            killed += outcome == "KILLED"
+            timed_out += outcome == "TIMEOUT"
+            print(f"M{total}: {outcome}: {label}", flush=True)
+            if outcome == "SURVIVED/ERROR":
                 print(detail, flush=True)
-    print(f"{killed}/{total} killed; no source files mutated", flush=True)
+    print(
+        f"{killed}/{total} killed, {timed_out} timed out after {timeout}s (not counted as"
+        " killed); no source files mutated",
+        flush=True,
+    )
     raise SystemExit(0 if killed == total else 1)
 
 

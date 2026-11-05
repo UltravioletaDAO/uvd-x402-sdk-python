@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import inspect
 import json
+import re
 import socket
 import sys
 import tempfile
@@ -34,6 +35,8 @@ LOCAL = NearEd25519Signer(SEED)
 BLOCK = _b58encode(bytes(range(32)))
 HAS_OWS = importlib.util.find_spec("ows") is not None
 VECTORS = Path(__file__).parent / "fixtures/near-ows.json"
+# Fresh interpreters import the whole package; under load 20 s was not enough.
+SUBPROCESS_TIMEOUT = 120
 
 
 @pytest.fixture(autouse=True)
@@ -364,7 +367,10 @@ else:
     raise AssertionError('missing optional dependency must fail at construction')
 """
     result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=20
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
 
@@ -379,9 +385,47 @@ def test_published_extra_pin_and_vector_generator():
         [sys.executable, str(root / "scripts/near_ows_vectors.py"), "--check"],
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=SUBPROCESS_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_all_extra_does_not_pull_ows():
+    # OWS 1.4.2 has no Windows or CPython 3.14 wheel: in [all] it would break that install.
+    tomllib = pytest.importorskip("tomllib")
+    root = Path(__file__).resolve().parents[1]
+    extras = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]
+    seen, pending, requirements = set(), ["all"], []
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        for requirement in extras[name]:
+            nested = re.fullmatch(r"uvd-x402-sdk\[(.+)\]", requirement)
+            if nested:
+                pending.extend(part.strip() for part in nested.group(1).split(","))
+            else:
+                requirements.append(requirement)
+    assert "ows" not in seen
+    assert not [r for r in requirements if r.lower().startswith("open-wallet-standard")]
+
+
+def test_environment_credentials_are_never_read(memory, monkeypatch):
+    token = "ows_key_" + "ab" * 32
+    for name in ("OWS_PASSPHRASE", "OWS_OWNER_PASSPHRASE", "PASSPHRASE", "OWS_VAULT_PASSPHRASE"):
+        monkeypatch.setenv(name, "owner-passphrase")
+    for name in ("OWS_API_KEY", "OWS_TOKEN", "OWS_API_TOKEN"):
+        monkeypatch.setenv(name, "ows_key_" + "cd" * 32)
+    s = signer()
+    s.sign(SEED)
+    s.sign_transaction(b"borsh transaction")
+    assert [(call[0], call[4]) for call in memory.calls] == [
+        ("sign_message", token),
+        ("sign_transaction", token),
+    ]
 
 
 @pytest.mark.parametrize("path", ["vault/test", "vault\\test"])

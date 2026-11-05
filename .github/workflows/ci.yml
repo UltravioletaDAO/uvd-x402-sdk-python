@@ -26,6 +26,11 @@ on:
     #                     run by cross-language against the TypeScript SDK
     #   scripts/release_tag.py  run by publish.yml's tag job, and against a
     #                     local remote by tests/test_release_tag.py
+    #   scripts/near_ows_vectors.py, scripts/near_ows_mutations.py and
+    #   scripts/near_erc8004_mutations.py
+    #                     read by tests/test_near_ows.py: it runs the vector
+    #                     generator with --check and imports both mutation
+    #                     lists to prove every mutation site still exists
     # Everything else is left out: docs/, CHANGELOG.md and the other root *.md,
     # the other scripts/ (no job runs one), LICENSE. One of them IS read: test_exact_amount
     # scans docs/ for the float price form, so a docs-only change that brings it

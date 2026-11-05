@@ -12,7 +12,9 @@
 - NEP-413 and NEP-366 signing through OWS hex messages, shared deterministic
   vectors, real ephemeral-vault tests and bounded adversarial mutations.
 - `send_near_transaction`: broadcast already journalled bytes with bounded
-  retries, transaction-hash-bound outcomes and explicit uncertainty on errors.
+  retries, transaction-hash-bound outcomes and explicit uncertainty on errors,
+  including an answer whose body cannot be decoded (never a bare httpx error).
+  `sign_registry_transaction` still signs the digest (see README).
 
 ## [0.108.0] - 2026-11-04
 

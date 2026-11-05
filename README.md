@@ -53,11 +53,16 @@ NEP-413/366 envelopes, their SDK-built digest goes through OWS
 policy parsing does not apply to a raw message digest. This OWS version also
 lacks NEAR receiver/method/deposit transaction policy context; enforce those
 limits in the application before signing, including when OWS receives the
-whole transaction.
+whole transaction. `near_registry.sign_registry_transaction` (registry-v1) is
+not on that path yet: it still asks the signer for `sign(sha256(wire))`, so an
+`OwsNearSigner` gets the digest through `sign_message`, and it does not compare
+the signer's network with the transaction's. Give it a signer for the
+registry's network.
 
 `send_near_transaction` has no signing capability. It retries only the same
 bytes (at most three attempts) after transport errors, HTTP 429/5xx or RPC
-`TIMEOUT_ERROR`. Other RPC refusals and malformed outcomes raise
+`TIMEOUT_ERROR`. Other RPC refusals and malformed outcomes, including an answer
+whose body cannot be decoded, raise
 `NearTransactionError` with the original `transaction_hash` and
 `uncertain=True`; a replay's invalid nonce alone cannot prove whether the
 first send landed. Final execution failures are returned once for the caller
