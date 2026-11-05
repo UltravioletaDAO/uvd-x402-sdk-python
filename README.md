@@ -79,7 +79,7 @@ to handle. Shared deterministic vectors are in `tests/fixtures/near-ows.json`;
 - **Simple API**: Decorators and middleware for quick integration
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
-- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (23 networks: 21 EVM + Solana + Solana-devnet)
+- **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (25 networks: 23 EVM + Solana + Solana-devnet)
 - **Escrow & Refunds**: Hold payments in escrow with dispute resolution (10 EVM chains, SKALE via CREATE3, Arc and Arc Testnet on the canonical x402r operator)
 - **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
@@ -1960,10 +1960,20 @@ except X402Error as e:
 
 ## ERC-8004 Trustless Agents
 
-Build verifiable on-chain reputation for AI agents and services. Supports **23 networks** (21 EVM + Solana + Solana devnet).
+Build verifiable on-chain reputation for AI agents and services. Supports **25 networks** (23 EVM + Solana + Solana devnet).
 
 Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; see
 [ERC-8004 on Arc](docs/networks/arc.md#erc-8004-on-arc-0900).
+
+Robinhood Chain (`robinhood`, chain 4663, and `robinhood-testnet`, chain 46630) since
+0.110.0, with the singleton identity, reputation and validation registries on both. It
+needs a facilitator that serves ERC-8004 there (x402-rs 2.55.0 did not yet). Neither network
+is on the relayed rail, and there is no escrow on Robinhood.
+
+Every EVM network also takes its CAIP-2 name (`eip155:8453`, `eip155:4663`, ...), the form v2
+payment requirements carry: `get_contracts()` / `is_available()` resolve it, and every read
+and write sends the plain name, which is the only one the facilitator parses. Exact strings
+only (`EIP155:8453` or `eip155:0x2105` are not Base).
 
 > Name Base as `"base"`. The old `"base-mainnet"` spelling is rejected by the facilitator
 > (`400 Invalid network`); the SDK now rewrites it for you, but new code should use `"base"`.

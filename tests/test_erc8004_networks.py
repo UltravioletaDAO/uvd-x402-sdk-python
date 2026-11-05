@@ -18,20 +18,22 @@ from uvd_x402_sdk.erc8004 import (
     _wire,
 )
 
-# Exactly what GET /feedback -> supportedNetworks returns: all 23, read from
-# facilitator 2.39.1 on 2026-09-23.
+# Exactly what GET /feedback -> supportedNetworks returns: the 23 read from
+# facilitator 2.39.1 on 2026-09-23, plus robinhood and robinhood-testnet, which
+# the facilitator serves from the x402-rs release that adds them (2.55.0 did not
+# yet, 2026-11-04; this table is merged only once production serves them).
 FACILITATOR_NETWORKS = {
     "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc",
-    "monad", "avalanche", "scroll", "skale-base", "arc",
+    "monad", "avalanche", "scroll", "skale-base", "arc", "robinhood",
     "ethereum-sepolia", "base-sepolia", "polygon-amoy", "arbitrum-sepolia",
     "optimism-sepolia", "celo-sepolia", "avalanche-fuji", "skale-base-sepolia",
-    "arc-testnet",
+    "arc-testnet", "robinhood-testnet",
     "solana", "solana-devnet",
 }
 
 EVM_MAINNETS = {
     "ethereum", "base", "polygon", "arbitrum", "optimism", "celo", "bsc",
-    "monad", "avalanche", "scroll", "arc",
+    "monad", "avalanche", "scroll", "arc", "robinhood",
 }
 
 

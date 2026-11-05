@@ -730,3 +730,35 @@ async def test_m29_a_prefix_only_check_lets_the_middle_of_the_ref_on_chain():
     env = _env()
     env.worker.__class__ = broken.ReputationWorker
     assert (await ref_window_in_a_tag(env)).status != "local_only"
+
+
+# M30 a registry without a relay must never start an anchor payment.
+@pytest.mark.parametrize(
+    "network,chain_id",
+    [
+        ("robinhood", 4663),
+        ("robinhood-testnet", 46630),
+        ("eip155:4663", 4663),
+        ("avalanche", 43114),
+        ("eip155:43114", 43114),
+    ],
+)
+async def test_m30_without_the_relay_guard_the_worker_pays_and_blocks_the_next_row(
+    network, chain_id
+):
+    from tests.test_reputation_networks import no_relay_rows
+
+    env, rows = await no_relay_rows(network, chain_id)
+    assert [(row.status, row.error) for row in rows] == [("local_only", "unknown_network")] * 2
+    assert env.chain.calls == [] and env.chain.broadcasts == []
+    assert env.signer.transactions == 0 and env.publish_calls == []
+    broken = mutant(
+        "worker", "        if relay_chain_id(entry.network) is None:\n", "        if False:\n"
+    )
+    env, rows = await no_relay_rows(network, chain_id, worker_class=broken.ReputationWorker)
+    assert rows[0].status == "paying" and rows[0].error == "evidence_unpublished"
+    assert rows[1].status == "queued"
+    assert env.signer.transactions == 1
+    assert len(set(env.chain.broadcasts)) == 1
+    assert rows[0].payment is not None and env.publish_calls
+    assert env.facilitator.prepares == []

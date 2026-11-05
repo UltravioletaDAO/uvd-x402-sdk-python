@@ -4,6 +4,7 @@
 as far as it can go:
 
 ``queued``
+    the network has a relay (otherwise ``local_only(unknown_network)``) ->
     :meth:`Governor.admit` (caps, health, breaker, excluded subjects) ->
     the RPC serves the row's chain -> the subject must OWN the agent
     (``ownerOf``, read from the chain: paying and rating an agent someone else
@@ -56,7 +57,7 @@ from collections.abc import Awaitable
 from typing import Any, Callable, Optional
 
 from uvd_x402_sdk.erc8004 import ProofOfPayment
-from uvd_x402_sdk.reputation._chains import identity_registry
+from uvd_x402_sdk.reputation._chains import identity_registry, relay_chain_id
 from uvd_x402_sdk.reputation._errors import OutboxConflict, PaymentPending, PaymentRejected
 from uvd_x402_sdk.reputation._redact import log_event, redact_http_client_logs
 from uvd_x402_sdk.reputation.governor import Governor
@@ -219,6 +220,10 @@ class ReputationWorker:
         return owner == int(entry.subject, 16)
 
     async def _start(self, entry: OutboxEntry, now: float) -> OutboxEntry:
+        # Registry support alone does not make the rating rail available.
+        # Refuse before any RPC, anchor payment or evidence publication.
+        if relay_chain_id(entry.network) is None:
+            return self._move(entry, LOCAL_ONLY, error="unknown_network")
         decision = self.governor.admit(entry, self.outbox, now)
         if not decision.allowed:
             reason = decision.reason or "refused"

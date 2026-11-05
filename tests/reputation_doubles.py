@@ -81,10 +81,18 @@ class FakeChain:
     """A JSON-RPC double over virtual blocks: block ``n`` exists once the clock
     reaches ``GENESIS_TIME + (n - GENESIS_BLOCK) * BLOCK_SECONDS``."""
 
-    def __init__(self, clock: Clock, *, chain_id: int = 8453, token: str = USDC_BASE) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        *,
+        chain_id: int = 8453,
+        token: str = USDC_BASE,
+        identity: str = IDENTITY,
+    ) -> None:
         self.clock = clock
         self.chain_id = chain_id
         self.token = token
+        self.identity = identity
         self.txs: dict[str, _Tx] = {}
         self.owners: dict[int, str] = {}
         self.code: dict[str, str] = {}
@@ -336,7 +344,7 @@ class FakeChain:
         from uvd_x402_sdk.reputation.submit import NONCE_USED_SELECTOR
 
         data = call["data"]
-        if call["to"].lower() == IDENTITY.lower() and data.startswith("0x6352211e"):
+        if call["to"].lower() == self.identity.lower() and data.startswith("0x6352211e"):
             agent = int(data[10:], 16)
             if agent not in self.owners:
                 raise RpcError("rpc_error", "execution reverted")
