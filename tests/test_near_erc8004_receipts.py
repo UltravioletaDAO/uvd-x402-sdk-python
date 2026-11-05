@@ -761,3 +761,83 @@ def test_foreign_proof_verifier_cannot_be_a_verified_event_or_outcome(row, forei
     # The transaction and event agree with EACH OTHER; the network must still refuse them.
     with pytest.raises(ValueError, match="matching receipt event"):
         parse(outcome, network=network)
+
+
+@pytest.mark.parametrize(
+    "network,url",
+    [
+        ("near:mainnet", "https://rpc.mainnet.near.org"),
+        ("near:testnet", "https://rpc.testnet.near.org"),
+    ],
+)
+def test_http_rpc_uses_selected_network(monkeypatch, network, url):
+    import httpx
+
+    seen = []
+
+    def stream(method, actual_url, **kwargs):
+        seen.append((method, actual_url, kwargs))
+        return httpx.Response(200, json=envelope("1"), request=httpx.Request(method, actual_url))
+
+    # httpx.Response is not a context manager; expose the same context API as stream().
+    from contextlib import contextmanager
+
+    @contextmanager
+    def response(*args, **kwargs):
+        yield stream(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "stream", response)
+    assert erc.NearErc8004Client(network).nft_total_supply() == "1"
+    assert len(seen) == 1
+    method, actual_url, options = seen[0]
+    assert (method, actual_url) == ("POST", url)
+    assert options["json"]["method"] == "query"
+    assert (
+        options["json"]["params"]["account_id"] == erc.NEAR_ERC8004_CONTRACTS[network]["identity"]
+    )
+
+
+@pytest.mark.parametrize("split_receipts", [False, True])
+def test_null_feedback_rejects_distinct_rejection_codes(split_receipts):
+    outcome = rejected_outcome()
+    first = outcome["receipts_outcome"][0]
+    second_log = "erc8004:rechazo:" + erc.Erc8004Rejection.E45.value
+    # Duplicating one recognized code is unambiguous and remains accepted as a rejection.
+    first["outcome"]["logs"] *= 2
+    assert parse(outcome).rejection == erc.Erc8004Rejection.E23
+    if split_receipts:
+        second = copy.deepcopy(first)
+        second["outcome"]["logs"] = [second_log]
+        outcome["receipts_outcome"].append(second)
+    else:
+        first["outcome"]["logs"].append(second_log)
+    with pytest.raises(ValueError, match="one recognized rejection"):
+        parse(outcome)
+
+
+@pytest.mark.parametrize("method", ["list_verified_feedback", "get_proof_feedback"])
+def test_view_feedback_reference_index_must_be_positive(method):
+    ref = {"agent_id": "0", "client_address": "payer.near", "feedback_index": "1"}
+
+    def rpc(*unused):
+        return envelope([ref] if method == "list_verified_feedback" else ref)
+
+    client = erc.NearErc8004Client(rpc=rpc)
+    args = (
+        ("0", "verifier.near")
+        if method == "list_verified_feedback"
+        else ("verifier.near", "proof", "payer.near")
+    )
+    assert getattr(client, method)(*args) == ([ref] if method == "list_verified_feedback" else ref)
+    ref["feedback_index"] = "0"
+    with pytest.raises(ValueError):
+        getattr(client, method)(*args)
+
+
+@pytest.mark.parametrize("name", ["new_feedback", "feedback_revoked", "response_appended"])
+@pytest.mark.parametrize("network", NETWORKS)
+def test_event_feedback_reference_index_must_be_positive(name, network):
+    evt = copy.deepcopy(next(e for role, e in EVENTS if e["event"] == name))
+    assert erc.parse_erc8004_receipt_events([receipt("reputation", evt, network)], network) == [evt]
+    evt["data"][0]["feedback_index"] = "0"
+    assert erc.parse_erc8004_receipt_events([receipt("reputation", evt, network)], network) == []

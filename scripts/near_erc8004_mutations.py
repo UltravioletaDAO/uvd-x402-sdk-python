@@ -59,6 +59,15 @@ def mutations(source):
         target.body = [ast.Return(ast.Constant(True))]
         yield name, ast.unparse(ast.fix_missing_locations(mutant))
     for old, new in [
+        (
+            'url = "https://rpc." + self.network.split(":")[1] + ".near.org"',
+            'url = "https://rpc.mainnet.near.org"',
+        ),
+        ("_require(len(codes) == 1,", "_require(len(codes) >= 1,"),
+        (
+            '"feedback_index": lambda v: _decimal(v, positive=True),\n}',
+            '"feedback_index": lambda v: _decimal(v, positive=False),\n}',
+        ),
         ('and data["proof"]["verifier"] != contracts["verifier"]', "and False"),
         ('"min_gas_nft_transfer_call": 50 * TGAS,', '"min_gas_nft_transfer_call": 1,'),
         ('"min_gas_give_feedback": 40 * TGAS,', '"min_gas_give_feedback": 1,'),
