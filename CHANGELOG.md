@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.109.0] - 2026-11-05
+
+### Added
+- Optional `ows` extra pinned to open-wallet-standard 1.4.2 and a token-only
+  `OwsNearSigner` with local Ed25519 verification and explicit network/key/vault.
+- Whole-Borsh OWS transaction signing for ERC-8004 and validated NEP-145 storage,
+  while existing local signers retain their digest interface and wire bytes.
+- NEP-413 and NEP-366 signing through OWS hex messages, shared deterministic
+  vectors, real ephemeral-vault tests and bounded adversarial mutations.
+- `send_near_transaction`: broadcast already journalled bytes with bounded
+  retries, transaction-hash-bound outcomes and explicit uncertainty on errors.
+
 ## [0.108.0] - 2026-11-04
 
 ### Added

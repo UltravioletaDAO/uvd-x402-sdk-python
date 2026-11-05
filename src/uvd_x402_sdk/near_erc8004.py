@@ -8,7 +8,6 @@ No helper broadcasts transactions or accesses a private key implicitly.
 from __future__ import annotations
 
 import base64
-import hashlib
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -22,8 +21,7 @@ import httpx
 from .bounded_json import loads_bounded
 from .near_escrow import NearLocalSigner, Unsigned, _account, _json, _uint
 from .near_events import _boolean, _record
-from .networks.near import BorshSerializer
-from .solana_signing import _b58decode
+from .near_transactions import _sign_function_call_transaction
 
 NEAR_ERC8004_CONTRACTS = MappingProxyType(
     {
@@ -586,41 +584,7 @@ def sign_erc8004_transaction(
     permission separately. No offline signature establishes key permissions.
     """
     tx = _validated_transaction(descriptor, network=network, config=config, now_ns=now_ns)
-    n = _uint(nonce, 64, "nonce")
-    _require(n > 0, "nonce must be positive")
-    _require(isinstance(block_hash, str) and 32 <= len(block_hash) <= 44, "invalid block hash")
-    block = _b58decode(block_hash)
-    _require(len(block) == 32, "block hash must decode to 32 bytes")
-    from cryptography.exceptions import InvalidSignature
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
-    params = tx["actions"][0]["params"]
-    public_key = signer.public_key
-    _require(isinstance(public_key, bytes) and len(public_key) == 32, "invalid Ed25519 public key")
-    wire = (
-        BorshSerializer()
-        .write_string(tx["signerId"])
-        .write_u8(0)
-        .write_fixed_bytes(public_key)
-        .write_u64(n)
-        .write_string(tx["receiverId"])
-        .write_fixed_bytes(block)
-        .write_u32(1)
-        .write_u8(2)
-        .write_string(params["methodName"])
-        .write_bytes(_json(params["args"]).encode())
-        .write_u64(int(params["gas"]))
-        .write_u128(int(params["deposit"]))
-        .get_bytes()
-    )
-    digest = hashlib.sha256(wire).digest()
-    signature = signer.sign(digest)
-    _require(isinstance(signature, bytes) and len(signature) == 64, "invalid Ed25519 signature")
-    try:
-        Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)
-    except InvalidSignature:
-        raise ValueError("invalid Ed25519 signature") from None
-    return base64.b64encode(wire + b"\x00" + signature).decode("ascii")
+    return _sign_function_call_transaction(tx, signer, nonce, block_hash, network)
 
 
 # Convenience builders keep ABI arguments separate from transaction options.

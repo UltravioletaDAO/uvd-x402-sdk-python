@@ -10,6 +10,57 @@ Accept **gasless stablecoin payments** across **31 blockchain networks** with a 
 
 **New in v0.84.0**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
 
+## NEAR signing with Open Wallet Standard
+
+Install `pip install 'uvd-x402-sdk[ows]'` for `OwsNearSigner` (pins
+`open-wallet-standard==1.4.2`). Its wheels support CPython 3.9–3.13 on Linux
+with glibc and macOS; OWS does not publish Windows wheels for this version.
+The base SDK and the `near` extra remain independent of OWS.
+
+Provision the wallet and its API token outside the agent runtime. Supply the
+selected 32-byte public access key, an explicit vault path and the API token;
+owner passphrases are rejected. For example, inside an async application:
+
+```python
+from uvd_x402_sdk import OwsNearSigner, send_near_transaction, sign_storage_transaction
+from uvd_x402_sdk.near_storage import build_usdc_storage_deposit
+
+signer = OwsNearSigner(
+    "agent-wallet", network="near:testnet", token=agent_api_token,
+    public_key=selected_public_key, vault_path=vault_path,
+)
+tx = build_usdc_storage_deposit(network="near:testnet", payer_id="agent.testnet")
+signed = sign_storage_transaction(
+    tx, signer, next_nonce, recent_block_hash, network="near:testnet",
+)
+journal.persist(signed)  # Durably store the exact signed bytes before sending.
+outcome = await send_near_transaction(signed, rpc_url=trusted_rpc_url)
+# Inspect outcome["status"] and its receipts: inclusion can contain a Failure.
+```
+
+The application obtains `next_nonce` and `recent_block_hash` from its trusted
+RPC and checks that `selected_public_key` is authorized for the account.
+`journal.persist` represents the application's durable journal. On restart or
+an ambiguous RPC error, reconcile the original transaction hash and replay
+those persisted bytes; signing a replacement may pay twice.
+
+`sign_erc8004_transaction` and `sign_storage_transaction` give OWS the complete
+Borsh transaction through `ows.sign_transaction`; each signature is verified
+locally before return. `sign_nep413`, `sign_escrow_authorization` and
+`sign_exact_near_delegate` accept the same signer. Until OWS provides native
+NEP-413/366 envelopes, their SDK-built digest goes through OWS
+`sign_message(encoding="hex")`. A token must permit that operation; transaction
+policy parsing does not apply to a raw message digest.
+
+`send_near_transaction` has no signing capability. It retries only the same
+bytes (at most three attempts) after transport errors, HTTP 429/5xx or RPC
+`TIMEOUT_ERROR`. Other RPC refusals and malformed outcomes raise
+`NearTransactionError` with the original `transaction_hash` and
+`uncertain=True`; a replay's invalid nonce alone cannot prove whether the
+first send landed. Final execution failures are returned once for the caller
+to handle. Shared deterministic vectors are in `tests/fixtures/near-ows.json`;
+`python scripts/near_ows_vectors.py --check` detects drift.
+
 ## Features
 
 - **31 Networks**: EVM chains (19 including HashKey mainnet/testnet, Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
