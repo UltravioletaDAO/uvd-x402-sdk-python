@@ -10,7 +10,7 @@ PROVENANCE of ``tests/fixtures/erc8004-ts.json``: generated from the PUBLISHED
 npm package, never edited by hand. Its ``source`` block names the release and
 the tarball's integrity hash. Regenerate or check it with::
 
-    node scripts/erc8004_ts_snapshot.mjs --version 2.98.0   # rewrite the fixture
+    node scripts/erc8004_ts_snapshot.mjs --version 2.113.0   # rewrite the fixture
     node scripts/erc8004_ts_snapshot.mjs --check            # exit 1 if it differs from npm
 
 When the TypeScript SDK changes a list, regenerate the fixture against its new
@@ -40,7 +40,7 @@ from uvd_x402_sdk.erc8004 import (
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "erc8004-ts.json"
 
 # The release the fixture was taken from. Bumped together with the fixture.
-TS_RELEASE = "2.98.0"
+TS_RELEASE = "2.113.0"
 
 TS = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 NAMES = sorted(TS["wireNetwork"])
@@ -110,8 +110,8 @@ def test_the_helpers_answer_like_the_typescript_ones(network):
 
 
 def test_every_declared_alias_has_recorded_runtime_answers():
-    # The 2.98.0 fixture predates CAIP-2 aliases; the next release must record
-    # every literal member. Do not silently miss a declared alias in NAMES.
+    # Every literal member must have runtime answers. Do not silently miss
+    # a declared alias in NAMES.
     for name in TS["erc8004Network"]:
         for helper in ("wireNetwork", "supportsRelayedFeedback", "supportsSolanaFeedback"):
             assert name in TS[helper], (name, helper)
