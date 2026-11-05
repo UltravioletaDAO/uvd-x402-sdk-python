@@ -1966,7 +1966,7 @@ Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; 
 [ERC-8004 on Arc](docs/networks/arc.md#erc-8004-on-arc-0900).
 
 Robinhood Chain (`robinhood`, chain 4663, and `robinhood-testnet`, chain 46630) since
-Unreleased, with the singleton identity, reputation and validation registries on both. It
+0.110.0, with the singleton identity, reputation and validation registries on both. It
 needs a facilitator that serves ERC-8004 there (x402-rs 2.55.0 did not yet). Neither network
 is on the relayed rail, and there is no escrow on Robinhood.
 

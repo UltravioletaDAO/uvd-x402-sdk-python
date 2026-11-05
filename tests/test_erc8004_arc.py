@@ -89,8 +89,8 @@ RELAYED_0_89_0 = {
 # ``SOLANA_FEEDBACK_NETWORKS`` as 0.89.0 exported it.
 SOLANA_0_89_0 = {"solana", "solana-devnet"}
 
-# Names added after 0.90.0, each pinned by its own test file (Unreleased after
-# 0.107.0): Robinhood (tests/test_erc8004_robinhood.py) in the table, and in
+# Names added after 0.90.0, each pinned by its own test file (0.110.0):
+# Robinhood (tests/test_erc8004_robinhood.py) in the table, and in
 # ``Erc8004Network`` also the CAIP-2 alias of every EVM network
 # (tests/test_erc8004_caip2_aliases.py), written out here.
 ADDED_AFTER_0_90_0 = {"robinhood", "robinhood-testnet"}

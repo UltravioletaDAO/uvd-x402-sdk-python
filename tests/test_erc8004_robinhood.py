@@ -1,4 +1,4 @@
-"""Robinhood Chain joins ERC-8004 (Unreleased), and it is the ONLY network that moves.
+"""Robinhood Chain joins ERC-8004 (0.110.0), and it is the ONLY network that moves.
 
 Payments on Robinhood (Paxos USDG) shipped before; ERC-8004 there did not.
 Execution Market rates on Robinhood Chain through this module. The TypeScript

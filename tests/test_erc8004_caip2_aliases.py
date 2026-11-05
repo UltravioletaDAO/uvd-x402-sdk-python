@@ -1,4 +1,4 @@
-"""The CAIP-2 name of every EVM network of ERC-8004 is an alias (Unreleased).
+"""The CAIP-2 name of every EVM network of ERC-8004 is an alias (0.110.0).
 
 An alias is not a Robinhood special case (c0der's decision on the refutation of
 the TypeScript twin, uvd-x402-sdk-typescript PR #70): either every EVM network
