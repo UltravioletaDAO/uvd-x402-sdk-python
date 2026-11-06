@@ -868,6 +868,11 @@ from uvd_x402_sdk.near_exact import NearExactDelegateOptions, sign_exact_near_de
 from uvd_x402_sdk.near_nep413 import (
     NEP413_PREFIX, Nep413SignedMessage, nep413_preimage, sign_nep413,
 )
+# NEP-413 HTTP authentication (keyid near:<account>:<key>): offline signer.
+from uvd_x402_sdk.near_http_auth import (  # noqa: E402
+    EXECUTION_MARKET_NEP413_RECIPIENT, NEAR_HTTP_AUTH_ALG, NEAR_HTTP_AUTH_LABEL,
+    NEAR_HTTP_AUTH_MAX_NONCE_LENGTH, NEAR_HTTP_AUTH_MAX_VALIDITY_SEC, sign_near_http_request,
+)
 from uvd_x402_sdk.near_storage import (
     NEAR_ARRAS_STORAGE_DEPOSIT, NEAR_USDC_STORAGE_DEPOSIT, NearStorageTransaction,
     build_arras_storage_deposit, build_usdc_storage_deposit,
@@ -876,7 +881,9 @@ from uvd_x402_sdk.near_storage import (
 __all__ += [
     "NearEd25519Signer", "NearLocalSigner", "NearExactDelegateOptions",
     "sign_exact_near_delegate", "NEP413_PREFIX", "Nep413SignedMessage",
-    "nep413_preimage", "sign_nep413", "NearStorageTransaction",
+    "nep413_preimage", "sign_nep413", "EXECUTION_MARKET_NEP413_RECIPIENT",
+    "NEAR_HTTP_AUTH_ALG", "NEAR_HTTP_AUTH_LABEL", "NEAR_HTTP_AUTH_MAX_NONCE_LENGTH",
+    "NEAR_HTTP_AUTH_MAX_VALIDITY_SEC", "sign_near_http_request", "NearStorageTransaction",
     "NEAR_ARRAS_STORAGE_DEPOSIT", "NEAR_USDC_STORAGE_DEPOSIT",
     "build_arras_storage_deposit", "build_usdc_storage_deposit", "ArrasAuthorizedData",
     "ArrasCapsSetData", "ArrasCompactedData", "ArrasEvent", "ArrasEventData",

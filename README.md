@@ -69,6 +69,65 @@ first send landed. Final execution failures are returned once for the caller
 to handle. Shared deterministic vectors are in `tests/fixtures/near-ows.json`;
 `python scripts/near_ows_vectors.py --check` detects drift.
 
+## NEAR HTTP authentication (NEP-413)
+
+An agent that holds only a NEAR account authenticates its HTTP requests to
+Execution Market with `sign_near_http_request`. The headers are the ERC-8128
+envelope (RFC 9421 `Signature-Input` / `Signature`, label `near`,
+`keyid="near:<account>:ed25519:<base58 key>"`, `alg="ed25519-nep413"`), and the
+signature is NEP-413 over the exact signature base, with
+`nonce = sha256(<RFC 9421 nonce>)` and the verifier's `recipient`. The server
+reads the identity as `near:<account>`. Signing is offline (no RPC, no nonce
+fetch) and needs the `near` extra (or `ows` for an `OwsNearSigner`).
+
+```python
+import secrets
+
+import httpx
+
+from uvd_x402_sdk import (
+    EXECUTION_MARKET_NEP413_RECIPIENT, NearEd25519Signer, sign_near_http_request,
+)
+
+signer = NearEd25519Signer(agent_secret_key)  # or an OwsNearSigner
+url = "https://api.execution.market/api/v1/tasks"
+body = '{"title":"Check the store hours"}'
+headers = sign_near_http_request(
+    signer, "agent.near", "POST", url,
+    nonce=secrets.token_urlsafe(32),
+    recipient=EXECUTION_MARKET_NEP413_RECIPIENT,
+    body=body,
+)
+response = httpx.post(
+    url, content=body, headers={**headers, "Content-Type": "application/json"}
+)
+```
+
+- The key must be a **FullAccess** key of the account on NEAR mainnet: EM reads
+  `view_access_key` at `finality: final` and refuses a FunctionCall key, an
+  account that does not exist (an implicit one included) and a key not on it.
+  The signer cannot check that offline.
+- One nonce per request. EM consumes `near:<account>:<nonce>` before it checks
+  the signature, so a retry, including after `503 near_rpc_unavailable`, needs
+  a new nonce and a new signature, never the same headers.
+- Send exactly the body that was signed (`str` is UTF-8); `Content-Digest`
+  covers it, the empty body included. `None` means no body.
+- `recipient` is required: a signature names the one service it is for. EM's
+  is `execution.market`, for both `api.` and `mcp.` hosts.
+- The window is `validity_sec` (1..300, EM's maximum) from `created` (now).
+- Refused before the key is read: a URL whose bytes EM would rebuild
+  differently (percent-encoded octets in the path, which EM's Starlette
+  decodes; dot segments, which HTTP clients remove; user info; a fragment; a
+  non-RFC 3986 character), a nonce outside `[A-Za-z0-9._~+/=-]{1,256}`, an
+  account outside NEAR's lowercase grammar. The authority is lowercased and
+  the scheme's default port dropped, as the `Host` header carries it.
+
+The output is pinned byte for byte to EM's public vector
+(`tests/fixtures/near-http-auth.json`, a copy of EM's
+`shared/test-vectors/near-http-auth.json`) with the in-memory signer and with
+OWS, and verified by a transcription of EM's verifier
+(`tests/near_http_auth_em.py`).
+
 ## Features
 
 - **31 Networks**: EVM chains (19 including HashKey mainnet/testnet, Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
