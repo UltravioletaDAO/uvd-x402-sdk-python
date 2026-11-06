@@ -1,0 +1,68 @@
+{
+  "_note": [
+    "Robinhood Chain escrow contracts as read on-chain on 2026-11-05: mainnet (chain 4663) at L2 block",
+    "106891112 (0x65f0768), testnet (chain 46630) at its head. Trimmed to what tests/test_robinhood_escrow.py",
+    "compares: the size and keccak256 of each runtime code, and the raw calldata and answer of each call.",
+    "Never edited by hand. Hex values of 32 bytes or more are stored without the 0x prefix."
+  ],
+  "mainnet": {
+    "eth_chainId": "0x1237",
+    "block": "0x65f0768",
+    "code": {
+      "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff": {
+        "size": 11053,
+        "keccak": "06c981228c864c5e6e57b57a98092e5b57557839db5a71c20b9435e687ff4b20"
+      },
+      "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716": {
+        "size": 16426,
+        "keccak": "bc047c2c866f41b0efa3c3cad50d8df3bec17d89abd0d50bfcb9d8b8a9bb6ef3"
+      },
+      "0x0E3dF9510de65469C4518D7843919c0b8C7A7757": {
+        "size": 3982,
+        "keccak": "29d2cf28fb841624c5da556521a3c70b0714c284a79acac0e21cc1869b2ab901"
+      },
+      "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D": {
+        "size": 11286,
+        "keccak": "57d2e3752195cb4457496a226d5fc1be5c24f5f40841ceb7f6bc097cd7b06a53"
+      }
+    },
+    "calls": [
+      {
+        "to": "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716",
+        "data": "8b805cd4000000000000000000000000ae07ceb6b395bc685a776a0b4c489e8d9ce9a6ad00000000000000000000000025ca273d6f5508f06ed186680d305dc32a99746100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f50fd76d66c80aeb216c0c5879376c980a2b62ef0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000d8023a72f29bb1ab782c69744893dea2836cb69c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000402ef720d202cb4bcbfb3ee6577b204ca06786b9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "result": "0000000000000000000000000258472a1410ac3ad720f1bc83f22b3c0af1fd9d"
+      },
+      {
+        "to": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+        "data": "e681c4aa",
+        "result": "000000000000000000000000bdea0d1bcc5966192b070fdf62ab4ef5b4420cff"
+      },
+      {
+        "to": "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D",
+        "data": "5782189c",
+        "result": "000000000000000000000000be2d24614f339a1eb103a399f93aa2a39ca815bc"
+      }
+    ]
+  },
+  "testnet": {
+    "eth_chainId": "0xb626",
+    "code": {
+      "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff": {
+        "size": 11053,
+        "keccak": "06c981228c864c5e6e57b57a98092e5b57557839db5a71c20b9435e687ff4b20"
+      },
+      "0xc24153B7ED8DC03e551F29DDEeA5CadFe57e2716": {
+        "size": 16426,
+        "keccak": "bc047c2c866f41b0efa3c3cad50d8df3bec17d89abd0d50bfcb9d8b8a9bb6ef3"
+      },
+      "0x0E3dF9510de65469C4518D7843919c0b8C7A7757": {
+        "size": 3982,
+        "keccak": "29d2cf28fb841624c5da556521a3c70b0714c284a79acac0e21cc1869b2ab901"
+      },
+      "0x0258472A1410Ac3Ad720f1BC83f22B3c0af1Fd9D": {
+        "size": 0,
+        "keccak": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+      }
+    }
+  }
+}

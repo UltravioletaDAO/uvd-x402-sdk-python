@@ -10,3 +10,15 @@ regexes = [
     '''^17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1$''',
     '''^3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af$''',
 ]
+
+# Public escrow contracts that generic-api-key reads as a key because the field
+# is named token / token_collector: the canonical x402r ERC3009 collector (Arc,
+# Arc Testnet and Robinhood Chain) and Paxos USDG on Robinhood Chain, both read
+# on-chain (tests/test_robinhood_escrow.py). Exact values only.
+[[allowlists]]
+description = "Public escrow token collector and USDG token contract addresses"
+regexTarget = "secret"
+regexes = [
+    '''^0x0E3dF9510de65469C4518D7843919c0b8C7A7757$''',
+    '''^0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168$''',
+]

@@ -552,6 +552,16 @@ SDK_NOT_USD_COIN = {
 }
 KK_NOT_USD_COIN = {n for n, v in KK["vectors"].items() if v["domain"]["name"] != "USD Coin"}
 
+
+def _sdk_not_version(version: str) -> set[str]:
+    return {
+        i for i, v in SDK_VECTORS.items() if v["network_config"]["usdc_domain_version"] != version
+    }
+
+
+def _kk_not_version(version: str) -> set[str]:
+    return {n for n, v in KK["vectors"].items() if v["domain"]["version"] != version}
+
 _TYPES_BLOCK = (
     '        {"name": "from", "type": "address"},\n'
     '        {"name": "to", "type": "address"},\n'
@@ -578,11 +588,18 @@ MUTATIONS = {
         SDK_NOT_USD_COIN,
         KK_NOT_USD_COIN,
     ),
+    # Every chain but Robinhood (USDG, "Global Dollar" / "1") signs version "2".
     "domain version hard-coded": (
         '"version": _afirmado[1],',
         '"version": "1",',
-        ALL_SDK,
-        ALL_KK,
+        _sdk_not_version("1"),
+        _kk_not_version("1"),
+    ),
+    "domain version hard-coded to 2": (
+        '"version": _afirmado[1],',
+        '"version": "2",',
+        _sdk_not_version("2"),
+        _kk_not_version("2"),
     ),
     "validAfter and validBefore swapped in the signed type": (
         _TYPES_BLOCK,
@@ -632,6 +649,11 @@ MUTATIONS = {
 class TestMutations:
     def test_the_unmutated_source_reproduces_every_vector(self):
         assert _failing(mutant("ZERO_ADDRESS = ", "ZERO_ADDRESS = ")) == (set(), set())
+
+    def test_robinhood_is_the_one_vector_off_version_2(self):
+        """What the 'hard-coded to 2' mutant must fail: USDG's version "1", no other."""
+        assert _sdk_not_version("2") == {"robinhood"}
+        assert _kk_not_version("2") == set()
 
     @pytest.mark.parametrize("name", sorted(MUTATIONS))
     def test_the_mutation_fails_exactly_the_vectors_it_touches(self, name):

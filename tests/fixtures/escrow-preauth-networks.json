@@ -243,6 +243,61 @@
       }
     },
     {
+      "id": "robinhood",
+      "network": "robinhood",
+      "network_config": {
+        "chain_id": 4663,
+        "operator": "0x0000000000000000000000000000000000001237",
+        "escrow": "0xBdEA0D1bcC5966192B070Fdf62aB4EF5b4420cff",
+        "token_collector": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+        "usdc": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "usdc_domain_name": "Global Dollar",
+        "usdc_domain_version": "1"
+      },
+      "amount_usd": "0.25",
+      "deadline": 1790259200,
+      "tier": "micro",
+      "delegate": null,
+      "expected": {
+        "nonce": "98028551c966ad8ff0fea442c79e3857d5318d7bab77096c5a1f391f88fa1162",
+        "digest": "1f0776ec3ea70948032cd87fa02ee7054866bb9731e2c10c75fdecadcaee099c",
+        "signature": "7ead897f7747b1925cd9e066bcd23680f45841c2985e9f4bf9a201b328dca35e124490381d0deb004dde0bef2d4582abc93d184fa352e95b0d44887123f466c71b",
+        "header_sha256": "63b0289db4ebf09d333f09a45c299fa18156c16d11b4b9397c2288435882f5ee",
+        "wrapper": {
+          "x402Version": 2,
+          "scheme": "escrow",
+          "payload": {
+            "authorization": {
+              "from": "0x49BF93845bB7AA4787e049E4e2252321da875405",
+              "to": "0x0E3dF9510de65469C4518D7843919c0b8C7A7757",
+              "value": "250000",
+              "validAfter": "0",
+              "validBefore": "1790003600",
+              "nonce": "98028551c966ad8ff0fea442c79e3857d5318d7bab77096c5a1f391f88fa1162"
+            },
+            "signature": "7ead897f7747b1925cd9e066bcd23680f45841c2985e9f4bf9a201b328dca35e124490381d0deb004dde0bef2d4582abc93d184fa352e95b0d44887123f466c71b",
+            "paymentInfo": {
+              "operator": "0x0000000000000000000000000000000000001237",
+              "receiver": "0x5e5E5e5e5E5e5E5E5e5E5E5e5e5E5E5E5e5E5E5e",
+              "token": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+              "maxAmount": "250000",
+              "preApprovalExpiry": 1790003600,
+              "authorizationExpiry": 1790864000,
+              "refundExpiry": 1791468800,
+              "minFeeBps": 0,
+              "maxFeeBps": 1800,
+              "feeReceiver": "0x0000000000000000000000000000000000001237",
+              "salt": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+            }
+          },
+          "paymentRequirements": {
+            "scheme": "escrow",
+            "network": "eip155:4663"
+          }
+        }
+      }
+    },
+    {
       "id": "arc",
       "network": "arc",
       "network_config": {

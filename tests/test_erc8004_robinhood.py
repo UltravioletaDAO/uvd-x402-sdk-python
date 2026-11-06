@@ -19,7 +19,9 @@ here, offline:
 3. Neither network is on a feedback rail (no ``FeedbackDelegate``, not Solana),
    so preparation and evidence refuse both. The worker also refuses queued
    rows before RPC or anchor-payment signing (test_reputation_networks.py).
-   No escrow row exists for either chain (x402r has no escrow on Robinhood).
+   0.110.0 added no escrow row for either chain; the release after it adds the
+   mainnet's (x402r's canonical set with USDG, tests/test_robinhood_escrow.py),
+   and the testnet still has none.
 4. Every network 0.107.0 exported is exactly what it was. The snapshots below
    are the lists as 0.107.0 built them, written out rather than derived from the
    code under test.
@@ -251,7 +253,7 @@ def test_the_deprecated_base_alias_still_resolves(offline_client):
     assert ERC8004_CONTRACTS["base-mainnet"] == ERC8004_CONTRACTS["base"]
 
 
-# -- no rail, no escrow -------------------------------------------------------
+# -- no rail; escrow on the mainnet only ---------------------------------------
 
 
 @pytest.mark.parametrize("network, canonical, contracts, chain_id", SPELLINGS, ids=SPELLING_IDS)
@@ -333,13 +335,17 @@ def test_the_evidence_document_refuses_robinhood(network, canonical, contracts, 
     assert caught.value.code == "unknown_network"
 
 
-def test_no_escrow_row_exists_on_either_chain():
-    # x402r has no escrow on Robinhood: build_escrow_pre_auth refuses a chain
-    # without a row in each table (test_escrow_signing_rows), and none is added.
-    for chain_id in (4663, 46630):
-        assert chain_id not in ESCROW_CONTRACTS
-        assert chain_id not in ESCROW_OPERATORS
-        assert chain_id not in ESCROW_MAX_FEE_BPS
+def test_the_mainnet_has_escrow_rows_and_the_testnet_none():
+    # The mainnet's rows are pinned against the chain in test_robinhood_escrow.
+    # The testnet has none: build_escrow_pre_auth refuses a chain without a row
+    # in each table (test_escrow_signing_rows), and Execution Market's operator
+    # has no code there.
+    assert 4663 in ESCROW_CONTRACTS
+    assert 4663 in ESCROW_OPERATORS
+    assert 4663 in ESCROW_MAX_FEE_BPS
+    assert 46630 not in ESCROW_CONTRACTS
+    assert 46630 not in ESCROW_OPERATORS
+    assert 46630 not in ESCROW_MAX_FEE_BPS
 
 
 # -- nothing but Robinhood moved since 0.107.0 ---------------------------------

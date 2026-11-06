@@ -1968,7 +1968,8 @@ Arc (`arc`, `arc-testnet`) since 0.90.0, with the canonical registries on both; 
 Robinhood Chain (`robinhood`, chain 4663, and `robinhood-testnet`, chain 46630) since
 0.110.0, with the singleton identity, reputation and validation registries on both. It
 needs a facilitator that serves ERC-8004 there (x402-rs 2.55.0 did not yet). Neither network
-is on the relayed rail, and there is no escrow on Robinhood.
+is on the relayed rail. The escrow pre-auth signs on `robinhood` since the release after
+0.110.0 (USDG; see the escrow pre-auth section); `robinhood-testnet` has no escrow.
 
 Every EVM network also takes its CAIP-2 name (`eip155:8453`, `eip155:4663`, ...), the form v2
 payment requirements carry: `get_contracts()` / `is_available()` resolve it, and every read
@@ -2599,7 +2600,14 @@ chain without a row in each of those tables raises `ValueError` too, and so does
 a `network` that is neither a name of the SDK's network registry nor
 `eip155:<chain id>` (until 0.96.0 both were signed with a logged warning): the
 chains with every row are Base, Ethereum, Polygon, Arbitrum, Celo, Monad,
-Avalanche, Optimism, SKALE Base, Arc and Arc Testnet. The tier windows are
+Avalanche, Optimism, SKALE Base, Arc, Arc Testnet and Robinhood Chain.
+On Robinhood Chain (`robinhood` / `eip155:4663`, unreleased) the row is Arc's
+canonical x402r set and Execution Market's operator with Paxos USDG
+(`0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168`, 6 decimals) as the token: the
+config's `usdc` must be that address and its domain `Global Dollar` / `1`.
+Execution Market's payment config serves `usdc: null` there and the token under
+`tokens.USDG`; a caller fills `usdc` from it, or the pre-auth refuses the block
+as incomplete. `robinhood-testnet` has no row. The tier windows are
 bounded as well: each of `pre` / `auth` / `refund` is a whole number of seconds
 within `ESCROW_MAX_TIER_WINDOWS` (1 day / 7 days / 30 days), and the signed
 `authorizationExpiry` is at most `ESCROW_MAX_AUTHORIZATION_SEC` (37 days: a
