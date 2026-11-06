@@ -315,6 +315,10 @@ BAD_INPUTS = {
     "url-port-padded": {"url": "https://api.execution.market:08443/x"},
     "url-port-zero": {"url": "https://api.execution.market:0/x"},
     "url-ipv6-uppercase": {"url": "https://[::FFFF:7F00:1]/x"},
+    # CPython 3.9.6's urlsplit accepts it; newer ones raise. Refused on both.
+    "url-ipv6-port-without-colon": {"url": "https://[::1]443/x"},
+    "url-scheme-uppercase": {"url": "HTTPS://api.execution.market/x"},
+    "url-scheme-uppercase-port": {"url": "HTTPS://api.execution.market:443/x"},
     "url-percent-host": {"url": "https://api%2Eexecution.market/x"},
     "url-dot-dot": {"url": "https://api.execution.market/a/../b"},
     "url-dot": {"url": "https://api.execution.market/a/./b"},
@@ -488,7 +492,12 @@ GUARD_MUTANTS = [
         "url-bad-percent",
     ),
     ("M05-fragment", 'if "#" in url:', "if False:", "url-fragment"),
-    ("M06-scheme", 'if parts.scheme not in ("http", "https"):', "if False:", "url-ftp"),
+    (
+        "M06-scheme",
+        'if not url.startswith(("http://", "https://")):',
+        "if False:",
+        "url-scheme-uppercase-port",
+    ),
     ("M07-userinfo", 'if "@" in netloc:', "if False:", "url-user-only"),
     ("M08-port", "        parts.port\n", "        pass\n", "url-bad-port"),
     ("M09-host", "if not parts.hostname:", "if False:", "url-no-host"),
@@ -558,7 +567,7 @@ GUARD_MUTANTS = [
     ),
     (
         "M35-ipv6-case",
-        'if "[" in netloc and netloc != netloc.lower():',
+        'if ("[" in netloc or "]" in netloc) and _IPV6_NETLOC_RE.fullmatch(netloc) is None:',
         "if False:",
         "url-ipv6-uppercase",
     ),
@@ -597,6 +606,22 @@ EM_MEASURED = {
     "M34-port-text": ("https://api.execution.market:0443/x", "api.execution.market"),
     "M35-ipv6-case": ("https://[::FFFF:7F00:1]/x", "[::ffff:7f00:1]"),
 }
+
+
+def test_without_the_scheme_guard_an_upper_case_scheme_loses_its_port():
+    # httpx keeps `:443` for `HTTPS` (it compares the port with the scheme as written).
+    url = "HTTPS://api.execution.market:443/x"
+    allowed = frozenset({"api.execution.market:443"})
+    assert httpx_host(url) == "api.execution.market:443"
+    old, new = next(m[1:3] for m in GUARD_MUTANTS if m[0] == "M06-scheme")
+    headers = sign(module=mutant(old, new), url=url, body=None, created=NOW)
+    assert not em_verifies(headers, url=url, body=None, allowed=allowed).ok
+
+
+def httpx_host(url):
+    import httpx
+
+    return httpx.Request("GET", url).headers["host"]
 
 
 @pytest.mark.parametrize("mid", list(EM_MEASURED))

@@ -118,8 +118,10 @@ response = httpx.post(
 - Refused before the key is read, where EM would rebuild other bytes than the
   ones signed (measured with httpx and EM's verifier): percent-encoded octets
   in the path (EM reads the decoded path), dot segments (httpx removes them), a
-  port written empty or with leading zeros and an upper-case IPv6 literal
-  (httpx rewrites both in `Host`). Also refused, as policy: brackets outside
+  port written empty or with leading zeros (httpx rewrites it in `Host`), an
+  upper-case scheme (httpx then keeps a default port) and an IPv6 literal that
+  is not `[lowercase hex]` with an optional `:port` (httpx sends it as written,
+  the signed authority is lowercased). Also refused, as policy: brackets outside
   the host and a `%` that starts no octet (`requests` re-encodes them), a `%`
   in the host, user info, a fragment, any non-RFC 3986 character, a nonce
   outside `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase

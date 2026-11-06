@@ -43,8 +43,12 @@ Every input is checked before the signer is touched. A URL is refused when
 the bytes EM rebuilds would differ from the bytes signed, measured with httpx
 0.28 and EM's verifier: percent-encoded octets in the path (EM reads
 Starlette's DECODED path), dot segments (httpx removes them), a port written
-empty or with leading zeros and an upper-case IPv6 literal (httpx rewrites
-them in ``Host``). Also refused, as policy rather than an EM measurement:
+empty or with leading zeros (httpx rewrites it in ``Host``), an upper-case
+scheme (httpx then keeps a default port this signer drops) and an IPv6 literal
+that is not lowercase (httpx sends it as written; the base lowercases the
+authority). An IPv6 host must be ``[hex:...]`` with an optional ``:port``
+(CPython 3.9.6's ``urlsplit`` accepts ``[::1]443``). Also refused, as policy
+rather than an EM measurement:
 brackets outside the host and a ``%`` that starts no octet (``requests`` /
 urllib3 2.8 re-encode both, httpx does not), a ``%`` in the host, user info, a
 fragment (no client sends it) and any character outside RFC 3986.
@@ -92,6 +96,8 @@ _URL_RE = re.compile(r"[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
 _BAD_PERCENT_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 # httpx rewrites `:0443`, `:` and `:08443` in Host; only the canonical text matches.
 _PORT_RE = re.compile(r"[1-9][0-9]{0,4}")
+# A bracketed host: lowercase hex (httpx sends it as written), then nothing or `:port`.
+_IPV6_NETLOC_RE = re.compile(r"\[[0-9a-f:.]+\](?::[^:]*)?")
 # EM's own nonces are secrets.token_urlsafe; base64, hex and UUIDs also fit.
 # No quote, backslash or space: EM writes the value back into the base verbatim.
 _NONCE_RE = re.compile(rf"[A-Za-z0-9._~+/=-]{{1,{NEAR_HTTP_AUTH_MAX_NONCE_LENGTH}}}")
@@ -111,9 +117,10 @@ def _url_parts(url: object) -> tuple:
         raise ValueError("url: '%' must start a percent-encoded octet")
     if "#" in url:
         raise ValueError("url: a fragment is never sent; sign the URL without it")
+    if not url.startswith(("http://", "https://")):
+        # Lowercase as written: httpx checks the default port against the scheme's text.
+        raise ValueError("url: the scheme must be written http:// or https://")
     parts = urlsplit(url)
-    if parts.scheme not in ("http", "https"):
-        raise ValueError("url: scheme must be http or https")
     netloc = parts.netloc
     if "@" in netloc:
         raise ValueError("url: user info is never part of the signed authority")
@@ -122,8 +129,8 @@ def _url_parts(url: object) -> tuple:
     if netloc.rfind(":") > netloc.rfind("]"):
         if _PORT_RE.fullmatch(netloc[netloc.rfind(":") + 1 :]) is None:
             raise ValueError("url: write the port in decimal without leading zeros")
-    if "[" in netloc and netloc != netloc.lower():
-        raise ValueError("url: write an IPv6 literal in lowercase, as it is sent")
+    if ("[" in netloc or "]" in netloc) and _IPV6_NETLOC_RE.fullmatch(netloc) is None:
+        raise ValueError("url: an IPv6 host is [lowercase hex] with an optional :port")
     try:
         parts.port
     except ValueError:
