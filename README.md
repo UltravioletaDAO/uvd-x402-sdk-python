@@ -115,14 +115,21 @@ response = httpx.post(
 - `recipient` is required: a signature names the one service it is for. EM's
   is `execution.market`, for both `api.` and `mcp.` hosts.
 - The window is `validity_sec` (1..300, EM's maximum) from `created` (now).
-- Refused before the key is read: a URL whose bytes EM would rebuild
-  differently (percent-encoded octets in the path, which EM's Starlette
-  decodes; dot segments, which HTTP clients remove; user info; a fragment; a
-  non-RFC 3986 character), a nonce outside `[A-Za-z0-9._~+/=-]{1,256}`, an
-  account outside NEAR's lowercase grammar. The authority is lowercased and
-  the scheme's default port dropped, as the `Host` header carries it.
+- Refused before the key is read, where EM would rebuild other bytes than the
+  ones signed (measured with httpx and EM's verifier): percent-encoded octets
+  in the path (EM reads the decoded path), dot segments (httpx removes them), a
+  port written empty or with leading zeros and an upper-case IPv6 literal
+  (httpx rewrites both in `Host`). Also refused, as policy: brackets outside
+  the host and a `%` that starts no octet (`requests` re-encodes them), a `%`
+  in the host, user info, a fragment, any non-RFC 3986 character, a nonce
+  outside `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase
+  grammar. The authority is lowercased and the scheme's default port dropped,
+  as the `Host` header carries it.
+- EM is NEAR mainnet only. The signed bytes carry no network, so an
+  `OwsNearSigner` configured for `near:testnet` signs them, but EM will not
+  find a testnet key on a mainnet account (and the nonce is spent).
 
-The output is pinned byte for byte to EM's public vector
+The header values are pinned byte for byte to EM's public vector
 (`tests/fixtures/near-http-auth.json`, a copy of EM's
 `shared/test-vectors/near-http-auth.json`) with the in-memory signer and with
 OWS, and verified by a transcription of EM's verifier

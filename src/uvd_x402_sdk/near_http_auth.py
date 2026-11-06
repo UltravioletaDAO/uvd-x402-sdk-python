@@ -39,11 +39,15 @@ signature, so a retry, even after EM's ``503 near_rpc_unavailable``, needs a
 NEW nonce and a new signature), that ``@authority`` is a host it serves, and
 the time window (EM: ``expires - created <= 300``, 30 s of clock skew).
 
-Every input is checked before the signer is touched. URLs are refused where
-the bytes the server rebuilds would differ from the bytes signed (measured):
-a path with percent-encoded octets (Starlette's ``request.url.path`` is the
-DECODED path), dot segments (httpx removes them before sending), user info, a
-fragment, a non-ASCII or non-RFC 3986 character, a malformed ``%``.
+Every input is checked before the signer is touched. A URL is refused when
+the bytes EM rebuilds would differ from the bytes signed, measured with httpx
+0.28 and EM's verifier: percent-encoded octets in the path (EM reads
+Starlette's DECODED path), dot segments (httpx removes them), a port written
+empty or with leading zeros and an upper-case IPv6 literal (httpx rewrites
+them in ``Host``). Also refused, as policy rather than an EM measurement:
+brackets outside the host and a ``%`` that starts no octet (``requests`` /
+urllib3 2.8 re-encode both, httpx does not), a ``%`` in the host, user info, a
+fragment (no client sends it) and any character outside RFC 3986.
 """
 
 from __future__ import annotations
@@ -83,9 +87,11 @@ EXECUTION_MARKET_NEP413_RECIPIENT = "execution.market"
 
 # RFC 9110 token.
 _METHOD_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
-# RFC 3986 characters only: httpx sends these as written.
+# RFC 3986 characters only.
 _URL_RE = re.compile(r"[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
 _BAD_PERCENT_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+# httpx rewrites `:0443`, `:` and `:08443` in Host; only the canonical text matches.
+_PORT_RE = re.compile(r"[1-9][0-9]{0,4}")
 # EM's own nonces are secrets.token_urlsafe; base64, hex and UUIDs also fit.
 # No quote, backslash or space: EM writes the value back into the base verbatim.
 _NONCE_RE = re.compile(rf"[A-Za-z0-9._~+/=-]{{1,{NEAR_HTTP_AUTH_MAX_NONCE_LENGTH}}}")
@@ -108,8 +114,16 @@ def _url_parts(url: object) -> tuple:
     parts = urlsplit(url)
     if parts.scheme not in ("http", "https"):
         raise ValueError("url: scheme must be http or https")
-    if "@" in parts.netloc:
+    netloc = parts.netloc
+    if "@" in netloc:
         raise ValueError("url: user info is never part of the signed authority")
+    if "%" in netloc:
+        raise ValueError("url: a percent-encoded host is not signed")
+    if netloc.rfind(":") > netloc.rfind("]"):
+        if _PORT_RE.fullmatch(netloc[netloc.rfind(":") + 1 :]) is None:
+            raise ValueError("url: write the port in decimal without leading zeros")
+    if "[" in netloc and netloc != netloc.lower():
+        raise ValueError("url: write an IPv6 literal in lowercase, as it is sent")
     try:
         parts.port
     except ValueError:
@@ -124,7 +138,7 @@ def _url_parts(url: object) -> tuple:
         raise ValueError("url: percent-encoded octets in the path are not verifiable")
     if any(segment in (".", "..") for segment in path.split("/")):
         raise ValueError("url: dot segments are removed by HTTP clients before sending")
-    return normalize_authority(parts.netloc, parts.scheme), path, parts.query
+    return normalize_authority(netloc, parts.scheme), path, parts.query
 
 
 def _check_recipient(recipient: object) -> str:
@@ -183,7 +197,7 @@ def sign_near_http_request(
         ``Signature``. Raises ``ValueError`` before reading the key for any
         invalid input, and after signing if the signer's output does not verify.
     """
-    if header_case not in _HEADER_NAMES:
+    if not isinstance(header_case, str) or header_case not in _HEADER_NAMES:
         raise ValueError("header_case must be 'title' or 'lower'")
     _account(account_id, "account_id")
     if not isinstance(method, str) or _METHOD_RE.fullmatch(method) is None:

@@ -172,6 +172,21 @@ def test_ems_verifier_accepts_what_the_sdk_signs(shape):
     assert result == em.Result(True, address=f"near:{account}")
 
 
+@pytest.mark.parametrize(
+    "url,authority",
+    [
+        ("https://api.execution.market:8443/x", "api.execution.market:8443"),
+        ("https://api.execution.market:80/x", "api.execution.market:80"),
+        ("http://api.execution.market:443/x", "api.execution.market:443"),
+        ("http://[::1]:8000/x", "[::1]:8000"),
+        ("https://[::ffff:7f00:1]/x", "[::ffff:7f00:1]"),
+    ],
+)
+def test_the_authority_is_what_the_host_header_carries(url, authority):
+    headers = sign(url=url, body=None)
+    assert em_verifies(headers, url=url, body=None, allowed=frozenset({authority})).ok
+
+
 def test_a_non_default_port_stays_in_the_authority():
     url = "http://localhost:8000/api/v1/tasks"
     headers = sign(url=url, body=None)
@@ -286,6 +301,8 @@ BAD_INPUTS = {
     "url-ftp": {"url": "ftp://api.execution.market/x"},
     "url-userinfo": {"url": "https://user:pass@api.execution.market/x"},
     "url-bare-at": {"url": "https://@api.execution.market/x"},
+    # No colon: only the user-info guard refuses it (the port guard reads `user:pass@`).
+    "url-user-only": {"url": "https://user@api.execution.market/x"},
     "url-bad-port": {"url": "https://api.execution.market:99999/x"},
     "url-text-port": {"url": "https://api.execution.market:abc/x"},
     "url-no-host": {"url": "https://:443/x"},
@@ -293,6 +310,12 @@ BAD_INPUTS = {
     "url-bracket-query": {"url": "https://api.execution.market/a?x=[1]"},
     "url-percent-path": {"url": "https://api.execution.market/a%20b"},
     "url-encoded-slash": {"url": "https://api.execution.market/a%2Fb"},
+    "url-port-leading-zero": {"url": "https://api.execution.market:0443/x"},
+    "url-port-empty": {"url": "https://api.execution.market:/x"},
+    "url-port-padded": {"url": "https://api.execution.market:08443/x"},
+    "url-port-zero": {"url": "https://api.execution.market:0/x"},
+    "url-ipv6-uppercase": {"url": "https://[::FFFF:7F00:1]/x"},
+    "url-percent-host": {"url": "https://api%2Eexecution.market/x"},
     "url-dot-dot": {"url": "https://api.execution.market/a/../b"},
     "url-dot": {"url": "https://api.execution.market/a/./b"},
     "url-trailing-dot-dot": {"url": "https://api.execution.market/a/.."},
@@ -329,6 +352,8 @@ BAD_INPUTS = {
     "created-negative": {"created": -1},
     "created-past-js-safe": {"created": 2**53 - 300},
     "header-case": {"header_case": "TITLE"},
+    "header-case-list": {"header_case": []},
+    "header-case-dict": {"header_case": {}},
 }
 
 
@@ -464,7 +489,7 @@ GUARD_MUTANTS = [
     ),
     ("M05-fragment", 'if "#" in url:', "if False:", "url-fragment"),
     ("M06-scheme", 'if parts.scheme not in ("http", "https"):', "if False:", "url-ftp"),
-    ("M07-userinfo", 'if "@" in parts.netloc:', "if False:", "url-userinfo"),
+    ("M07-userinfo", 'if "@" in netloc:', "if False:", "url-user-only"),
     ("M08-port", "        parts.port\n", "        pass\n", "url-bad-port"),
     ("M09-host", "if not parts.hostname:", "if False:", "url-no-host"),
     (
@@ -519,7 +544,31 @@ GUARD_MUTANTS = [
         "if False:",
         "created-negative",
     ),
-    ("M21-header-case", "if header_case not in _HEADER_NAMES:", "if False:", "header-case"),
+    (
+        "M21-header-case",
+        "if not isinstance(header_case, str) or header_case not in _HEADER_NAMES:",
+        "if not isinstance(header_case, str):",
+        "header-case",
+    ),
+    (
+        "M34-port-text",
+        'if _PORT_RE.fullmatch(netloc[netloc.rfind(":") + 1 :]) is None:',
+        "if False:",
+        "url-port-leading-zero",
+    ),
+    (
+        "M35-ipv6-case",
+        'if "[" in netloc and netloc != netloc.lower():',
+        "if False:",
+        "url-ipv6-uppercase",
+    ),
+    ("M36-percent-host", 'if "%" in netloc:', "if False:", "url-percent-host"),
+    (
+        "M37-header-case-type",
+        "if not isinstance(header_case, str) or header_case not in _HEADER_NAMES:",
+        "if header_case not in _HEADER_NAMES:",
+        "header-case-list",
+    ),
 ]
 
 
@@ -531,13 +580,37 @@ def test_guard_mutant_goes_through(old, new, case):
     assert not refused_before_key(mutant(old, new), **BAD_INPUTS[case])
 
 
-def em_accepts(module, signer=LOCAL, **changes):
+def em_accepts(module, signer=LOCAL, allowed=em.PRODUCTION_AUTHORITIES, **changes):
     try:
         headers = sign(signer, module, created=NOW, **changes)
     except Exception:  # noqa: BLE001
         return False
     verify = {k: changes[k] for k in ("method", "url", "body") if k in changes}
-    return em_verifies(headers, **verify).ok
+    return em_verifies(headers, allowed=allowed, **verify).ok
+
+
+# The guards whose case EM itself rejects (measured with EM's real verifier too).
+# The other URL guards are policy: EM accepts those bytes (see the module docstring).
+EM_MEASURED = {
+    "M11-percent-path": ("https://api.execution.market/a%20b", "api.execution.market"),
+    "M12-dot-segments": ("https://api.execution.market/a/../b", "api.execution.market"),
+    "M34-port-text": ("https://api.execution.market:0443/x", "api.execution.market"),
+    "M35-ipv6-case": ("https://[::FFFF:7F00:1]/x", "[::ffff:7f00:1]"),
+}
+
+
+@pytest.mark.parametrize("mid", list(EM_MEASURED))
+def test_without_the_guard_em_rejects_what_was_signed(mid):
+    url, authority = EM_MEASURED[mid]
+    old, new = next(m[1:3] for m in GUARD_MUTANTS if m[0] == mid)
+    allowed = frozenset({authority})
+    assert not em_accepts(auth, url=url, body=None, allowed=allowed)  # refused before signing
+    headers = sign(module=mutant(old, new), url=url, body=None, created=NOW)
+    assert not em_verifies(headers, url=url, body=None, allowed=allowed).ok
+    # and the same request written canonically verifies
+    canonical = url.replace("a%20b", "ab").replace("a/../b", "b").replace(":0443", "")
+    canonical = canonical.replace("FFFF:7F00:1", "ffff:7f00:1")
+    assert em_accepts(auth, url=canonical, body=None, allowed=allowed)
 
 
 def test_m22_the_alg_is_ed25519_nep413():
@@ -547,6 +620,7 @@ def test_m22_the_alg_is_ed25519_nep413():
 
 
 def test_m23_the_label_is_near():
+    # Parity with EM's vector only: EM's verifier also accepts a near: keyid under "eth".
     module = mutant('NEAR_HTTP_AUTH_LABEL = "near"', 'NEAR_HTTP_AUTH_LABEL = "eth"')
     assert lower(sign(module=module)) != lower(V["headers"])
 
@@ -570,6 +644,8 @@ def test_m25_the_callers_recipient_is_signed():
 
 
 def test_m26_an_empty_body_is_covered():
+    # Parity with EM's signer (http_auth.sign_near_request digests whenever body is not
+    # None); EM's verifier accepts an empty body with or without content-digest.
     module = mutant(
         "covered = select_covered(url, raw_body is not None)",
         "covered = select_covered(url, bool(raw_body))",
@@ -585,8 +661,8 @@ def test_m27_the_query_keeps_its_question_mark():
 def test_m28_the_authority_is_normalised():
     url = "https://API.Execution.Market:443/api/v1/tasks"
     module = mutant(
-        "return normalize_authority(parts.netloc, parts.scheme), path, parts.query",
-        "return parts.netloc, path, parts.query",
+        "return normalize_authority(netloc, parts.scheme), path, parts.query",
+        "return netloc, path, parts.query",
     )
     assert em_accepts(auth, url=url, body=None)
     assert not em_accepts(module, url=url, body=None)
