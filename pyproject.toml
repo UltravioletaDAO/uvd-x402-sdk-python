@@ -159,6 +159,12 @@ dev = [
     # tests/test_fastapi_durable.py serves a seller app with a real ASGI
     # server on 127.0.0.1 (how a route's stream is walked there).
     "uvicorn>=0.23.0",
+    # tests/test_near_http_auth.py checks that what requests and aiohttp (yarl)
+    # send for every URL the NEAR signer accepts is what it signed
+    # (tests/http_clients_wire.py). web3 brings both today; named here so the
+    # test does not depend on that.
+    "requests>=2.28.0",
+    "aiohttp>=3.9.0",
     # tests/test_ows_wallet_adapter.py runs OWSWalletAdapter against the real
     # library (a temporary vault, no network) and pins tests/ows_double.py to
     # its signatures. Pinned: a new release is a new API to measure. It ships

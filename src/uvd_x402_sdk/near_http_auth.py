@@ -39,24 +39,46 @@ signature, so a retry, even after EM's ``503 near_rpc_unavailable``, needs a
 NEW nonce and a new signature), that ``@authority`` is a host it serves, and
 the time window (EM: ``expires - created <= 300``, 30 s of clock skew).
 
-Every input is checked before the signer is touched. A URL is refused when
-the bytes EM rebuilds would differ from the bytes signed, measured with httpx
-0.28 and EM's verifier: percent-encoded octets in the path (EM reads
-Starlette's DECODED path), dot segments (httpx removes them), a port written
-empty or with leading zeros (httpx rewrites it in ``Host``), an upper-case
-scheme (httpx then keeps a default port this signer drops) and an IPv6 literal
-that is not lowercase (httpx sends it as written; the base lowercases the
-authority). An IPv6 host must be ``[hex:...]`` with an optional ``:port``
-(CPython 3.9.6's ``urlsplit`` accepts ``[::1]443``). Also refused, as policy
-rather than an EM measurement:
-brackets outside the host and a ``%`` that starts no octet (``requests`` /
-urllib3 2.8 re-encode both, httpx does not), a ``%`` in the host, user info, a
-fragment (no client sends it) and any character outside RFC 3986.
+Every input is checked before the signer is touched. A URL is signed only
+when EM rebuilds the signed bytes from what each measured HTTP client sends
+for it: httpx 0.28, requests 2.34 (urllib3 2.8), urllib (CPython 3.11) and
+aiohttp 3.14 (yarl 1.25), against EM's verifier. EM consumes the nonce before
+it checks the signature, so a URL one of them rewrites costs a nonce and a 401.
+The authority signed is the URL's ``host[:port]`` as written, which is what
+every client sends in ``Host`` once the URL passes. Refused, with the client
+that rewrites it:
+
+* percent-encoded octets in the path (EM reads Starlette's DECODED path,
+  whatever the client sent);
+* dot segments (httpx, requests and aiohttp remove them);
+* a port written empty or with leading zeros (httpx, requests and aiohttp
+  rewrite it in ``Host``; urllib sends it as written, which no allowlist names);
+* an upper-case host (httpx, requests and aiohttp lowercase it in ``Host``;
+  urllib sends it as written) and an explicit default port (the same three drop
+  it; urllib sends ``host:443``);
+* an IPv6 literal other than ``ipaddress``'s compressed form of it (aiohttp
+  sends that form: ``[0::1]`` as ``[::1]``, and on CPython 3.11.14
+  ``[::ffff:7f00:1]`` as ``[::ffff:127.0.0.1]``; httpx and urllib send it as
+  written, requests lowercased);
+* in the query, a percent-encoded octet in lower-case hex (requests and aiohttp
+  send it upper-case), one that encodes an unreserved character (both send it
+  decoded) or one of ``/ ? : @ ! $ ' ( ) * ,`` (aiohttp sends it decoded).
+  Written as the character itself, each means the same to a form parser and
+  every client sends it unchanged; ``%26 %2B %3B %3D %25 %23 %20`` and
+  non-ASCII octets in upper-case hex pass;
+* brackets outside the host and a ``%`` that starts no octet (requests and
+  aiohttp re-encode both).
+
+Also refused, as policy rather than a measurement: an upper-case scheme,
+anything after an IPv6 host but an optional ``:port`` (CPython 3.9.6's
+``urlsplit`` accepts ``[::1]443``), a ``%`` in the host, user info, a fragment
+(no client sends it) and any character outside RFC 3986.
 """
 
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
 import time
 from urllib.parse import urlsplit
@@ -67,7 +89,6 @@ from .erc8128.core import (
     build_signature_params,
     canonical_params,
     compute_content_digest,
-    normalize_authority,
     select_covered,
 )
 from .near_escrow import NearLocalSigner, _account
@@ -94,10 +115,17 @@ _METHOD_RE = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 # RFC 3986 characters only.
 _URL_RE = re.compile(r"[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
 _BAD_PERCENT_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
-# httpx rewrites `:0443`, `:` and `:08443` in Host; only the canonical text matches.
+_PERCENT_OCTET_RE = re.compile(r"%([0-9A-Fa-f]{2})")
+# Sent decoded when percent-encoded in the query: the unreserved characters by
+# requests and aiohttp, these reserved ones by aiohttp (yarl) as well.
+_QUERY_DECODED_BY_CLIENTS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/?:@!$'()*,"
+)
+# httpx, requests and aiohttp rewrite `:0443`, `:` and `:08443` in Host, urllib does not.
 _PORT_RE = re.compile(r"[1-9][0-9]{0,4}")
-# A bracketed host: lowercase hex (httpx sends it as written), then nothing or `:port`.
-_IPV6_NETLOC_RE = re.compile(r"\[[0-9a-f:.]+\](?::[^:]*)?")
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+# A bracketed host, then nothing or `:port` (CPython 3.9.6's urlsplit accepts `[::1]443`).
+_IPV6_NETLOC_RE = re.compile(r"\[([0-9A-Fa-f:.]+)\](?::[^:]*)?")
 # EM's own nonces are secrets.token_urlsafe; base64, hex and UUIDs also fit.
 # No quote, backslash or space: EM writes the value back into the base verbatim.
 _NONCE_RE = re.compile(rf"[A-Za-z0-9._~+/=-]{{1,{NEAR_HTTP_AUTH_MAX_NONCE_LENGTH}}}")
@@ -110,6 +138,18 @@ _HEADER_NAMES = {
 }
 
 
+def _compressed_ipv6_netloc(netloc: str) -> bool:
+    # aiohttp (yarl) sends the literal as this Python's ipaddress compresses it;
+    # the other clients send it as written (requests lowercased).
+    match = _IPV6_NETLOC_RE.fullmatch(netloc)
+    if match is None:
+        return False
+    try:
+        return ipaddress.IPv6Address(match.group(1)).compressed == match.group(1)
+    except ValueError:
+        return False
+
+
 def _url_parts(url: object) -> tuple:
     if not isinstance(url, str) or _URL_RE.fullmatch(url) is None:
         raise ValueError("url: expected an absolute http(s) URL of RFC 3986 ASCII characters")
@@ -118,7 +158,7 @@ def _url_parts(url: object) -> tuple:
     if "#" in url:
         raise ValueError("url: a fragment is never sent; sign the URL without it")
     if not url.startswith(("http://", "https://")):
-        # Lowercase as written: httpx checks the default port against the scheme's text.
+        # Policy: the normal form. (httpx keeps `HTTPS://h:443`'s port: the default-port guard.)
         raise ValueError("url: the scheme must be written http:// or https://")
     parts = urlsplit(url)
     netloc = parts.netloc
@@ -129,14 +169,20 @@ def _url_parts(url: object) -> tuple:
     if netloc.rfind(":") > netloc.rfind("]"):
         if _PORT_RE.fullmatch(netloc[netloc.rfind(":") + 1 :]) is None:
             raise ValueError("url: write the port in decimal without leading zeros")
-    if ("[" in netloc or "]" in netloc) and _IPV6_NETLOC_RE.fullmatch(netloc) is None:
-        raise ValueError("url: an IPv6 host is [lowercase hex] with an optional :port")
+    if ("[" in netloc or "]" in netloc) and not _compressed_ipv6_netloc(netloc):
+        raise ValueError("url: an IPv6 host is [its compressed form] with an optional :port")
     try:
-        parts.port
+        port = parts.port
     except ValueError:
         raise ValueError("url: invalid port") from None
     if not parts.hostname:
         raise ValueError("url: a host is required")
+    if netloc != netloc.lower():
+        # urllib sends Host as written, the other clients lowercase it.
+        raise ValueError("url: write the host in lowercase")
+    if port == _DEFAULT_PORTS[parts.scheme]:
+        # urllib sends `host:443` in Host, the other clients drop the default port.
+        raise ValueError("url: leave out the scheme's default port")
     path = parts.path or "/"
     if "[" in path or "]" in path or "[" in parts.query or "]" in parts.query:
         raise ValueError("url: brackets belong to an IPv6 host only")
@@ -145,7 +191,12 @@ def _url_parts(url: object) -> tuple:
         raise ValueError("url: percent-encoded octets in the path are not verifiable")
     if any(segment in (".", "..") for segment in path.split("/")):
         raise ValueError("url: dot segments are removed by HTTP clients before sending")
-    return normalize_authority(netloc, parts.scheme), path, parts.query
+    for octet in _PERCENT_OCTET_RE.findall(parts.query):
+        if octet != octet.upper():
+            raise ValueError("url: write percent-encoded octets in the query in upper-case hex")
+        if chr(int(octet, 16)) in _QUERY_DECODED_BY_CLIENTS:
+            raise ValueError("url: write this query character itself, not percent-encoded")
+    return netloc, path, parts.query
 
 
 def _check_recipient(recipient: object) -> str:

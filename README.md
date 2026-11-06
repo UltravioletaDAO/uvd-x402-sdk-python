@@ -115,18 +115,25 @@ response = httpx.post(
 - `recipient` is required: a signature names the one service it is for. EM's
   is `execution.market`, for both `api.` and `mcp.` hosts.
 - The window is `validity_sec` (1..300, EM's maximum) from `created` (now).
-- Refused before the key is read, where EM would rebuild other bytes than the
-  ones signed (measured with httpx and EM's verifier): percent-encoded octets
-  in the path (EM reads the decoded path), dot segments (httpx removes them), a
-  port written empty or with leading zeros (httpx rewrites it in `Host`), an
-  upper-case scheme (httpx then keeps a default port) and an IPv6 literal that
-  is not `[lowercase hex]` with an optional `:port` (httpx sends it as written,
-  the signed authority is lowercased). Also refused, as policy: brackets outside
-  the host and a `%` that starts no octet (`requests` re-encodes them), a `%`
-  in the host, user info, a fragment, any non-RFC 3986 character, a nonce
-  outside `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase
-  grammar. The authority is lowercased and the scheme's default port dropped,
-  as the `Host` header carries it.
+- Refused before the key is read: any URL one of the measured clients (httpx,
+  requests, urllib, aiohttp) would send as other bytes than the ones signed,
+  because EM spends the nonce before it checks the signature (measured against
+  EM's verifier). That is: percent-encoded octets in the path (EM reads the
+  decoded path); dot segments (httpx, requests and aiohttp remove them); a port
+  written empty or with leading zeros, an upper-case host and the scheme's
+  default port (httpx, requests and aiohttp rewrite them in `Host`, urllib
+  sends them as written); an IPv6 literal other than its `ipaddress` compressed
+  form (aiohttp compresses it); in the query, a percent-encoded octet in
+  lower-case hex (requests and aiohttp upper-case it) or one that encodes an
+  unreserved character or one of `/ ? : @ ! $ ' ( ) * ,` (sent decoded: write
+  the character itself, it means the same to a form parser); brackets outside
+  the host and a `%` that starts no octet (requests and aiohttp re-encode
+  them). `%26 %2B %3B %3D %25 %23 %20` and non-ASCII octets in upper-case hex
+  are signed. Also refused, as policy: an upper-case scheme, a `%` in the host,
+  user info, a fragment, any non-RFC 3986 character, a nonce outside
+  `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase grammar.
+  The authority signed is the URL's `host[:port]` as written, which is what
+  every measured client sends in `Host` for a URL that passes.
 - EM is NEAR mainnet only. The signed bytes carry no network, so an
   `OwsNearSigner` configured for `near:testnet` signs them, but EM will not
   find a testnet key on a mainnet account (and the nonce is spent).
@@ -135,7 +142,8 @@ The header values are pinned byte for byte to EM's public vector
 (`tests/fixtures/near-http-auth.json`, a copy of EM's
 `shared/test-vectors/near-http-auth.json`) with the in-memory signer and with
 OWS, and verified by a transcription of EM's verifier
-(`tests/near_http_auth_em.py`).
+(`tests/near_http_auth_em.py`), as httpx, requests, urllib and aiohttp send
+each request (`tests/http_clients_wire.py`).
 
 ## Features
 

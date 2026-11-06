@@ -7,7 +7,9 @@ is ``bytes(range(32))``: public test material, never a funded key.
 
 "Verifies as EM does" is checked against ``tests/near_http_auth_em.py``, a
 transcription of EM's verifier that shares no code with the SDK, fed the
-request as an HTTP client sends it and EM's Starlette reads it.
+request as an HTTP client sends it and EM's Starlette reads it. The clients are
+httpx (``em.wire_request``) and, in ``tests/http_clients_wire.py``, requests,
+urllib and aiohttp, read without a socket.
 """
 
 from __future__ import annotations
@@ -15,19 +17,23 @@ from __future__ import annotations
 import base64
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import socket
 import sys
 from pathlib import Path
 from types import ModuleType
+from urllib.parse import urlsplit
 
 import pytest
 
 pytest.importorskip("cryptography")
 
+from tests import http_clients_wire as wire  # noqa: E402
 from tests import near_http_auth_em as em  # noqa: E402
 from tests.test_near_ows import backend_signer  # noqa: E402,F401
 from uvd_x402_sdk import near_http_auth as auth  # noqa: E402
+from uvd_x402_sdk.erc8128.core import normalize_authority  # noqa: E402
 from uvd_x402_sdk.near_escrow import NearEd25519Signer  # noqa: E402
 
 FIXTURE = Path(__file__).parent / "fixtures/near-http-auth.json"
@@ -143,9 +149,15 @@ SHAPES = {
     "bytes-body": ("POST", "https://mcp.execution.market/mcp/", '{"t":"ñandú ✓"}'.encode(), {}),
     "str-body-unicode": ("POST", "https://mcp.execution.market/mcp/", '{"t":"ñandú ✓"}', {}),
     "named-account": ("POST", V["url"], "{}", {"account_id": "alice.near"}),
-    "host-case-and-default-port": (
+    "query-encoded-octets": (
         "GET",
-        "https://API.Execution.Market:443/api/v1/tasks",
+        "https://api.execution.market/api/v1/tasks?q=%E2%9C%93&r=%26%3D%2B%20%25%23%5B%5D%3B",
+        None,
+        {},
+    ),
+    "query-reserved-written-literally": (
+        "GET",
+        "https://api.execution.market/api/v1/tasks?next=/a/b?c=d:e@f!$'()*,+;",
         None,
         {},
     ),
@@ -172,19 +184,73 @@ def test_ems_verifier_accepts_what_the_sdk_signs(shape):
     assert result == em.Result(True, address=f"near:{account}")
 
 
-@pytest.mark.parametrize(
-    "url,authority",
-    [
-        ("https://api.execution.market:8443/x", "api.execution.market:8443"),
-        ("https://api.execution.market:80/x", "api.execution.market:80"),
-        ("http://api.execution.market:443/x", "api.execution.market:443"),
-        ("http://[::1]:8000/x", "[::1]:8000"),
-        ("https://[::ffff:7f00:1]/x", "[::ffff:7f00:1]"),
-    ],
-)
+AUTHORITIES = [
+    ("https://api.execution.market:8443/x", "api.execution.market:8443"),
+    ("https://api.execution.market:80/x", "api.execution.market:80"),
+    ("http://api.execution.market:443/x", "api.execution.market:443"),
+    ("http://[::1]:8000/x", "[::1]:8000"),
+    ("https://[2001:db8::1]/x", "[2001:db8::1]"),
+]
+
+
+@pytest.mark.parametrize("url,authority", AUTHORITIES)
 def test_the_authority_is_what_the_host_header_carries(url, authority):
     headers = sign(url=url, body=None)
     assert em_verifies(headers, url=url, body=None, allowed=frozenset({authority})).ok
+
+
+# -- every measured HTTP client sends what was signed ------------------------------
+@pytest.mark.parametrize("client", wire.CLIENTS)
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_every_client_sends_what_was_signed(shape, client):
+    method, url, body, extra = SHAPES[shape]
+    headers = sign(method=method, url=url, body=body, nonce=f"shape-{shape}", **extra)
+    request = wire.server_request(client, method, url, headers, body)
+    account = extra.get("account_id", V["account_id"])
+    assert em.verify(request, now=NOW) == em.Result(True, address=f"near:{account}")
+
+
+@pytest.mark.parametrize("client", wire.CLIENTS)
+@pytest.mark.parametrize("url,authority", AUTHORITIES)
+def test_every_client_sends_the_signed_authority(url, authority, client):
+    headers = sign(method="GET", url=url, body=None)
+    request = wire.server_request(client, "GET", url, headers)
+    assert em.verify(request, now=NOW, allowed=frozenset({authority})).ok
+
+
+@pytest.mark.parametrize("url", [SHAPES[s][1] for s in SHAPES] + [a[0] for a in AUTHORITIES])
+def test_the_signed_authority_is_the_netloc_as_written_and_already_normal(url):
+    # What EM's own signer signs (the netloc verbatim) and RFC 9421's normalised
+    # authority (lowercase, no default port) agree on every URL this signer accepts.
+    parts = urlsplit(url)
+    assert auth._url_parts(url)[0] == parts.netloc
+    assert normalize_authority(parts.netloc, parts.scheme) == parts.netloc
+
+
+def test_an_ipv4_mapped_literal_is_signed_as_this_python_compresses_it():
+    # CPython 3.11.14 writes ::ffff:7f00:1 as ::ffff:127.0.0.1 (older ones did not);
+    # yarl writes what ipaddress writes, so the accepted spelling follows the runtime.
+    form = ipaddress.IPv6Address("::ffff:7f00:1").compressed
+    other = "::ffff:127.0.0.1" if form == "::ffff:7f00:1" else "::ffff:7f00:1"
+    url = f"https://[{form}]/x"
+    headers = sign(method="GET", url=url, body=None)
+    for client in wire.CLIENTS:
+        request = wire.server_request(client, "GET", url, headers)
+        assert em.verify(request, now=NOW, allowed=frozenset({f"[{form}]"})).ok, client
+    assert refused_before_key(url=f"https://[{other}]/x")
+
+
+def test_the_aiohttp_model_is_what_aiohttp_writes():
+    # tests/http_clients_wire.py reads aiohttp's request off yarl: the session builds
+    # yarl.URL(url) and ClientRequest writes these two. A new aiohttp is re-measured.
+    import inspect
+
+    from aiohttp.client import ClientSession
+    from aiohttp.client_reqrep import ClientRequest
+
+    assert "URL(str_or_url)" in inspect.getsource(ClientSession._build_url)
+    assert "path = self.url.raw_path_qs" in inspect.getsource(ClientRequest.send)
+    assert "self.url.host_port_subcomponent" in inspect.getsource(ClientRequest.update_headers)
 
 
 def test_a_non_default_port_stays_in_the_authority():
@@ -217,6 +283,21 @@ def test_default_created_is_now(monkeypatch):
     monkeypatch.setattr(auth.time, "time", lambda: 1_800_000_000.7)
     headers = sign(created=None)
     assert ";created=1800000000;expires=1800000300;" in headers["Signature-Input"]
+
+
+def sign_with_the_default_validity(module=auth):
+    args = vector_args(created=NOW)
+    del args["validity_sec"]
+    return module.sign_near_http_request(
+        LOCAL, args.pop("account_id"), args.pop("method"), args.pop("url"), **args
+    )
+
+
+def test_the_default_validity_is_300_seconds():
+    # EM's maximum, as README and CHANGELOG say; a shorter default is not a refusal anywhere.
+    headers = sign_with_the_default_validity()
+    assert f";created={NOW};expires={NOW + 300};" in headers["Signature-Input"]
+    assert em_verifies(headers).ok
 
 
 @pytest.mark.parametrize(
@@ -306,6 +387,7 @@ BAD_INPUTS = {
     "url-bad-port": {"url": "https://api.execution.market:99999/x"},
     "url-text-port": {"url": "https://api.execution.market:abc/x"},
     "url-no-host": {"url": "https://:443/x"},
+    "url-no-host-port": {"url": "https://:8443/x"},
     "url-bracket-path": {"url": "https://api.execution.market/a[b]"},
     "url-bracket-query": {"url": "https://api.execution.market/a?x=[1]"},
     "url-percent-path": {"url": "https://api.execution.market/a%20b"},
@@ -315,14 +397,26 @@ BAD_INPUTS = {
     "url-port-padded": {"url": "https://api.execution.market:08443/x"},
     "url-port-zero": {"url": "https://api.execution.market:0/x"},
     "url-ipv6-uppercase": {"url": "https://[::FFFF:7F00:1]/x"},
+    "url-ipvfuture": {"url": "https://[v1.abc]/x"},
+    "url-ipv6-not-compressed": {"url": "http://[0::1]:8000/x"},
+    "url-ipv6-leading-zeros": {"url": "https://[2001:0db8::1]/x"},
+    "url-ipv4-in-brackets": {"url": "https://[127.0.0.1]/x"},
+    "url-host-uppercase": {"url": "https://API.execution.market/x"},
+    "url-default-port-https": {"url": "https://api.execution.market:443/x"},
+    "url-default-port-http": {"url": "http://api.execution.market:80/x"},
     # CPython 3.9.6's urlsplit accepts it; newer ones raise. Refused on both.
     "url-ipv6-port-without-colon": {"url": "https://[::1]443/x"},
     "url-scheme-uppercase": {"url": "HTTPS://api.execution.market/x"},
     "url-scheme-uppercase-port": {"url": "HTTPS://api.execution.market:443/x"},
-    "url-percent-host": {"url": "https://api%2Eexecution.market/x"},
+    "url-percent-host": {"url": "https://api%2eexecution.market/x"},
     "url-dot-dot": {"url": "https://api.execution.market/a/../b"},
     "url-dot": {"url": "https://api.execution.market/a/./b"},
     "url-trailing-dot-dot": {"url": "https://api.execution.market/a/.."},
+    "url-query-lowercase-hex": {"url": "https://api.execution.market/x?q=%e2%9c%93"},
+    "url-query-unreserved": {"url": "https://api.execution.market/x?q=%7E"},
+    "url-query-unreserved-lowercase": {"url": "https://api.execution.market/x?q=%7e"},
+    "url-query-encoded-slash": {"url": "https://api.execution.market/x?next=%2Fa"},
+    "url-query-encoded-comma": {"url": "https://api.execution.market/x?q=a%2Cb"},
     "nonce-none": {"nonce": None},
     "nonce-empty": {"nonce": ""},
     "nonce-int": {"nonce": 1},
@@ -496,11 +590,11 @@ GUARD_MUTANTS = [
         "M06-scheme",
         'if not url.startswith(("http://", "https://")):',
         "if False:",
-        "url-scheme-uppercase-port",
+        "url-scheme-uppercase",
     ),
     ("M07-userinfo", 'if "@" in netloc:', "if False:", "url-user-only"),
-    ("M08-port", "        parts.port\n", "        pass\n", "url-bad-port"),
-    ("M09-host", "if not parts.hostname:", "if False:", "url-no-host"),
+    ("M08-port", "        port = parts.port\n", "        port = None\n", "url-bad-port"),
+    ("M09-host", "if not parts.hostname:", "if False:", "url-no-host-port"),
     (
         "M10-brackets",
         'if "[" in path or "]" in path or "[" in parts.query or "]" in parts.query:',
@@ -563,13 +657,13 @@ GUARD_MUTANTS = [
         "M34-port-text",
         'if _PORT_RE.fullmatch(netloc[netloc.rfind(":") + 1 :]) is None:',
         "if False:",
-        "url-port-leading-zero",
+        "url-port-padded",
     ),
     (
-        "M35-ipv6-case",
-        'if ("[" in netloc or "]" in netloc) and _IPV6_NETLOC_RE.fullmatch(netloc) is None:',
+        "M35-ipv6-form",
+        'if ("[" in netloc or "]" in netloc) and not _compressed_ipv6_netloc(netloc):',
         "if False:",
-        "url-ipv6-uppercase",
+        "url-ipvfuture",
     ),
     ("M36-percent-host", 'if "%" in netloc:', "if False:", "url-percent-host"),
     (
@@ -577,6 +671,26 @@ GUARD_MUTANTS = [
         "if not isinstance(header_case, str) or header_case not in _HEADER_NAMES:",
         "if header_case not in _HEADER_NAMES:",
         "header-case-list",
+    ),
+    ("M38-host-case", "if netloc != netloc.lower():", "if False:", "url-host-uppercase"),
+    (
+        "M39-default-port",
+        "if port == _DEFAULT_PORTS[parts.scheme]:",
+        "if False:",
+        "url-default-port-https",
+    ),
+    ("M40-query-hex-case", "if octet != octet.upper():", "if False:", "url-query-lowercase-hex"),
+    (
+        "M41-query-decoded",
+        "if chr(int(octet, 16)) in _QUERY_DECODED_BY_CLIENTS:",
+        "if False:",
+        "url-query-unreserved",
+    ),
+    (
+        "M43-ipv6-compressed",
+        "return ipaddress.IPv6Address(match.group(1)).compressed == match.group(1)",
+        "return ipaddress.IPv6Address(match.group(1)).compressed is not None",
+        "url-ipv6-not-compressed",
     ),
 ]
 
@@ -598,44 +712,52 @@ def em_accepts(module, signer=LOCAL, allowed=em.PRODUCTION_AUTHORITIES, **change
     return em_verifies(headers, allowed=allowed, **verify).ok
 
 
-# The guards whose case EM itself rejects (measured with EM's real verifier too).
-# The other URL guards are policy: EM accepts those bytes (see the module docstring).
-EM_MEASURED = {
-    "M11-percent-path": ("https://api.execution.market/a%20b", "api.execution.market"),
-    "M12-dot-segments": ("https://api.execution.market/a/../b", "api.execution.market"),
-    "M34-port-text": ("https://api.execution.market:0443/x", "api.execution.market"),
-    "M35-ipv6-case": ("https://[::FFFF:7F00:1]/x", "[::ffff:7f00:1]"),
-}
+API = "https://api.execution.market"
+# The guards whose case EM rejects as a measured HTTP client sends it: the guard
+# removed, the URL signs and what each named client sends does not verify; written
+# canonically, it verifies through every client. Measured with EM's real verifier
+# and the real clients too (tests/http_clients_wire.py). The other URL guards are
+# policy (see the module docstring).
+EM_MEASURED = [
+    ("M04-bad-percent", API + "/x?a=%zz", API + "/x?a=%25zz", ("requests", "aiohttp")),
+    ("M10-brackets", API + "/x?x=[1]", API + "/x?x=%5B1%5D", ("requests", "aiohttp")),
+    ("M11-percent-path", API + "/a%20b", API + "/ab", wire.CLIENTS),
+    ("M12-dot-segments", API + "/a/../b", API + "/b", ("httpx", "requests", "aiohttp")),
+    ("M34-port-text", API + ":08443/x", API + ":8443/x", wire.CLIENTS),
+    (
+        "M38-host-case",
+        "https://API.execution.market/x",
+        API + "/x",
+        ("httpx", "requests", "aiohttp"),
+    ),
+    ("M39-default-port", API + ":443/x", API + "/x", wire.CLIENTS),
+    ("M40-query-hex-case", API + "/x?q=%e2%9c%93", API + "/x?q=%E2%9C%93", ("requests", "aiohttp")),
+    ("M41-query-decoded", API + "/x?q=%7E", API + "/x?q=~", ("requests", "aiohttp")),
+    ("M41-query-decoded", API + "/x?next=%2Fa", API + "/x?next=/a", ("aiohttp",)),
+    ("M43-ipv6-compressed", "http://[0::1]:8000/x", "http://[::1]:8000/x", ("aiohttp",)),
+]
 
 
-def test_without_the_scheme_guard_an_upper_case_scheme_loses_its_port():
-    # httpx keeps `:443` for `HTTPS` (it compares the port with the scheme as written).
-    url = "HTTPS://api.execution.market:443/x"
-    allowed = frozenset({"api.execution.market:443"})
-    assert httpx_host(url) == "api.execution.market:443"
-    old, new = next(m[1:3] for m in GUARD_MUTANTS if m[0] == "M06-scheme")
-    headers = sign(module=mutant(old, new), url=url, body=None, created=NOW)
-    assert not em_verifies(headers, url=url, body=None, allowed=allowed).ok
-
-
-def httpx_host(url):
-    import httpx
-
-    return httpx.Request("GET", url).headers["host"]
-
-
-@pytest.mark.parametrize("mid", list(EM_MEASURED))
-def test_without_the_guard_em_rejects_what_was_signed(mid):
-    url, authority = EM_MEASURED[mid]
+@pytest.mark.parametrize(
+    "mid,url,canonical,clients",
+    EM_MEASURED,
+    ids=[
+        f"{m[0]}-{urlsplit(m[1]).netloc}{urlsplit(m[1]).path}?{urlsplit(m[1]).query}"
+        for m in EM_MEASURED
+    ],
+)
+def test_without_the_guard_em_rejects_what_a_client_sends(mid, url, canonical, clients):
     old, new = next(m[1:3] for m in GUARD_MUTANTS if m[0] == mid)
-    allowed = frozenset({authority})
-    assert not em_accepts(auth, url=url, body=None, allowed=allowed)  # refused before signing
-    headers = sign(module=mutant(old, new), url=url, body=None, created=NOW)
-    assert not em_verifies(headers, url=url, body=None, allowed=allowed).ok
-    # and the same request written canonically verifies
-    canonical = url.replace("a%20b", "ab").replace("a/../b", "b").replace(":0443", "")
-    canonical = canonical.replace("FFFF:7F00:1", "ffff:7f00:1")
-    assert em_accepts(auth, url=canonical, body=None, allowed=allowed)
+    allowed = frozenset({urlsplit(canonical).netloc})
+    assert refused_before_key(url=url)
+    headers = sign(module=mutant(old, new), method="GET", url=url, body=None, created=NOW)
+    for client in clients:
+        request = wire.server_request(client, "GET", url, headers)
+        assert not em.verify(request, now=NOW, allowed=allowed).ok, client
+    headers = sign(method="GET", url=canonical, body=None, created=NOW)
+    for client in wire.CLIENTS:
+        request = wire.server_request(client, "GET", canonical, headers)
+        assert em.verify(request, now=NOW, allowed=allowed).ok, client
 
 
 def test_m22_the_alg_is_ed25519_nep413():
@@ -683,14 +805,15 @@ def test_m27_the_query_keeps_its_question_mark():
     assert not em_accepts(module)
 
 
-def test_m28_the_authority_is_normalised():
-    url = "https://API.Execution.Market:443/api/v1/tasks"
+def test_m28_the_authority_keeps_its_port():
+    url = API + ":8443/api/v1/tasks"
+    allowed = frozenset({"api.execution.market:8443"})
     module = mutant(
-        "return normalize_authority(netloc, parts.scheme), path, parts.query",
         "return netloc, path, parts.query",
+        "return parts.hostname, path, parts.query",
     )
-    assert em_accepts(auth, url=url, body=None)
-    assert not em_accepts(module, url=url, body=None)
+    assert em_accepts(auth, url=url, body=None, allowed=allowed)
+    assert not em_accepts(module, url=url, body=None, allowed=allowed)
 
 
 def test_m29_an_empty_path_is_slash():
@@ -728,3 +851,13 @@ def test_m33_the_content_digest_header_is_sent():
     module = mutant("        headers[digest_name] = digest\n", "        pass\n")
     assert em_accepts(auth)
     assert not em_accepts(module)
+
+
+def test_m42_the_default_validity_is_ems_maximum():
+    module = mutant(
+        "    validity_sec: int = NEAR_HTTP_AUTH_MAX_VALIDITY_SEC,\n",
+        "    validity_sec: int = 299,\n",
+    )
+    expires = f";expires={NOW + 300};"
+    assert expires in sign_with_the_default_validity()["Signature-Input"]
+    assert expires not in sign_with_the_default_validity(module)["Signature-Input"]
