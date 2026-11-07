@@ -122,7 +122,8 @@ response = httpx.post(
   decoded path); dot segments (httpx, requests and aiohttp remove them); a port
   written empty or with leading zeros, an upper-case host and the scheme's
   default port (httpx, requests and aiohttp rewrite them in `Host`, urllib
-  sends them as written); an IPv6 literal other than its `ipaddress` compressed
+  sends them as written); a host that ends in `.` (requests and aiohttp send
+  it without the dot); an IPv6 literal other than its `ipaddress` compressed
   form (aiohttp compresses it); in the query, a percent-encoded octet in
   lower-case hex (requests and aiohttp upper-case it) or one that encodes an
   unreserved character or one of `/ ? : @ ! $ ' ( ) * ,` (sent decoded: write
@@ -133,7 +134,9 @@ response = httpx.post(
   user info, a fragment, any non-RFC 3986 character, a nonce outside
   `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase grammar.
   The authority signed is the URL's `host[:port]` as written, which is what
-  every measured client sends in `Host` for a URL that passes.
+  every measured client sends in `Host` for a URL that passes, unless the
+  client refuses the URL and sends nothing (requests, for a host that starts
+  with `.` or `*`).
 - EM is NEAR mainnet only. The signed bytes carry no network, so an
   `OwsNearSigner` configured for `near:testnet` signs them, but EM will not
   find a testnet key on a mainnet account (and the nonce is spent).
@@ -143,7 +146,10 @@ The header values are pinned byte for byte to EM's public vector
 `shared/test-vectors/near-http-auth.json`) with the in-memory signer and with
 OWS, and verified by a transcription of EM's verifier
 (`tests/near_http_auth_em.py`), as httpx, requests, urllib and aiohttp send
-each request (`tests/http_clients_wire.py`).
+each request (`tests/http_clients_wire.py`). Every RFC 3986 character of the
+path, the query and the host, and every spelling of every percent-encoded octet
+of the query, is signed exactly when none of the four clients rewrites it
+(`test_signed_iff_every_client_sends_it_as_written`).
 
 ## Features
 

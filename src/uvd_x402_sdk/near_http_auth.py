@@ -45,8 +45,8 @@ for it: httpx 0.28, requests 2.34 (urllib3 2.8), urllib (CPython 3.11) and
 aiohttp 3.14 (yarl 1.25), against EM's verifier. EM consumes the nonce before
 it checks the signature, so a URL one of them rewrites costs a nonce and a 401.
 The authority signed is the URL's ``host[:port]`` as written, which is what
-every client sends in ``Host`` once the URL passes. Refused, with the client
-that rewrites it:
+every client that sends the URL puts in ``Host`` once it passes. Refused, with
+the client that rewrites it:
 
 * percent-encoded octets in the path (EM reads Starlette's DECODED path,
   whatever the client sent);
@@ -56,6 +56,8 @@ that rewrites it:
 * an upper-case host (httpx, requests and aiohttp lowercase it in ``Host``;
   urllib sends it as written) and an explicit default port (the same three drop
   it; urllib sends ``host:443``);
+* a host that ends in ``.`` (requests and aiohttp send ``Host`` without it,
+  httpx and urllib with it);
 * an IPv6 literal other than ``ipaddress``'s compressed form of it (aiohttp
   sends that form: ``[0::1]`` as ``[::1]``, and on CPython 3.11.14
   ``[::ffff:7f00:1]`` as ``[::ffff:127.0.0.1]``; httpx and urllib send it as
@@ -68,6 +70,9 @@ that rewrites it:
   non-ASCII octets in upper-case hex pass;
 * brackets outside the host and a ``%`` that starts no octet (requests and
   aiohttp re-encode both).
+
+A client may instead refuse a URL outright, which sends nothing and spends no
+nonce: requests refuses a host that starts with ``.`` or ``*``.
 
 Also refused, as policy rather than a measurement: an upper-case scheme,
 anything after an IPv6 host but an optional ``:port`` (CPython 3.9.6's
@@ -177,6 +182,9 @@ def _url_parts(url: object) -> tuple:
         raise ValueError("url: invalid port") from None
     if not parts.hostname:
         raise ValueError("url: a host is required")
+    if parts.hostname.endswith("."):
+        # requests and aiohttp send Host without it, httpx and urllib with it.
+        raise ValueError("url: write the host without a trailing dot")
     if netloc != netloc.lower():
         # urllib sends Host as written, the other clients lowercase it.
         raise ValueError("url: write the host in lowercase")

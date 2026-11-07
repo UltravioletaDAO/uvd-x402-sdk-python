@@ -9,17 +9,21 @@ is ``bytes(range(32))``: public test material, never a funded key.
 transcription of EM's verifier that shares no code with the SDK, fed the
 request as an HTTP client sends it and EM's Starlette reads it. The clients are
 httpx (``em.wire_request``) and, in ``tests/http_clients_wire.py``, requests,
-urllib and aiohttp, read without a socket.
+urllib and aiohttp, read without a socket. ``WALKS`` vary every RFC 3986
+character of the path, query and host and every percent-encoded octet of the
+query: the SDK signs exactly what no client rewrites.
 """
 
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import importlib.util
 import ipaddress
 import json
 import socket
+import string
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -44,6 +48,7 @@ LOCAL = NearEd25519Signer(SEED)
 OTHER = NearEd25519Signer(bytes(range(1, 33)))
 NOW = V["created"] + 10
 SUBJECT = "near:" + V["account_id"]
+API = "https://api.execution.market"
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +258,94 @@ def test_the_aiohttp_model_is_what_aiohttp_writes():
     assert "self.url.host_port_subcomponent" in inspect.getsource(ClientRequest.update_headers)
 
 
+# -- every character and octet: signed <=> every client sends it as written ----------
+# RFC 3986's characters: the class of near_http_auth._URL_RE (pinned below).
+RFC3986 = string.ascii_letters + string.digits + "-._~:/?#[]@!$&'()*+,;=%"
+
+
+def hex_spellings(octet: int) -> list[str]:
+    """``%XX`` with each hex digit in each case: ``%7E`` ``%7e``, ``%9C`` ``%9c``, ``%Ea``..."""
+    digits = [sorted({d.upper(), d.lower()}) for d in f"{octet:02X}"]
+    return ["%" + a + b for a in digits[0] for b in digits[1]]
+
+
+# Each walk varies one component of a URL that is signed as it is. The query walks put
+# the character in a SECOND parameter, after an octet that is signed, so a guard that
+# reads only the first octet is seen. `#` starts the fragment (policy, M05); in the host,
+# `: / ? # [ ] @` delimit it and a `%` is policy (M36).
+WALKS = {
+    "query-octet": [API + "/x?a=%26&q=" + s for octet in range(256) for s in hex_spellings(octet)],
+    "query-character": [API + "/x?a=%26&q=a" + c + "z" for c in RFC3986 if c != "#"],
+    "path-character": [API + "/a" + c + "z" for c in RFC3986 if c != "#"],
+    "host-character": [
+        f"https://{host}/x"
+        for c in RFC3986
+        if c not in ":/?#[]@%"
+        for host in (c + "ab.cd", "ab" + c + "cd.ef", "ab.cd" + c)
+    ],
+}
+# A client that refuses a URL sends nothing and spends no nonce. requests refuses a host
+# that starts with `.` or `*` ("URL has an invalid label"); the other three send both.
+CLIENT_REFUSALS = {
+    "host-character": {("https://.ab.cd/x", "requests"), ("https://*ab.cd/x", "requests")},
+}
+
+
+@functools.cache
+def client_sends(client: str, url: str):
+    """``wire.sends``, or ``None`` when the client refuses the URL."""
+    try:
+        return wire.sends(client, url)
+    except Exception:  # noqa: BLE001 - which refusals are expected is CLIENT_REFUSALS
+        return None
+
+
+def walk_mismatches(walk: str, module=auth) -> list:
+    """The URLs of ``walk`` signed while a client rewrites them, or refused while none does.
+
+    A URL signed must also verify under EM's verifier as each client that sends it does.
+    """
+    mismatches: list = []
+    refusals = set()
+    for url in WALKS[walk]:
+        parts = urlsplit(url)
+        written = ((parts.path or "/") + ("?" + parts.query if "?" in url else ""), parts.netloc)
+        sent = {client: client_sends(client, url) for client in wire.CLIENTS}
+        rewritten = {c: s for c, s in sent.items() if s is not None and s != written}
+        try:
+            headers = sign(module=module, method="GET", url=url, body=None, created=NOW)
+        except ValueError:
+            headers = None
+        if (headers is None) != bool(rewritten):
+            what = "signed, a client rewrites it" if rewritten else "refused, sent as written"
+            mismatches.append((url, what, rewritten))
+            continue
+        for client, sent_by_client in sent.items() if headers is not None else ():
+            if sent_by_client is None:
+                refusals.add((url, client))
+                continue
+            request = wire.server_request(client, "GET", url, headers, sent=sent_by_client)
+            if not em.verify(request, now=NOW, allowed=frozenset({parts.netloc})).ok:
+                mismatches.append((url, "signed, EM rejects what the client sends", client))
+    if refusals != CLIENT_REFUSALS.get(walk, set()):
+        mismatches.append(("client refusals of signed URLs", sorted(refusals)))
+    return mismatches
+
+
+@pytest.mark.parametrize("walk", list(WALKS))
+def test_signed_iff_every_client_sends_it_as_written(walk):
+    # When a client's release changes what it sends for one character or octet, this is red.
+    assert walk_mismatches(walk) == []
+
+
+def test_the_walks_cover_every_rfc3986_character_and_every_query_octet():
+    assert {chr(i) for i in range(128) if auth._URL_RE.fullmatch(chr(i))} == set(RFC3986)
+    octets = WALKS["query-octet"]
+    # 100 octets of two decimal digits, 120 with one hex letter (2 spellings), 36 with two (4).
+    assert len(octets) == len(set(octets)) == 100 + 120 * 2 + 36 * 4
+    assert {url.rsplit("=", 1)[1].upper() for url in octets} == {f"%{o:02X}" for o in range(256)}
+
+
 def test_a_non_default_port_stays_in_the_authority():
     url = "http://localhost:8000/api/v1/tasks"
     headers = sign(url=url, body=None)
@@ -402,6 +495,9 @@ BAD_INPUTS = {
     "url-ipv6-leading-zeros": {"url": "https://[2001:0db8::1]/x"},
     "url-ipv4-in-brackets": {"url": "https://[127.0.0.1]/x"},
     "url-host-uppercase": {"url": "https://API.execution.market/x"},
+    "url-host-mixed-case": {"url": "https://api.Execution.market/x"},
+    "url-host-trailing-dot": {"url": "https://api.execution.market./x"},
+    "url-host-trailing-dot-port": {"url": "https://api.execution.market.:8443/x"},
     "url-default-port-https": {"url": "https://api.execution.market:443/x"},
     "url-default-port-http": {"url": "http://api.execution.market:80/x"},
     # CPython 3.9.6's urlsplit accepts it; newer ones raise. Refused on both.
@@ -692,6 +788,12 @@ GUARD_MUTANTS = [
         "return ipaddress.IPv6Address(match.group(1)).compressed is not None",
         "url-ipv6-not-compressed",
     ),
+    (
+        "M44-host-trailing-dot",
+        'if parts.hostname.endswith("."):',
+        "if False:",
+        "url-host-trailing-dot",
+    ),
 ]
 
 
@@ -703,6 +805,42 @@ def test_guard_mutant_goes_through(old, new, case):
     assert not refused_before_key(mutant(old, new), **BAD_INPUTS[case])
 
 
+# Narrower guards, not removed ones: each still refuses most of what it should and lets
+# through a URL a client rewrites, which only a walk sees (the refutador's Q1-Q5 and Q8).
+WALK_MUTANTS = [
+    ("M45-decoded-set-quote", "-._~/?:@!$'()*,\"", '-._~/?:@!$()*,"', "query-octet"),
+    ("M46-decoded-set-A", '"ABCDEFGHIJKLMNOPQRS', '"BCDEFGHIJKLMNOPQRS', "query-octet"),
+    ("M47-decoded-set-question", "-._~/?:@!$'()*,\"", "-._~/:@!$'()*,\"", "query-octet"),
+    (
+        "M48-hex-case-first-digit",
+        "if octet != octet.upper():",
+        "if octet[0] != octet[0].upper():",
+        "query-octet",
+    ),
+    (
+        "M49-first-octet-only",
+        "for octet in _PERCENT_OCTET_RE.findall(parts.query):",
+        "for octet in _PERCENT_OCTET_RE.findall(parts.query)[:1]:",
+        "query-octet",
+    ),
+    (
+        "M50-host-case-first-character",
+        "if netloc != netloc.lower():",
+        "if netloc[:1] != netloc[:1].lower():",
+        "host-character",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "old,new,walk", [m[1:] for m in WALK_MUTANTS], ids=[m[0] for m in WALK_MUTANTS]
+)
+def test_walk_mutant_signs_what_a_client_rewrites(old, new, walk):
+    assert walk_mismatches(walk) == []
+    found = walk_mismatches(walk, mutant(old, new))
+    assert found and {m[1] for m in found} == {"signed, a client rewrites it"}
+
+
 def em_accepts(module, signer=LOCAL, allowed=em.PRODUCTION_AUTHORITIES, **changes):
     try:
         headers = sign(signer, module, created=NOW, **changes)
@@ -712,7 +850,6 @@ def em_accepts(module, signer=LOCAL, allowed=em.PRODUCTION_AUTHORITIES, **change
     return em_verifies(headers, allowed=allowed, **verify).ok
 
 
-API = "https://api.execution.market"
 # The guards whose case EM rejects as a measured HTTP client sends it: the guard
 # removed, the URL signs and what each named client sends does not verify; written
 # canonically, it verifies through every client. Measured with EM's real verifier
@@ -735,6 +872,7 @@ EM_MEASURED = [
     ("M41-query-decoded", API + "/x?q=%7E", API + "/x?q=~", ("requests", "aiohttp")),
     ("M41-query-decoded", API + "/x?next=%2Fa", API + "/x?next=/a", ("aiohttp",)),
     ("M43-ipv6-compressed", "http://[0::1]:8000/x", "http://[::1]:8000/x", ("aiohttp",)),
+    ("M44-host-trailing-dot", API + "./x", API + "/x", ("requests", "aiohttp")),
 ]
 
 

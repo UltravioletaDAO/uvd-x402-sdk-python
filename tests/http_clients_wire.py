@@ -18,7 +18,12 @@ Cross-checked on 2026-11-06 against the real clients (httpx 0.28.1, requests
 2.34.2 / urllib3 2.8.0, urllib of CPython 3.11.14, aiohttp 3.14.5 / yarl 1.25.1)
 sending to a uvicorn on 127.0.0.1 and ::1: for the shapes, authorities and
 ``EM_MEASURED`` URLs of ``tests/test_near_http_auth.py`` (as http) and a few
-probes, the target and ``Host`` uvicorn received equal these, 138 of 138.
+probes, the target and ``Host`` uvicorn received equal these, 138 of 138; for
+the 883 URLs of its ``WALKS`` and four trailing-dot hosts (as http), 3544 of
+3548. The other four the real client refused, sending nothing: requests
+``.ab.cd`` and ``*ab.cd`` (refused here too), requests
+``api.execution.market..`` at name resolution and aiohttp ``127.0.0.1.``
+(sent here without the dots; the signer refuses both).
 """
 
 from __future__ import annotations
@@ -129,9 +134,12 @@ def sends(client: str, url: str) -> tuple[str, str]:
     return _SENDERS[client](url)
 
 
-def server_request(client: str, method: str, url: str, headers: dict, body=None):
-    """The request EM reads after ``client`` sent ``url`` with ``headers`` and ``body``."""
-    target, host = sends(client, url)
+def server_request(client: str, method: str, url: str, headers: dict, body=None, *, sent=None):
+    """The request EM reads after ``client`` sent ``url`` with ``headers`` and ``body``.
+
+    ``sent``: what ``sends(client, url)`` returned, when the caller already read it.
+    """
+    target, host = sends(client, url) if sent is None else sent
     raw_path, _, query = target.partition("?")
     content = body.encode("utf-8") if isinstance(body, str) else body
     return em.ServerRequest(
