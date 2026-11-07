@@ -1,0 +1,23 @@
+{
+  "description": "PUBLIC TEST VECTOR ONLY. Seed is bytes(range(32)); never fund this key.",
+  "seed_derivation": "bytes(range(32))",
+  "account_id": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "method": "POST",
+  "url": "https://api.execution.market/api/v1/tasks?network=near",
+  "body": "{\"title\":\"NEAR auth vector\",\"bounty_usd\":0.1}",
+  "nonce": "test-nonce-near-http",
+  "created": 1793718000,
+  "expires": 1793718300,
+  "recipient": "execution.market",
+  "callback_url": null,
+  "headers": {
+    "content-digest": "sha-256=:T8wHXTtQj/nEq1ja5plIk9Q9ZsXULEU1MSV0qixMn58=:",
+    "Signature-Input": "near=(\"@method\" \"@authority\" \"@path\" \"@query\" \"content-digest\");created=1793718000;expires=1793718300;nonce=\"test-nonce-near-http\";keyid=\"near:03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8:ed25519:FAe4sisG95oZ42w7buUn5qEE4TAnfTTFPiguZUHmhiF\";alg=\"ed25519-nep413\"",
+    "Signature": "near=:fmzgWkgtk41qrhyFxoowWs8GQlVm52prxxTYvGGgH97OFX6Wskxekz06lon2RkWqMUaAvQ+EihC4KtblGwnKBw==:"
+  },
+  "signature_base": "\"@method\": POST\n\"@authority\": api.execution.market\n\"@path\": /api/v1/tasks\n\"@query\": ?network=near\n\"content-digest\": sha-256=:T8wHXTtQj/nEq1ja5plIk9Q9ZsXULEU1MSV0qixMn58=:\n\"@signature-params\": (\"@method\" \"@authority\" \"@path\" \"@query\" \"content-digest\");created=1793718000;expires=1793718300;nonce=\"test-nonce-near-http\";keyid=\"near:03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8:ed25519:FAe4sisG95oZ42w7buUn5qEE4TAnfTTFPiguZUHmhiF\";alg=\"ed25519-nep413\"",
+  "nep413_nonce_hex": "d2d0b4b8bad773b08074df702f81fd66ab93a400f4ffa663db65652b45e71d2d",
+  "nep413_hash_hex": "a4d8723c517cb3bfd57a0bf4ec7c15853aed1d8ccdc8c8c2b4a9b7ebe9122c89",
+  "signature_hex": "7e6ce05a482d938d6aae1c85c68a305acf06425566e76a6bc714d8bc61a01fdece157e96b24c5e933d3a9689f64645aa314680bd0f848a10b82ad6e51b09ca07"
+}

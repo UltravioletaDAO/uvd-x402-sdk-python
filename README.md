@@ -69,6 +69,88 @@ first send landed. Final execution failures are returned once for the caller
 to handle. Shared deterministic vectors are in `tests/fixtures/near-ows.json`;
 `python scripts/near_ows_vectors.py --check` detects drift.
 
+## NEAR HTTP authentication (NEP-413)
+
+An agent that holds only a NEAR account authenticates its HTTP requests to
+Execution Market with `sign_near_http_request`. The headers are the ERC-8128
+envelope (RFC 9421 `Signature-Input` / `Signature`, label `near`,
+`keyid="near:<account>:ed25519:<base58 key>"`, `alg="ed25519-nep413"`), and the
+signature is NEP-413 over the exact signature base, with
+`nonce = sha256(<RFC 9421 nonce>)` and the verifier's `recipient`. The server
+reads the identity as `near:<account>`. Signing is offline (no RPC, no nonce
+fetch) and needs the `near` extra (or `ows` for an `OwsNearSigner`).
+
+```python
+import secrets
+
+import httpx
+
+from uvd_x402_sdk import (
+    EXECUTION_MARKET_NEP413_RECIPIENT, NearEd25519Signer, sign_near_http_request,
+)
+
+signer = NearEd25519Signer(agent_secret_key)  # or an OwsNearSigner
+url = "https://api.execution.market/api/v1/tasks"
+body = '{"title":"Check the store hours"}'
+headers = sign_near_http_request(
+    signer, "agent.near", "POST", url,
+    nonce=secrets.token_urlsafe(32),
+    recipient=EXECUTION_MARKET_NEP413_RECIPIENT,
+    body=body,
+)
+response = httpx.post(
+    url, content=body, headers={**headers, "Content-Type": "application/json"}
+)
+```
+
+- The key must be a **FullAccess** key of the account on NEAR mainnet: EM reads
+  `view_access_key` at `finality: final` and refuses a FunctionCall key, an
+  account that does not exist (an implicit one included) and a key not on it.
+  The signer cannot check that offline.
+- One nonce per request. EM consumes `near:<account>:<nonce>` before it checks
+  the signature, so a retry, including after `503 near_rpc_unavailable`, needs
+  a new nonce and a new signature, never the same headers.
+- Send exactly the body that was signed (`str` is UTF-8); `Content-Digest`
+  covers it, the empty body included. `None` means no body.
+- `recipient` is required: a signature names the one service it is for. EM's
+  is `execution.market`, for both `api.` and `mcp.` hosts.
+- The window is `validity_sec` (1..300, EM's maximum) from `created` (now).
+- Refused before the key is read: any URL one of the measured clients (httpx,
+  requests, urllib, aiohttp) would send as other bytes than the ones signed,
+  because EM spends the nonce before it checks the signature (measured against
+  EM's verifier). That is: percent-encoded octets in the path (EM reads the
+  decoded path); dot segments (httpx, requests and aiohttp remove them); a port
+  written empty or with leading zeros, an upper-case host and the scheme's
+  default port (httpx, requests and aiohttp rewrite them in `Host`, urllib
+  sends them as written); a host that ends in `.` (requests and aiohttp send
+  it without the dot); an IPv6 literal other than its `ipaddress` compressed
+  form (aiohttp compresses it); in the query, a percent-encoded octet in
+  lower-case hex (requests and aiohttp upper-case it) or one that encodes an
+  unreserved character or one of `/ ? : @ ! $ ' ( ) * ,` (sent decoded: write
+  the character itself, it means the same to a form parser); brackets outside
+  the host and a `%` that starts no octet (requests and aiohttp re-encode
+  them). `%26 %2B %3B %3D %25 %23 %20` and non-ASCII octets in upper-case hex
+  are signed. Also refused, as policy: an upper-case scheme, a `%` in the host,
+  user info, a fragment, any non-RFC 3986 character, a nonce outside
+  `[A-Za-z0-9._~+/=-]{1,256}`, an account outside NEAR's lowercase grammar.
+  The authority signed is the URL's `host[:port]` as written, which is what
+  every measured client sends in `Host` for a URL that passes, unless the
+  client refuses the URL and sends nothing (requests, for a host that starts
+  with `.` or `*`).
+- EM is NEAR mainnet only. The signed bytes carry no network, so an
+  `OwsNearSigner` configured for `near:testnet` signs them, but EM will not
+  find a testnet key on a mainnet account (and the nonce is spent).
+
+The header values are pinned byte for byte to EM's public vector
+(`tests/fixtures/near-http-auth.json`, a copy of EM's
+`shared/test-vectors/near-http-auth.json`) with the in-memory signer and with
+OWS, and verified by a transcription of EM's verifier
+(`tests/near_http_auth_em.py`), as httpx, requests, urllib and aiohttp send
+each request (`tests/http_clients_wire.py`). Every RFC 3986 character of the
+path, the query and the host, and every spelling of every percent-encoded octet
+of the query, is signed exactly when none of the four clients rewrites it
+(`test_signed_iff_every_client_sends_it_as_written`).
+
 ## Features
 
 - **31 Networks**: EVM chains (19 including HashKey mainnet/testnet, Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
