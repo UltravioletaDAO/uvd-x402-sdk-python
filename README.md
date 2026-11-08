@@ -161,7 +161,7 @@ of the query, is signed exactly when none of the four clients rewrites it
 ## Features
 
 - **31 Networks**: EVM chains (19 including HashKey mainnet/testnet, Circle Arc mainnet/testnet, Robinhood, Scroll, SKALE), SVM chains (Solana, Fogo), NEAR, Stellar, Algorand, Sui, XRPL (native XRP), and Hedera (native USDC; HBAR for sponsor fees)
-- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG (EVM chains); XRPL settles in native XRP
+- **6 Stablecoins**: USDC, EURC, AUSD, PYUSD, USDT, USDG; XRPL settles in native XRP (networks per token: [Supported Tokens](#supported-tokens))
 - **x402 v1 & v2**: Protocol auto-detection; native Hedera supports v2/exact only
 - **Framework Integrations**: Flask, FastAPI, Django, AWS Lambda
 - **Gasless Payments**: Users sign EIP-712/EIP-3009 authorizations, facilitator pays all network fees
