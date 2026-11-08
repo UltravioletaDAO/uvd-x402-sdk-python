@@ -1,10 +1,14 @@
 # Arras registry on NEAR
 
-Version 0.107.0 provides identity and payment-backed reputation through
-`uvd_x402_sdk.near_registry`. The deployment table reserves
-`registry.arras-escrow.near` on `near:mainnet` and accepts only
-`v1.arras-escrow.near` as its payment source. At implementation time the registry
-was not deployed. Testnet has no registered deployment and is refused.
+The legacy Arras registry, `registry.arras-escrow.near` on `near:mainnet`,
+has been deployed with no access keys since 2026-11-04. The SDK exposes it
+through `uvd_x402_sdk.near_registry` and accepts only `v1.arras-escrow.near`
+as its payment source. Testnet has no registered deployment and is refused.
+
+Execution Market moved to the NEAR ERC-8004 identity and reputation registries
+on 2026-11-06 and no longer uses this registry. Use the
+[NEAR ERC-8004 guide](near-erc8004.md) for new integrations. The legacy client
+keeps its existing API; the reference below describes that client.
 
 ## Offline transactions
 
@@ -58,7 +62,7 @@ from a public key offline; check them when selecting the key.
 | give_feedback | 18640000000000000000000 | 100 TGas |
 | revoke_feedback | 1, exactly | 30 TGas |
 
-Read `get_config` after deployment for the actual register/feedback deposits and
+Read `get_config` for the actual register/feedback deposits and
 pass them with `deposit=`; values below these SDK defaults are refused.
 `give_feedback` requires at least 60 TGas. Gas is in integer gas units (1 TGas =
 10**12); all builders cap it at NEAR's 300 TGas transaction maximum. `update`
@@ -80,7 +84,7 @@ payment eligibility are on-chain checks; offline builders cannot promise them.
 from uvd_x402_sdk.near_registry import NearRegistryClient, parse_give_feedback_outcome
 
 # Constructing the client performs no I/O. These read calls contact RPC only
-# when invoked; the registry must first be deployed.
+# when invoked.
 client = NearRegistryClient("near:mainnet")
 # config = client.get_config()
 # agent = client.get_agent("worker.near")
@@ -129,12 +133,12 @@ network without a registry returns no events. The low-level
 success first. Neither helper authenticates the RPC itself or proves a payment
 settled.
 
-## Execution Market and trust
+## Legacy reputation and trust
 
 After an Arras payment releases a positive amount (including partial release
 followed by refund/reclaim), the payer can rate the receiver and vice versa.
-Neither needs a registry profile first. EM should rate promptly: after payment
-compaction (`reclaim_after + 7 days` at the earliest) the source payment may no
+Neither needs a registry profile first. Legacy clients should rate promptly:
+after payment compaction (`reclaim_after + 7 days` at the earliest) the source payment may no
 longer exist. One feedback per escrow/payment/rater is allowed; revoking it
 removes its contribution but does not free the slot for another rating.
 

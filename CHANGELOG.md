@@ -288,3 +288,424 @@ Changes what a seller sends and answers. Read before upgrading.
 - Bind receipts to purchase and authorization; preserve payment state independently of the merchant HTTP result.
 - Persist and resume the original authorization, expose private receipt lookup, and verify Ed25519 provenance with trusted issuer keys.
 - Document recovery limits, merchant propagation and the pending live EURC acceptance.
+
+## Releases 0.1.0 - 0.84.0 (moved from the README)
+
+Moved verbatim from the README. 0.85.0-0.87.0: see the GitHub releases.
+
+### v0.84.0 (2026-09-16)
+- Add Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) to network lookup, defaults, signing and v1/v2 envelopes.
+- Use USDC `0x3600000000000000000000000000000000000000`, 6 payment decimals and EIP-712 domain `USDC` / `2`; retain 18 decimals for native gas metadata.
+- Validate payment scaling, domains and isolation between the two networks. See [Arc usage](docs/networks/arc.md) for examples and verification evidence.
+- 27 enabled networks, including 17 EVM networks (14 mainnets and 3 testnets). Arc supports direct `exact` EOA payments; other Arc payment modes are not advertised.
+
+### v0.83.1 (2026-09-14)
+- **Changed: the `Idempotency-Key` is opt-in, and bound to a purchase the caller names.** `X402Config.send_idempotency_key` now defaults to `False`. With it on, `verify_payment()`, `settle_payment()`, `try_settle_payment()` and `process_payment()` take `idempotency_scope`, the caller's own identifier for the purchase (an order id), and mix it into the key. A key derived only from the payment does not tell two purchases of the same price apart, because their requests are byte-identical, and only the caller knows which purchase a payment is for
+- **Key on, no scope: no key**, and one warning per process. Fail-safe: the call goes out exactly as with the key off. A blank scope counts as none; a scope that is not a string raises `TypeError` before anything is sent
+- **`derive_idempotency_key(payload, op, scope=None)`**: without `scope`, the 0.83.0 key byte for byte (its pinned vector is unchanged); with it, the sha256 covers `{"payload": <signed block>, "scope": <scope>}` with sorted keys and no whitespace. The signed block stays in, so two sellers that use the same order id get different keys. A second pinned vector for the TypeScript twin, computed from the literal text
+- **Upgrading from 0.83.0:** a caller that set nothing sends no key again, as in 0.82.0, and no longer depends on the facilitator's idempotency store. A caller that wants a completed settle replayed sets `send_idempotency_key=True` and passes the same `idempotency_scope` to verify, settle and every retry of that purchase
+- **Classification, unchanged and now pinned end to end:** a `409 idempotency_key_conflict` is evidence that a settle under that key already succeeded (`spent_nonce_evidence()` returns `"structured"`, and it is not transient), and a `503 idempotency_store_unavailable` moved nothing and is transient. Both verdicts date from 0.83.0; `tests/test_idempotency_opt_in.py` pins them through the scoped path against a local facilitator with the x402-rs semantics
+- 1159 tests pass, 1 skipped (1139 before, 20 added, none lost). Against 0.83.0, 7 of the 8 tests in `tests/test_idempotency_opt_in.py` fail; the eighth, a 409 that is not an idempotency conflict, already passed there
+
+### v0.83.0 (2026-09-13)
+- **Added: `Idempotency-Key` on `/verify` and `/settle`, on by default.** `derive_idempotency_key(payload, op)` is `x402-<verify|settle>-<sha256>` over the signed payload block (sorted keys, no whitespace), so the same authorization gives the same key in any process. Measured on x402-rs 2.28.0 `post_settle`: the facilitator hashes the raw body; same key + same body is answered from its cache of SUCCESSFUL settles (`200`, `Idempotent-Replayed: true`) and nothing executes; same key + another body is `409 idempotency_key_conflict`. Until now a buyer re-presenting the same `X-PAYMENT` to a seller that restarted reached the chain again, and on EVM the UVD facilitator answers a used authorization with an opaque `400 contract_call_failed (ref)`, which a paywall reads as "rejected, sign again"
+- **Namespaced by operation, and the requirements stay out of the key.** One store, two endpoints carrying the same payload: a shared key would let a future verify cache answer a settle. And the same authorization under other terms has to land on the same key, so the facilitator refuses it instead of running it
+- **The timeout fallback re-asks under the same key**, so a settle that completed while the client timed out comes back from the cache
+- **Off switch: `X402Config.send_idempotency_key=False`.** Production runs the DynamoDB store, and a keyed settle the facilitator cannot check is `503 idempotency_store_unavailable` with no settle (fail-closed on purpose). **The header is on by default, so a consumer that bumps to 0.83.0 without reading this inherits that dependency:** while the facilitator's store is down, its settles answer 503 instead of settling
+- **What it does not do:** catch a buyer who signs a NEW authorization for the same purchase (different block, different key), or help `process_payment()` with a credential that already settled: verify runs first, simulates the transfer on EVM, and `/verify` has no cache
+- **The key is not a secret, and the store is shared.** Anyone who sees the `X-PAYMENT` before the seller settles can settle an authorization of their own under the same key first; the legitimate settle then gets `409 idempotency_key_conflict` for 24 hours, reads as "already settled", and stays unpaid. Check the chain before delivering on a conflict. The fix belongs to the facilitator (scope the key by payer or `payTo`)
+- **Added: `is_spent_nonce_error()` / `spent_nonce_evidence()`**, ported upstream from tarotof's paywall: does this failure say the authorization was ALREADY USED? `"structured"` (a code in any code-bearing field, normalised, nested) wins over `"wording"` (free text). What it serves is the answer a paywall gives: a 402 over an authorization that already settled is how a buyer pays twice
+- **A superset of the copy it came from, which is what upstream-first means.** It keeps tarotof's substring match — `NonceAlreadyUsed`, `NonceReused { .. }` and `nonce_used` inside prose and structs all read as spent — and subtracts exactly two measured words that contain "used" without meaning it: `refused` (the facilitator's own transient "the node refused this transaction on nonce or mempool grounds and never queued it") and `unused`. A whole-word match was tried first and missed four measured spent inputs, which is the direction that costs money. Pinned row by row against tarotof's own verdicts in `tests/test_spent_nonce.py` (table from `api/main.py` at commit `534d133d`), including its cheap false positives, kept on purpose
+- **Three things it reads that tarotof does not:** `409 idempotency_key_conflict` and `503 idempotency_cache_corrupt` — the facilitator caches only successful settles, so both mean a settle under this key already succeeded — and USDC's own revert, "authorization is used or canceled", which never says "nonce"
+- **Fixed: `pip install uvd-x402-sdk[fastapi]` can run the ERC-8128 verifier.** `verify_request` imports `eth_account` lazily and the extra did not bring it, so the server imported fine and raised `ModuleNotFoundError` on the first signed request. Measured in a fresh venv with the new `scripts/smoke_fastapi_extra.py`: `ModuleNotFoundError: No module named 'eth_account'` on 0.82.0, `verify vectors: 77 passed, 0 failed` now
+- 1139 tests pass (1052 before, 87 added, none lost). 17 targeted mutations of the key and the classifier (among them the whole-word match, subtracting `reused`, and each of the five stems): none survived
+
+### v0.82.0 (2026-09-11)
+- **Added: the buyer decides against the offer in hand, before it signs.** `PurchasePolicy` + `X402Client.fetch(policy=...)` implement the contract the facilitator fixed in its P3 phase (`x402-rs` 2.25.0, `crates/x402-reqwest/src/policy.rs`), field for field and code for code, so a refusal means the same thing in the Rust buyer, this SDK and the TypeScript one. A catalog listing is a claim somebody else made about their own price; the `402` is the offer, and the two can differ legitimately, so the decision is made against **the offer**, every time
+- **Where it runs is the whole point.** The evaluation sits in `fetch()` between reading the 402 and producing the `X-PAYMENT` header — the security review of the Rust PR caught exactly this half-built: the policy existed, the seller declared its validity, and the wiring between them was missing for a whole commit with every unit test green. So `tests/test_policy_real_path.py` goes in through `fetch()` against a mocked transport with a real key and asserts on whether a header was ever produced. **Red-proof**: deleting the block turns 7 of its 13 tests red, "DID NOT RAISE" — the expired offer gets signed and paid
+- **Six refusal codes in a fixed order**, because the FIRST failing check is the one reported and a caller branches on it: `no-readable-offer` → `offer-expired` → `recipient-not-permitted` → `asset-not-budgeted` → `per-payment-limit` → `cumulative-limit`. Each carries the numbers that caused it (`requested`, `allowed`, `spent`, `wouldTotal`, `asset`, `payTo`, `validUntil`, `now`, `offered[]`) on `PolicyRefusedError.details`
+- **`asset-not-budgeted` runs BEFORE the ceilings.** The ceilings are a map, and a map has no opinion about a key it does not hold — which is exactly how a token nobody budgeted sails past a budget that looks complete. And the signer would sign it: `create_authorization` takes the EIP-712 domain from the seller's own `extra` and will sign for a token and a network it has never seen. So an asset with no declared ceiling is refused, and the caller hears "budget that asset" rather than "raise a ceiling that does not exist"
+- **Addresses are canonicalised BY FAMILY, never with `lower()`.** Hex is folded; base58 (Solana, XRPL) is compared exactly. Lowercasing a base58 address does not produce the same address spelled differently — it produces a string that is not an address, so an allowlist written in the seller's own spelling would never match and every legitimate payment to that payee would be refused. And in the dangerous direction, two distinct base58 addresses can fold to the same lowercase string, admitting one nobody put on the list
+- **Evaluating does not spend, and a copy spends from the same purse.** Signing can fail and a settlement can be refused, so `record_spend()` is a separate call made once the settlement resolved. `copy.copy()` and `copy.deepcopy()` share the running total — a deep copy that duplicated it would hand a fresh budget to every copy, which looks like a correct deep copy and is the failure a cumulative limit exists to prevent. If the total cannot be read (a held lock, a corrupt value), `spent()` reports the **ceiling**, never zero
+- **Offer validity, read from the seller's own declaration.** `validUntil` comes from `extensions["offer-receipt/1"].info.validUntil` in Unix seconds — the same versioned key `x402-axum` writes. Absent means no declared validity; **unreadable means absent, never zero**, because "the seller said something we could not read" must not become "this offer expired in 1970" and refuse every payment to them. `validUntil == now` still stands: it is the last instant the offer is in force
+- **One unreadable offer no longer takes the list with it.** A seller advertising `exact` beside a scheme this build does not implement stays payable, and a challenge where NOTHING is readable now answers `no-readable-offer` naming what the seller wanted (`["batch-settlement", "agent-pay"]`) instead of an empty list that sends a caller hunting a bug in its own code. Scheme names are bounded at 64 chars: it is somebody else's string and it lands in an error message
+- **A divergence from a listing is evidence, never a refusal.** `fetch(quote=AdvertisedQuote(...))` reports `not-compared` | `matches` | `amount-differs` | `different-asset` and decides nothing. Stopping to ask would turn every ordinary reprice into a halt, and an agent that halts on ordinary commerce is an agent nobody can leave running — there is no human-confirmation hook on this path
+- **Nothing changes for a caller who wrote no policy.** `X402Client` holds `PurchasePolicy.permissive()` by default, so an unlisted asset is still paid exactly as before; `PurchasePolicy()` — the one you sit down to write — denies. `max_amount` is untouched and still raises `PaymentExceedsMaxError` first, and `PolicyRefusedError` subclasses `NoAcceptablePaymentError` so code written before this version keeps catching it
+- **The policy cannot be widened from inside an evaluation.** No setter, no limit-raising builder, and `per_payment` / `cumulative` are handed out as read-only views — widening means constructing a new policy, which is a visible act in the caller's code. A test asserts no such method appeared
+- **One chain, one budget key, whichever dialect the seller speaks.** `base` and `eip155:8453` are the same chain under two dialects — v1 uses the name, v2 the CAIP-2 id, and the same seller can answer either — so both resolve to the SDK's canonical name (aliases like `skale` too), in both directions. Without it a policy written `base` refused a v2 challenge with `asset-not-budgeted`, **a cause that is not true**, while the Rust and TypeScript buyers paid: the same policy has to decide the same way in all three. It is literally one key, so a cumulative limit is not duplicated per dialect; different *chains* stay different keys, and a dialect the registry cannot resolve falls back to the literal — a refusal, never an exception that aborts an evaluation
+- **`scheme` is required, and its vocabulary is closed.** Aligned with the facilitator, where `Scheme` is a required field and an entry without one fails to deserialize. This SDK assumed `exact`, which is a silent way to sign an `exact` authorization for an offer that asked for something else; measured against the repo's one real capture (`tests/test_x402_transport.py`: 36 of 36 live resources answering 402 on 2026-08-20) every seller names it, so the assumption covered nobody. `offered[]` still carries only the NAMED schemes — it is the wire vocabulary the contract fixed — and the unnamed ones are counted in the prose, because a bare `offered: []` is the message that sends a caller hunting a bug in its own code
+- 1058 tests pass (968 before, 90 added, none lost). Fifteen targeted mutations of `policy.py` — swapping the order, making `evaluate` spend, deep-copying the purse, folding base58, dropping the readable offers, `now >= valid_until`, unreadable-validity-as-zero, the network as a bare literal, normalisation raising instead of falling back, a missing `scheme` assumed `exact` — each turn a named test red; none survived
+
+### v0.81.0 (2026-09-07)
+- **Added: the rater can now author their own rating on Solana.** `prepare_solana_feedback()` + `sign_solana_feedback_transaction()` + `submit_solana_feedback()` drive the facilitator's `/feedback/solana/prepare` and `/feedback/solana/submit`, live on the deployed facilitator since **v1.74.0** (measured today on **v2.16.0**) and until now with **no client on either SDK**. The server half has existed since 2026-08-13 (`x402-rs`, `src/erc8004/solana.rs`); nothing could call it
+- **Why it matters**: account 0 of the program's `give_feedback` instruction is declared `[signer, writable] client (feedback author / fee payer)`, and `POST /feedback` puts the FACILITATOR's keypair there. Same defect the EIP-7702 rail fixes on EVM -- the chain records the service, not the person. Solana takes several signers per transaction natively, so the fix needs no delegate and no program change: the rater signs as `client`, the facilitator stays the fee payer
+- **`SOLANA_FEEDBACK_NETWORKS` / `supports_solana_feedback()` are a SIBLING of `RELAYED_FEEDBACK_NETWORKS`, never an addition to it.** That frozenset means "Execution Market deployed a `FeedbackDelegate` here and the facilitator verified it on-chain", and `prepare_relayed_feedback()` builds the EVM URL `/feedback/evm/prepare` from it -- a `solana` entry there routes the call to the EVM URL, which answers 400. Pinned by a test, and the delegate tests are untouched and still green
+- **The message is never re-serialised.** `sign_solana_feedback_transaction()` carries the exact bytes that came off the wire and rewrites only the signature array, because `accept_rater_signed_transaction` compares the submitted message against the one it rebuilds and refuses a mismatch (`submitted transaction does not match the one this facilitator built`). A client that decoded to structs and re-encoded would look correct and fail there, with nothing on its own side to point at
+- **Added: `Ed25519Signer`** (`pip install 'uvd-x402-sdk[solana]'`) -- a `SolanaSigner` over a 32-byte seed, a 64-byte `solana-keygen` key, its JSON int array or its base58 form. The 64-byte form's public half is checked against the derived one: a key pasted a byte short still parses and then signs as somebody else. The key is never in `repr`, never in an error, never on disk
+- **`SolanaSigner` is a two-member Protocol**, so a browser wallet, a custodian or an HSM plugs in with no adapter
+- **Everything that can go wrong fails before the network**: a signer holding another key, a rater that is not a required signer, a versioned (v0) message, a truncated blob, a header that disagrees with the signature array, a signature of the wrong length. From a facilitator 400 those are indistinguishable, and one of them -- the rater in a non-signer slot -- is a rating signed by nobody
+- **Wire pinned against the LIVE facilitator.** `tests/fixtures/solana-feedback-prepare.json` is a capture from `https://facilitator.ultravioletadao.xyz` (v2.16.0, 2026-09-07): two signature slots both empty, fee payer at account 0, rater at account 1, 11 accounts. The decode -> encode round trip is asserted byte-identical, and the rater's signature is pinned by value (ed25519 is deterministic), so a change in *what* gets signed goes red instead of producing a well-formed signature over the wrong thing
+- 968 tests pass (931 before, 37 added, none lost). `submit_feedback()` and the EVM relay rail are byte-for-byte unchanged
+
+### v0.80.0 (2026-09-07)
+- **Fixed: the lifecycle order document could not be signed by a browser.** `build_lifecycle_typed_data()` emitted a document `viem` refuses, and the consumer was patching it by hand (`execution-market:mcp_server/integrations/x402/lifecycle_auth.py`, with its own "[DIVERGENCIA DE LOS SDK, para upstream]" comment). Three divergences, not one: a missing `primaryType`, a `nonce` as `bytes` (`json.dumps` raises, so the document could not even reach the browser), and every uint as a Python int
+- **The third one did not fail -- it signed the wrong struct.** A real 32-byte `salt` is destroyed by `JSON.parse`: measured with `0xab*32`, Python signed `0x15a8587e...` and viem, reading that same document, `0x4c88c56a...`. Two valid signatures over two different structs, with no error anywhere. The pinned vector missed it because its salt (12345) fits in a double
+- **No digest moved.** EIP-712 hashes domain, types and message; `eth-account` decodes a uint from an int or a decimal string to the same value. The shared vector's signature is byte-identical before and after (`0x78fe14...3a71c`, pinned in `tests/test_lifecycle_auth.py`)
+- **`lifecycle_auth_from_signature` rejects a wrong `primaryType` and tolerates an absent one** -- every document emitted by 0.78.0 and 0.79.0 lacks it. The TypeScript twin emitted all three correctly from its first day; Python was the one that was wrong
+- The cross-language gate now compares the DOCUMENT, not just the signature, across a real `json.dumps` -> `JSON.parse` boundary
+
+### v0.79.0 (2026-09-06)
+- **Added: `release_via_facilitator()` / `refund_via_facilitator()` accept `lifecycle_auth=`** — a lifecycle order **already signed by someone else**, attached to `payload.lifecycleAuth` verbatim. 0.78.0 shipped only `lifecycle_signer=`, which signs with a key held **in the calling process**; that is the wrong shape for the flow the owner picked, where the **payer** signs and Execution Market transports. EM's own handoff measured the gap: *"Mientras no acepte un `lifecycle_auth=`, no puede transportar la orden de un tercero"* — their side is already merged behind `EM_LIFECYCLE_PAYER_SIGNS` (off), waiting on this
+- **Added: `lifecycle_auth_from_signature(typed_data, signature, signer)`** — the browser path's other half. `build_lifecycle_typed_data()` (public since 0.78.0) produces the EIP-712 document, a wallet returns 65 bytes, and this pairs them into the wire block. `deadline` and `nonce` are read **out of the signed typed data**, never passed alongside: both enter the digest, so declaring them separately would let the wire announce one window while the signature covers another
+- **The signature is verified against `signer` before anything is returned.** The real failure of a browser flow is the page signing with whichever account is connected while the backend believes it was another; the facilitator answers `bad_signature` and does not say which of the two was wrong. Recovering locally is the only place that can. A wrong-length signature and a typed document from another domain are refused by name too
+- **`lifecycle_signer` and `lifecycle_auth` are mutually exclusive, and passing both raises** before the POST. One signs a new order with its own nonce and deadline, the other carries a foreign one — choosing silently would submit an order the caller did not intend, and on `release` that is money moving
+- **Nothing is normalized on the way out.** The order travels byte-for-byte: trimming a hex, reordering keys or recomputing the window would send something other than what entered the digest. Pinned by a test that compares the captured request against the block handed in
+- **Both paths produce the same wire block.** `lifecycle_auth_from_signature` on a signature over the same typed data equals `build_lifecycle_auth` for the same nonce and deadline — asserted, so the browser route cannot drift into a second dialect that the pinned vectors do not cover
+- Backward compatible: `lifecycle_auth` defaults to `None` and, with neither argument, the request is byte-identical to 0.78.0 and to everything before it. 925 tests pass (916 before, 9 added, none lost)
+
+### v0.78.0 (2026-09-05)
+- **Added: you can now sign `release` and `refundInEscrow`.** `build_lifecycle_auth()` produces the EIP-712 order the facilitator verifies, and `release_via_facilitator()` / `refund_via_facilitator()` take a `lifecycle_signer` that attaches it. Until now nothing in either SDK could produce one: measured in the facilitator's own logs, **2,953 release/refund calls over 17 days from 22 payers and 38 receivers across 9 networks, zero of them signed** — the field did not exist and no caller sent it
+- **Why it matters**: both actions move money that is **already** escrowed, so neither carries an ERC-3009 signature — there is no transfer left to authorize. That left *who is entitled to ask for the move* answered by "whoever called". On 2026-08-30 a third party probed exactly that: five calls with a fabricated `paymentInfo`, two of them mined, gas spent
+- **The format is the facilitator's, verbatim** (`x402-rs`, `src/payment_operator/lifecycle_auth.rs`, PR #21): a `LifecycleOrder(string action, uint256 amount, uint256 deadline, bytes32 nonce, PaymentInfo paymentInfo)` under the domain `{"x402 escrow lifecycle", "1", chainId}` — no `verifyingContract`, because `paymentInfo.operator` already travels inside the signed struct. `PaymentInfo` is the `AuthCaptureEscrow` type string this SDK already types for ERC-3009, so a client that has it reuses it instead of learning a second struct
+- **Who may sign what**: `release` — the payer, or the operator owner (`FEE_RECIPIENT()`, read on-chain). `refundInEscrow` — the receiver, the operator owner, or the payer once `authorizationExpiry` has passed. The receiver may never release (paying yourself out of an escrow is what escrow exists to stop) and the payer may never refund before expiry (that is the chargeback)
+- **Backward compatible, by design.** `lifecycle_signer` is optional at every layer and defaults to `None`; without it the request goes out byte-identical to before, which is what the facilitator's `off` and `log` modes still accept. The rollout is the facilitator's `ESCROW_LIFECYCLE_AUTH`: `off` → `log` (verify when present, log the verdict, never reject) → `enforce`
+- **The signer is injected, never read.** The SDK does not go looking for a key in the environment — pass any `WalletAdapter` (`EnvKeyAdapter`, a KMS, a browser wallet)
+- **Three rejections are caught here rather than there**, because in `enforce` each one is stuck money and the caller has no access to the facilitator's log: a `deadline` in the past (`expired`), one past the 900 s ceiling (`deadline_too_far` — the default signs `now + 600`, so a facilitator clock a few seconds behind yours does not decide the verdict), and a `paymentInfo` missing a field, which is refused by name instead of being defaulted into a signature over a struct that is not the one submitted
+- **`paymentInfo.salt` is `bytes32` on the wire and `uint256` in the signature** (the facilitator converts it with `U256::from_be_bytes`). Signing it as a hex string produces a different digest and a `bad_signature` whose only symptom is that no order ever verifies. The SDK converts it
+- **The amount signed is the amount submitted.** Signing `max_amount` while submitting a partial release is an order that does not verify — and a partial is the normal case for a stream, which emits one order, and one nonce, per delta
+- **Verified against the live facilitator** in `log` mode (`GET /settle` → `"escrowLifecycleAuth":"log"`), on base-sepolia, with no funds and no transaction: a payer-signed release logged `verdict="ok"` (2026-09-06T01:27:49.199084Z) — the first one ever — and a stranger-signed one logged `verdict="unauthorized_role"`, "is neither a party to this escrow nor the operator owner" (01:29:45.099379Z)
+- Cross-language conformance unaffected: 266 checks across 5 phases, passing against the TypeScript SDK. The TypeScript twin does not yet emit `lifecycleAuth`; the exact wire block is written down for it in `docs/handoffs/2026-09-05-lifecycle-auth-firma.md`
+
+### v0.77.0 (2026-09-05)
+- **Fixed**: **XRPL charged in XRP what the integrator wrote in dollars.** `process_payment(header, Decimal("1.00"))` on XRPL produced `maxAmountRequired = 1000000` drops — **1 XRP**, not one dollar. The scaling was right (XRP really has 6 decimals); the **unit** was wrong. `NetworkConfig.get_token_amount()` multiplies a USD price by `10**decimals`, which only turns dollars into base units when one whole unit IS a dollar — true for every USDC/EURC/AUSD/PYUSD/USDT/USDG network in the registry, false for a chain that settles in its own floating native asset. Any endpoint priced in USD over XRPL has been charging the XRP price of its number, in whichever direction the market moved
+- **Added**: `NetworkConfig.usd_pegged` (default `True`, so the 23 other networks are byte-for-byte unchanged). XRPL mainnet and testnet carry `False`, and both `get_token_amount()` and the client's requirements builder now **refuse** rather than convert. The error names the asset, shows what the old code would have charged, and points at `GET /supported` for a pegged token — a refusal that does not say where to look just moves the dead end
+- **`token_decimals` does not open this door.** It fixes SCALE and the defect is UNIT: six decimals of XRP are still XRP. The way through is naming an `asset` — the facilitator settles a dollar-pegged USDC on XRPL (issuer `rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE`, Circle) — with its `token_decimals`, or pricing the call in drops yourself
+- **Fixed**: **XRPL mainnet is `xrpl`, not `xrpl-mainnet`.** The facilitator advertises `xrpl` in `GET /supported` and prints `xrpl` everywhere (`x402-rs/src/network.rs:189`); it takes `xrpl-mainnet` only as an informal `FromStr` alias, which its own source calls "right for a lookup and wrong for a wire format" (`network.rs:719`). The SDK put the alias on the wire, so `X402Client(..., verify_facilitator_support=True)` refused to start with *"does not settle: xrpl-mainnet"* against a network the facilitator settles fine. Measured before and after against the live facilitator; the testnet name already matched and does not move
+- **`xrpl-mainnet` keeps resolving** as an alias (`get_network`, `normalize_network`, `X402Config.supported_networks`), through the same `_NETWORK_ALIASES` table that already carried `skale`. It is no longer a separate registry entry, so network counts and listings are unchanged, and it is no longer what the SDK emits — `validate_network("xrpl-mainnet")` now returns `"xrpl"`
+- Both defects were surfaced by the audit of PR #2 (Casper), as pre-existing defects of `main` that the PR would have inherited — see `docs/reports/2026-09-05-auditoria-pr2-casper.md` (H2, and the closing recommendation)
+- 889 tests pass (881 before, 8 added, none lost); cross-language conformance against the TypeScript SDK still 266 checks PASSED; `ruff` and `mypy` counts unchanged (63 / 120)
+
+### v0.76.0 (2026-09-04)
+- **Fixed**: the SDK refused to retry an unconfirmed settlement and then threw away the one thing that made the refusal actionable. The facilitator answers `502 {"error":"settlement_unconfirmed","transaction":"0x…","paymentId":"0x…","retryable":false}` — the tx MAY be mined, so retrying is paying twice — and the anti-double-settle guard already stopped the loop. But `_extract_tx_hash_from_body` was private: the hash fed the verdict, went into a warning log, and was **discarded**. The caller got "not retryable" and **nothing to check**, which rebuilds the same dead end one layer up: whoever paid cannot find out whether their money moved
+- **Added**: `FacilitatorError.transaction`, `.payment_id` and `.error_code`, repeated in `to_dict()["details"]` as `transaction` / `paymentId` / `errorCode` — so they reach the buyer through `transient_503_response()` without a paywall having to know about them. `try_settle_payment()` returns them as data (`payment_id`, `error_code`; both keys always present, `None` on the happy path). The hash travels **verbatim** — Algorand prints base32, Solana base58, and reformatting it makes it unpastable into an explorer
+- **Fixed, the second decision site**: `FacilitatorError.__init__` computed `retryable` purely from the status (`None | 429 | >=500`) without reading the body — the same hole TypeScript found in `Erc8004LookupError`. **The status is now the CEILING and the body can only LOWER it**, never raise it: a body claiming `retryable: true` on a `400` will not make the SDK re-send a credential the facilitator genuinely rejected. Three signals lower it, in order of authority: an explicit `retryable: false` (a contract the facilitator states, until now ignored outright); any 5xx carrying a hash **whatever the error is called** (the general form — it covers codes that do not exist yet); nothing else
+- Because the verdict now lives in the constructor, **every path that raises one** — settle, verify, escrow, events, ERC-8004 — reaches it by construction instead of each re-deriving it. One parser (`parse_facilitator_error_body`) serves both decision sites: two subtly different readings of the same body is how one code path stops honouring the `retryable: false` that the other honours
+- **Unchanged**: the transient `502` — the one with `Retry-After` and no hash — still retries with the same 3 attempts and the same clamped wait. The settle loop still never re-POSTs a `429`. A `4xx` still carries no `retryable` key in its `to_dict()`. `anti_double_settle=False` still disarms the hash INFERENCE — but not the explicit contract, which is not the caller's to contradict
+- Symmetric with the TypeScript SDK 2.80.0 (`FacilitatorFailureFields`), same three fields and the same ceiling rule
+
+### v0.75.0 (2026-09-04)
+- **Fixed**: `"auto"` — the default — crashed on the one payload shape it exists to route. A **v2 payload has no top-level `network` at all** (v2 moved the chain id into `accepted`), and `resolve_envelope_version()` read only `payload.network` and handed it straight to `is_caip2_format` (`":" in network`). Measured in runtime against the published 0.74.0: `AttributeError: 'dict' object has no attribute 'network'` on a v2 envelope, `TypeError: argument of type 'NoneType' is not iterable` when the network is `None`
+- **The consequence was already in production**: MeshRelay's turnstile and multibrain pin `x402_version` to 1 or 2 explicitly rather than use the default, so this SDK's own default was the one option no consumer could use. Those pins can come out once this version is published
+- **The rule is now written down** (`_network_of_payload`): the network is read wherever the payload keeps it — top level if present, otherwise `accepted.network` — and the **top level wins** when it is there, so a v1 payload keeps reading its own. A payload carrying neither contributes no CAIP-2 evidence and stays on v1 instead of raising
+- `build_verify_request_for_version()` / `build_settle_request_for_version()` take the same shapes: resolving to 2 and then raising one line later on the same object was half a fix. A payload with no signed `payload` block now refuses by name instead of producing the facilitator's "matched no variant", which names no field
+- The v2 payload travels **unreshaped** through the v1 envelope too — this module chooses the envelope, it does not translate one payload shape into the other (`X402Client.extract_payload` is what flattens a v2 header)
+- Purely a fix: every wire that resolved before resolves to the same version, and the v1 body from a `PaymentPayload` is byte-for-byte unchanged. Same defect the TypeScript SDK fixed in 2.79.0, with the same rule, so the same wire produces the same body in both SDKs
+
+### v0.74.0 (2026-09-04)
+- **Fixed**: `verify_payment()` and `settle_payment()` wrote `"x402Version": 1` as a **literal**, so the SDK could advertise x402 v2 in a 402 and was then structurally unable to speak it — a payer that believed our own 402 got a 400 back. The v2 builders (`build_verify_request_v2` / `build_settle_request_v2`) had existed since v0.62.0 with **no caller**; `X402Config.x402_version` was declared, documented as "1, 2 or auto", and read by nothing. Same defect the TypeScript SDK fixed in 2.78.0, after it broke a real ChatGPT payment
+- **Added**: `uvd_x402_sdk.envelope` — `resolve_envelope_version()`, `build_verify_request_for_version()`, `build_settle_request_for_version()`, and the v1 → v2 conversion (`to_resource_info_v2()`, `to_accepted_requirements_v2()`). Consumers write no new code: keep passing the same `PaymentPayload`, the client picks the envelope
+- **`X402Config.x402_version` now does what it says.** `"auto"` (the default) upgrades to v2 when the network on the wire is CAIP-2 (`eip155:8453`) and stays on v1 for plain names — including a header that merely *declares* version 2, which the facilitator's untagged envelope enum serves correctly today and which is a **400** in v2. `1` or `2` pins, and a pin wins over the wire
+- **Not purely additive, and this is the one behaviour change**: a CAIP-2 wire now travels in the v2 envelope. Both envelopes answer 200 against facilitator 2.10.0 and reduce to the same payment, but only v2-with-CAIP-2 is accepted by facilitator builds older than 2026-09-04, where v1-with-CAIP-2 is a hard 400. Set `x402_version=1` to restore the previous body byte-for-byte. The v1 path itself is untouched
+- Verified end-to-end against the live `/verify` with the SDK building the body, and pinned against the TypeScript SDK: the two now emit byte-identical `/verify` and `/settle` bodies for the same wire
+- A network with no CAIP-2 form (XRPL — its v1 string *is* its identifier) stays on v1 under `auto`, and raises under an explicit `x402_version=2` rather than silently sending a v1 network name inside a v2 body
+
+### v0.44.0 (2026-08-11)
+- **Added**: per-network facilitator routing — `X402Config(facilitator_by_network={"base": CDP_URL, "avalanche": UVD_URL})` (also `X402Client(...)` and `configure_x402(...)`, and the `X402_FACILITATOR_BY_NETWORK` env var as a JSON object). `verify`, `settle`, the post-timeout settle re-check and `/accepts` each go to the facilitator that owns their network
+- **The translation refuses to guess**: a network that is neither in the table nor covered by the reserved `"*"` fallback key raises `ConfigurationError` — it is NEVER routed to `facilitator_url` silently. Settling on a facilitator that does not settle that chain is a money bug, not a config nit
+- **Boot fails early**: an ENABLED network left unrouted raises in the `X402Config` constructor, not on the first payment. `X402Client(..., verify_facilitator_support=True)` additionally probes each facilitator's `GET /supported` at construction and raises if one does not advertise a network routed to it (also available on demand as `client.verify_routes()`)
+- Added `X402Config.facilitator_url_for(network)`, `X402Config.facilitator_routes()`, `X402Client.facilitator_url_for()` / `verify_routes()`, and optional `network=` on `get_supported()` / `health_check()` to target a single facilitator
+- Purely additive — with no `facilitator_by_network` the resolution returns `facilitator_url` for every input, including unknown networks, and the wire is byte-identical. `FACILITATOR_URLS` (which maps ENVIRONMENT, not network) is untouched
+- Reported by **NomiCheck**, who route `base` through Coinbase's CDP facilitator and `avalanche` through Ultravioleta's — CDP does not settle avalanche — and had to maintain a routing layer of their own on top of the SDK because a single `facilitator_url` could not express it
+
+### v0.36.0 (2026-08-02)
+- **Added**: `asset` and `eip712_domain` overrides on `settle_payment()`, `verify_payment()` and `process_payment()` — the caller's token registry (not the SDK's) decides which token contract is settled and which EIP-712 domain (`{"name", "version"}`) goes to the facilitator via `extra`. Unblocks non-USDC settles where the token is not in the SDK registry or the registries drift
+- **Added**: `eip712_domain` override on `create_authorization()` — injects the domain into the SIGNED digest (and into the non-USDC `token.eip712` block), so the signature verifies against the domain the verifier resolves. Partial domains raise `ValueError` before signing
+- **Added**: opt-in settle retry — `settle_payment(..., retry=True)` (default `False`, single attempt exactly as before). Up to 3 attempts, exponential backoff (1s, 2s), retrying ONLY transient transport errors and 5xx; NEVER a 4xx, a business failure inside a 2xx, or a 5xx whose body already carries a transaction hash (**anti-double-settle guard**, ported from Execution Market's facilitator retry policy)
+- **Added**: `try_settle_payment()` — non-raising settle returning `{"success", "tx_hash", "error"}`; `success=False` with `tx_hash` set is the double-settle warning shape (the facilitator broadcast the tx despite the error status — verify on-chain, do NOT re-send)
+- Purely additive — every new parameter defaults to the previous behavior; the default wire request is byte-identical
+
+### v0.35.0 (2026-08-02)
+- **Added**: `uvd_x402_sdk.escrow_signing` — escrow pre-auth builder for sign-on-assignment marketplaces (Execution Market ADR-002): `build_escrow_pre_auth()` signs the `ReceiveWithAuthorization` escrow lock and returns the raw JSON `X-Payment-Auth` header value; `compute_escrow_nonce()` mirrors `AuthCaptureEscrow.getHash` (payer zeroed, receiver INCLUDED — the signature commits to the worker)
+- Wrapper and nonce pinned by golden vectors (`tests/fixtures/escrow-preauth.json`, byte-identical copy of Execution Market's F0-1 shared fixture, also consumed by the EM web/mobile/plugin-SDK suites)
+- Purely additive — importable on a base install (eth-abi/eth-utils only required at signing time); `EnvKeyAdapter.sign_eip3009` and `AdvancedEscrowClient._compute_nonce` behavior unchanged, their digest/nonce parity is now pinned by tests
+
+### v0.34.0 (2026-08-02)
+- **Added**: `uvd_x402_sdk.erc8128` — ERC-8128 Signed HTTP Requests (RFC 9421) with any `WalletAdapter`: `sign_request()` builds `Signature` / `Signature-Input` / `Content-Digest` headers, `fetch_nonce()` gets the single-use server nonce
+- Wire format pinned by golden vectors (`tests/fixtures/erc8128.json`, byte-identical copy of Execution Market's F3-1 conformance fixture): `alg="eip191"` emitted, keyid always lowercase, params in the order `created;expires;nonce;keyid;alg`
+- Purely additive — importable on a base install (no `eth-account` required until you instantiate an adapter)
+
+### v0.27.0 (2026-07-27)
+- **Fixed**: `BazaarClient.list_resources()` raised `ValidationError` against the live registry. `firstSeen` / `lastSeen` are epoch integers on the wire but the model declared them `str`, so *every* call failed regardless of `limit`. Timestamps are now epoch `int` and coerce from int, float, numeric string, ISO-8601 string or `datetime`
+- Added `first_seen_at` / `last_seen_at` / `last_updated_at` helpers returning timezone-aware UTC `datetime`
+- Added `lastUpdated`, which the registry has always sent and the model dropped
+- **Added**: `health` (`DiscoveryHealth`: `status`, `last_checked`, `http_status`, `latency_ms`) and `curation` (`DiscoveryCuration`: `tier`, `label`). These are the fields that make the registry usable -- without them you cannot sort by reachable or by vetted -- and `model_dump()` was discarding them
+- Added `DiscoveryResource.is_alive` and `.tier` shortcuts
+- `list_resources()` now exposes every server-side filter: `provider`, `tag`, `source`, `source_facilitator`, `health`, `tier` and free-text `q`. `q` is validated against `MAX_SEARCH_LEN` (128) and `health` / `tier` against `HEALTH_FILTERS` / `TIER_FILTERS` before the request goes out
+- Discovery models now keep unmodelled server fields instead of silently dropping them
+- `pagination` is a typed `DiscoveryPagination` and still supports `pagination["total"]`
+- Added `tests/test_discovery.py`, a contract test pinned to a verbatim live registry page
+
+Reported by KarmaCadabra against uvd-x402-sdk 0.26.0.
+
+### v0.26.0 (2026-07-21)
+- Added Robinhood Chain support: `robinhood` (chain ID 4663) and `robinhood-testnet` (chain ID 46630), Arbitrum Orbit L2s with ETH gas
+- Settlement stablecoin is Paxos **USDG** (Global Dollar), NOT USDC -- there is no USDC on Robinhood Chain
+- New `usdg` token type; USDG uses 6 decimals and EIP-712 domain `{name: "Global Dollar", version: "1"}`
+- USDG's on-chain `version()` reverts, so the SDK always carries the domain via `extra` (never resolved on-chain)
+- Added `default_token` field to `NetworkConfig` so a network can declare a primary settlement asset other than USDC
+- CAIP-2 mappings: `eip155:4663` (mainnet) and `eip155:46630` (testnet)
+- Now supports 25 blockchains across 7 network families
+
+### v0.24.0 (2026-05-30)
+- Added XRP Ledger support: `xrpl-mainnet` and `xrpl-testnet` (native XRP, 6 decimals/drops)
+- New `NetworkType.XRPL` and `networks/xrpl.py` (drops/XRP helpers, address validation)
+- XRPL settles via pre-signed Payment transaction blobs; the facilitator submits and pays the fee
+- Added `recipient_xrpl` to `X402Config` and the `X402_RECIPIENT_XRPL` env var
+- Exported `XRPL_FEE_PAYER_MAINNET` / `XRPL_FEE_PAYER_TESTNET`
+- XRPL has no CAIP-2 form; only the v1 network strings are recognized
+- Now supports 23 blockchains across 7 network families
+
+### v0.22.0 (2026-04-05)
+
+- **Commerce Scheme**: `PaymentPayload`, `PaymentRequirements`, and `PaymentRequirementsV2` now accept `scheme: "exact" | "escrow" | "commerce"`
+  - Aligns with facilitator v1.43.0 which serves `"commerce"` as alias for `"escrow"` (Execution Market / arbiter integrations)
+  - Default scheme remains `"exact"` -- no breaking changes
+  - Updated scheme validator with clear error messages
+
+### v0.21.0 (2026-04-03)
+
+- **AdvancedEscrowClient WalletAdapter**: `AdvancedEscrowClient` now accepts `WalletAdapter` protocol for signing
+  - Enables Open Wallet Standard (OWS) integration for escrow operations
+  - Backward compatible: still supports direct private key usage
+
+### v0.20.0 (2026-04-02)
+
+- **WalletAdapter Protocol**: Abstract wallet interface for signing operations (`wallet.py`)
+  - `WalletAdapter` - runtime-checkable Protocol for any wallet backend
+  - `EnvKeyAdapter` - raw private key from env var or direct param
+  - `OWSWalletAdapter` - stub for Open Wallet Standard (not yet on PyPI)
+  - `EIP3009Params`, `EIP3009Authorization`, `SignedTypedData` TypedDict types
+  - Auto-detects USDC contract addresses and EIP-712 domain names per network
+  - Uses proven `encode_typed_data()` + `sign_message()` signing pattern
+- **New `[wallet]` install extra**: `pip install uvd-x402-sdk[wallet]` (eth-account>=0.11.0)
+- **eth-account bumped** to `>=0.11.0` across all extras (`signer`, `wallet`, `web3`)
+
+### v0.19.4 (2026-03-29)
+
+- **ERC-8004**: Added `get_identity_by_owner()` method for looking up agent identity by owner address
+- **ERC-8004**: Added documentation for register idempotency behavior
+
+### v0.19.3 (2026-03-29)
+
+- **ERC-8004**: Added SKALE to ERC-8004 networks (20 networks total: 18 EVM + Solana + Solana-devnet)
+
+### v0.19.2 (2026-03-27)
+
+- **Escrow**: Added `OPERATOR_ABI_V2` with `bytes data` parameter for CREATE3 chains
+- **Escrow**: Updated SKALE default operator to EM-deployed address
+
+### v0.18.0 (2026-03-25)
+
+- **Server-Side Signing**: New `X402Client.connect_with_private_key()` for backend EIP-3009 signing
+  - Creates an EVM signer from a private key without browser wallet
+  - Requires `pip install uvd-x402-sdk[signer]` (only `eth-account`, not full `web3`)
+- **EVM-only guard**: `create_authorization()` now validates chain is EVM type before signing
+
+### v0.17.0 (2026-03-22)
+
+- **SKALE Base Network**: Added `skale-base` (mainnet, chainId 1187947933) and `skale-base-sepolia` (testnet, chainId 324705682)
+  - Gasless transactions (CREDIT gas token), legacy tx only (no EIP-1559)
+  - EIP-712 domain name: `"Bridged USDC (SKALE Bridge)"`
+- **SKALE Base Escrow**: Added escrow support via CREATE3 contracts
+
+### v0.16.0 (2026-03-03)
+
+- **Bazaar Discovery**: New `BazaarClient` for resource registration and discovery
+  - `list_resources()` with pagination, category, and network filtering
+  - `register_resource()` for publishing paid resources to the Bazaar
+  - `DiscoveryResource` and `DiscoveryResponse` Pydantic models
+- **Facilitator Info Endpoints**: New methods on `X402Client`
+  - `get_version()` - query facilitator version (`GET /version`)
+  - `get_supported()` - list supported networks/schemes (`GET /supported`)
+  - `get_blacklist()` - check blocked/sanctioned addresses (`GET /blacklist`)
+  - `health_check()` - check facilitator availability (`GET /health`)
+- **Escrow State Queries**: New `get_escrow_state()` method on `EscrowClient`
+  - Query on-chain escrow state via `POST /escrow/state`
+  - Read status, balance, timestamps without settlement
+- **Bug Fix**: Fixed `negotiate_accepts()` referencing undefined `self.facilitator_url` and `self.timeout`
+  - Now correctly uses `self.config.facilitator_url` and the HTTP client pool
+
+### v0.15.0 (2026-03-03)
+
+- **ERC-8004 Solana Support**: Full integration with QuantuLabs 8004-solana Anchor program + ATOM Engine
+  - `AgentId` type alias (`Union[int, str]`) for dual EVM/Solana agent IDs
+  - Solana and Solana-devnet added to `Erc8004Network` (18 networks total)
+  - Solana program ID constants (`agent_registry_program`, `atom_engine_program`)
+  - All ERC-8004 methods now accept `AgentId` (int for EVM, string for Solana)
+  - `seal_hash` parameter added to `revoke_feedback()` and `append_response()` (SEAL v1 support)
+- **`/accepts` Negotiation**: New `negotiate_accepts()` method on `X402Client`
+  - Sends merchant payment requirements to facilitator POST `/accepts`
+  - Returns enriched requirements with feePayer, tokens, escrow config
+  - Faremeter middleware compatibility
+- **Solana Smart Wallet Support**: Transparent CPI inner instruction scanning on server side
+
+### v0.14.0 (2026-02-20)
+
+- **Per-Network Settle Timeout**: Different timeout per chain (L1 vs L2)
+- **On-Chain Fallback**: Post-timeout on-chain state check before returning failure
+- **Escrow**: Updated Ethereum mainnet contract addresses from Ali's redeploy
+- **Escrow**: Fixed Optimism `token_collector` and `protocol_fee_config` addresses (corrected to CREATE2)
+
+### v0.13.2 (2026-02-13)
+
+- **Escrow**: Dynamic EIP-712 domain resolution per-chain (was hardcoded "USD Coin"/"2")
+- **Escrow**: Added Optimism (chain_id=10) to `ESCROW_CONTRACTS`
+- **Fix**: HexBytes compatibility with web3 >= 6.x and eth_account >= 0.10.0
+
+### v0.6.0 (2026-01-30)
+
+- **ERC-8004 Trustless Agents**: Full client for on-chain reputation system
+  - `Erc8004Client` class with identity, reputation, and feedback methods
+  - `append_response()` method for agents to respond to feedback
+  - `ProofOfPayment` model for reputation submission authorization
+  - `build_erc8004_payment_requirements()` helper
+- **Escrow & Refund Support**: Complete escrow payment flow
+  - `EscrowClient` class with create, release, refund, dispute methods
+  - `EscrowPayment`, `RefundRequest`, `Dispute` models
+  - Helper functions: `can_release_escrow()`, `can_refund_escrow()`, etc.
+- **New Networks**: Scroll (534352) and SKALE (1187947933, testnet: 324705682)
+  - SKALE is gasless L3 with sFUEL
+  - Scroll is zkEVM Layer 2
+- SDK now supports 21 blockchain networks
+
+### v0.5.6 (2025-12-31)
+
+- Added `SuiPayloadContent` Pydantic model for Sui sponsored transactions
+- Added `coinObjectId` as required field (CRITICAL for facilitator deserialization)
+- Added `get_sui_payload()` method to `PaymentPayload`
+- Updated `validate_sui_payload()` to require `coinObjectId`
+
+### v0.5.5 (2025-12-30)
+
+- Added AUSD (Agora USD) support for Sui mainnet
+- Added `SUI_AUSD_COIN_TYPE_MAINNET` constant
+- Added `get_sui_ausd_coin_type()` helper function
+
+### v0.5.4 (2025-12-30)
+
+- **Sui Blockchain Support**: Added Sui mainnet and testnet networks
+- Added `NetworkType.SUI` for Sui Move VM chains
+- Added `SUI_FEE_PAYER_MAINNET` and `SUI_FEE_PAYER_TESTNET` sponsor addresses
+- Added CAIP-2 support for `sui:mainnet` and `sui:testnet`
+- Added Sui-specific utilities: `validate_sui_payload()`, `is_valid_sui_address()`, `is_valid_sui_coin_type()`
+- SDK now supports 18 blockchain networks
+
+### v0.5.3 (2025-12-27)
+
+- Documentation updates for Algorand support
+- Updated README with facilitator addresses and changelog
+
+### v0.5.2 (2025-12-26)
+
+- Added EVM facilitator addresses for reference
+  - `EVM_FACILITATOR_MAINNET`: 0x103040545AC5031A11E8C03dd11324C7333a13C7
+  - `EVM_FACILITATOR_TESTNET`: 0x34033041a5944B8F10f8E4D8496Bfb84f1A293A8
+
+### v0.5.1 (2025-12-26)
+
+- Changed default Algorand mainnet network name from `algorand-mainnet` to `algorand`
+- Aligns with facilitator v1.9.5+ which now uses `algorand` as the primary network identifier
+
+### v0.5.0 (2025-12-26)
+
+- **Facilitator Module**: Added `facilitator.py` with all fee payer addresses embedded as constants
+- SDK users no longer need to configure facilitator addresses manually
+- Added constants: `ALGORAND_FEE_PAYER_MAINNET`, `SOLANA_FEE_PAYER_MAINNET`, `NEAR_FEE_PAYER_MAINNET`, `STELLAR_FEE_PAYER_MAINNET`, etc.
+- Added helper functions: `get_fee_payer()`, `requires_fee_payer()`, `build_payment_info()`
+- Network-specific helpers: `get_algorand_fee_payer()`, `get_svm_fee_payer()`, `get_near_fee_payer()`, `get_stellar_fee_payer()`
+
+### v0.4.2 (2025-12-26)
+
+- **Algorand Atomic Group Fix**: Rewrote Algorand payload format to use GoPlausible x402-avm atomic group spec
+- New `AlgorandPaymentPayload` dataclass with `paymentIndex` and `paymentGroup` fields
+- Added `build_atomic_group()` helper for constructing two-transaction atomic groups
+- Added `validate_algorand_payload()` for payload validation
+- Added `build_x402_payment_request()` for building complete x402 requests
+
+### v0.4.1 (2025-12-26)
+
+- Added AUSD (Agora USD) support on Solana using Token2022 program
+- Added `TOKEN_2022_PROGRAM_ID` constant
+- Added `get_token_program_id()` and `is_token_2022()` helpers
+
+### v0.4.0 (2025-12-26)
+
+- **Algorand Support**: Added Algorand mainnet and testnet networks
+- Added `ALGORAND` NetworkType
+- Added `algorand` optional dependency (`py-algorand-sdk>=2.0.0`)
+- SDK now supports 16 blockchain networks
+
+### v0.3.4 (2025-12-22)
+
+- Added USDT support (USDT0 omnichain via LayerZero) on Ethereum, Arbitrum, Optimism, Avalanche, Polygon
+- SDK now supports 5 stablecoins: USDC, EURC, AUSD, PYUSD, USDT
+
+### v0.3.3 (2025-12-22)
+
+- Fixed EIP-712 domain names: AUSD uses "Agora Dollar" (not "Agora USD")
+- Fixed EURC domain name on Ethereum/Avalanche: "Euro Coin" (not "EURC")
+
+### v0.3.2 (2025-12-21)
+
+- Added critical implementation notes for multi-token support:
+  - EIP-712 domain names vary by chain (e.g., EURC is "Euro Coin" on Ethereum but "EURC" on Base)
+  - PYUSD uses v,r,s signature variant (Paxos implementation)
+  - Token info must be passed to facilitator via `extra` field
+
+### v0.3.1 (2025-12-21)
+
+- Removed GHO and crvUSD token support (not EIP-3009 compatible)
+- SDK now supports 4 stablecoins: USDC, EURC, AUSD, PYUSD
+
+### v0.3.0 (2025-12-20)
+
+- **Multi-Stablecoin Support**: Added support for 4 stablecoins on EVM chains
+  - USDC (all EVM chains)
+  - EURC (Ethereum, Base, Avalanche)
+  - AUSD (Ethereum, Arbitrum, Avalanche, Polygon, Monad)
+  - PYUSD (Ethereum)
+- Added `TokenType` literal type and `TokenConfig` dataclass
+- Added token helper functions: `get_token_config()`, `get_supported_tokens()`, `is_token_supported()`, `get_networks_by_token()`
+- Added `tokens` field to `NetworkConfig` for multi-token configurations
+- Updated EVM network configurations with token contract addresses and EIP-712 domain parameters
+
+### v0.2.2 (2025-12-16)
+
+- Added Security section to documentation
+- Added Error Codes table
+- Updated links to new GitHub repository
+- Synced documentation with TypeScript SDK
+
+### v0.2.1 (2025-12-16)
+
+- Removed BSC network (doesn't support ERC-3009)
+- Added GitHub Actions workflow for PyPI publishing
+- Updated to 14 supported networks
+
+### v0.2.0 (2025-12-15)
+
+- Added **NEAR Protocol** support with NEP-366 meta-transactions
+- Added **Fogo** SVM chain support
+- Added **x402 v2** protocol support with CAIP-2 network identifiers
+- Added `accepts` array for multi-network payment options
+- Refactored Solana to generic SVM type (supports Solana, Fogo, future SVM chains)
+- Added CAIP-2 parsing utilities (`parse_caip2_network`, `to_caip2_network`)
+- Added `MultiPaymentConfig` for multi-network recipient configuration
+- Added `Payment402BuilderV2` for v2 response construction
+
+### v0.1.0 (2025-12-01)
+
+- Initial release
+- EVM, Solana, Stellar network support
+- Flask, FastAPI, Django, Lambda integrations
+- Full Pydantic models
