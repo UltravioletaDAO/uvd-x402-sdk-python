@@ -1,4 +1,4 @@
-# Arras NEAR escrow (Python 0.105.0)
+# Arras NEAR escrow
 
 Install `pip install 'uvd-x402-sdk[near]'`. Import from `uvd_x402_sdk.near_escrow`.
 Builders need only the base package; signing uses cryptography. All helpers are offline.
