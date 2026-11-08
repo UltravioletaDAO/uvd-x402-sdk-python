@@ -2,13 +2,15 @@
 
 Python SDK for integrating **x402 cryptocurrency payments** via the Ultravioleta DAO facilitator.
 
-Accept **gasless stablecoin payments** across **31 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
+Accept **gasless cryptocurrency payments** across **31 blockchain networks** with a single integration. The SDK handles signature verification, on-chain settlement, and all the complexity of multi-chain payments.
 
-**New in v0.86.0**: EURC on Arc mainnet and testnet, six-decimal euro amounts and token-specific signatures. Gas remains USDC. Funded EURC payments confirmed on Arc mainnet (x402 v1 and v2, 2026-09-22); Arc testnet funded acceptance pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
+See the [CHANGELOG](CHANGELOG.md) for release history.
 
-**New in v0.87.0**: Hedera mainnet and testnet accept native USDC only with x402 v2/exact. HBAR funds sponsor network fees and is rejected as payment. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
+**EURC on Arc**: Mainnet and testnet support six-decimal euro amounts and token-specific signatures. Gas remains USDC. Funded EURC payments confirmed on Arc mainnet (x402 v1 and v2, 2026-09-22); Arc testnet funded acceptance pending. [Arc EURC guide](docs/networks/arc.md#eurc-prices-in-euros).
 
-**New in v0.84.0**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
+**Native Hedera payments**: Hedera mainnet and testnet accept native USDC only with x402 v2/exact. HBAR funds sponsor network fees and is rejected as payment. Includes offline signing, buyer 402 retries and merchant request builders. [Hedera guide](docs/networks/hedera.md).
+
+**Arc USDC payments**: Arc mainnet (`arc`, `eip155:5042`) and testnet (`arc-testnet`, `eip155:5042002`) support direct USDC `exact` payments. Both use 6-decimal ERC-20 amounts and the `USDC` / `2` EIP-712 domain. See [Arc usage and validation](docs/networks/arc.md).
 
 ## NEAR signing with Open Wallet Standard
 
@@ -162,7 +164,7 @@ of the query, is signed exactly when none of the four clients rewrites it
 - **Type Safety**: Full Pydantic models and type hints
 - **Extensible**: Register custom networks and tokens easily
 - **ERC-8004 Trustless Agents**: On-chain reputation and identity for AI agents (25 networks: 23 EVM + Solana + Solana-devnet)
-- **Escrow & Refunds**: Hold payments in escrow with dispute resolution (10 EVM chains, SKALE via CREATE3, Arc and Arc Testnet on the canonical x402r operator)
+- **Escrow & Refunds**: Hold payments in escrow with dispute resolution (14 registered EVM escrow deployments, including SKALE via CREATE3 and Arc, Arc Testnet and Robinhood mainnet on the canonical x402r operator; Robinhood uses USDG)
 - **Commerce Scheme**: Supports `"exact"`, `"escrow"`, and `"commerce"` schemes (facilitator v1.43.0+)
 - **Server-Side Signing**: `connect_with_private_key()` for backend EIP-3009 signing without browser wallet
 - **`/accepts` Negotiation**: Discover facilitator capabilities before constructing payments
@@ -339,6 +341,8 @@ def premium_endpoint(payment_result):
 | Sui Testnet | Sui | - | `sui:testnet` | Active |
 | XRP Ledger | XRPL | - | _(no CAIP-2)_ `xrpl` | Active |
 | XRP Ledger Testnet | XRPL | - | _(no CAIP-2)_ `xrpl-testnet` | Active |
+| Hedera | Hedera (native) | - | `hedera:mainnet` | Active (v2/exact) |
+| Hedera Testnet | Hedera (native) | - | `hedera:testnet` | Active (v2/exact) |
 
 > **HashKey Chain** (`hashkey` / `hashkey-testnet`) uses HSK for gas and USDC with 6 decimals for payments. Mainnet signs with `Bridged USDC / 2`; testnet uses `USD Coin / 2`. HashKey USDT is not supported because it lacks EIP-3009.
 
@@ -346,12 +350,13 @@ def premium_endpoint(payment_result):
 
 | Token | Networks | Decimals |
 |-------|----------|----------|
-| USDC | All networks except Robinhood | 6 |
+| USDC | All listed networks except Robinhood mainnet/testnet and XRPL mainnet/testnet | 6 (7 on Stellar) |
 | EURC | Ethereum, Base, Avalanche, Arc mainnet/testnet | 6 |
 | AUSD | Ethereum, Arbitrum, Avalanche, Polygon, Monad, Sui | 6 |
 | PYUSD | Ethereum | 6 |
 | USDT | Ethereum, Arbitrum, Optimism, Avalanche, Polygon | 6 |
 | USDG | Robinhood, Robinhood Testnet | 6 |
+| XRP (native, not a stablecoin) | XRP Ledger, XRP Ledger Testnet | 6 |
 
 > **Arc uses one USDC balance at two precisions.** Native gas uses 18 decimals; ERC-20 payments use 6. Both Arc networks sign `$0.01` as `10000` atomic units. Do not add the native and ERC-20 balance readings together.
 
