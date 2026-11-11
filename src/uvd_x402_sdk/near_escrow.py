@@ -1,4 +1,4 @@
-"""Arras v1: offline NEP-366 signing, in atomic units and nanoseconds.
+"""Arras v1 and v2: offline NEP-366 signing, in atomic units and nanoseconds.
 
 Only registered escrow contracts are signed. Read operator scope and advertised
 support from trusted facilitator ``/supported`` configuration.
@@ -7,8 +7,12 @@ NEXT nonce and an expiry block from the selected key; persist the signed payment
 before submitting it. Lifecycle callers should use a function-call key restricted
 to this escrow and the methods they need (with a bounded gas allowance).
 
-``authorize_from_budget`` is intentionally unavailable until v2 freezes its ABI.
-Signing needs the ``near`` extra; message/id builders work on a base install.
+Arras v2 (``NEAR_ESCROW_CONTRACTS_V2``) takes the v1 ``authorize`` msg plus two
+optional fields, ``dispute_deadline`` and ``operator_ticket``; v1 refuses both
+(``E03``). ``sign_operator_ticket`` is the operator's ed25519 ticket
+(arras ``contracts/escrow-v2/src/ticket.rs``). ``authorize_from_budget`` is not
+implemented here yet. Signing needs the ``near`` extra; message/id builders work
+on a base install.
 """
 
 from __future__ import annotations
@@ -39,6 +43,13 @@ __all__ = [
     "NEAR_ESCROW_MAX_GAS",
     "NEAR_ESCROW_TOKENS",
     "NEAR_ESCROW_CONTRACTS",
+    "NEAR_ESCROW_CONTRACTS_V2",
+    "near_escrow_contract_version",
+    "OPERATOR_TICKET_DOMAIN",
+    "OperatorTicketSigner",
+    "operator_ticket_message",
+    "sign_operator_ticket",
+    "verify_operator_ticket",
     "build_escrow_msg",
     "payment_id_preimage",
     "compute_payment_id",
@@ -70,6 +81,32 @@ NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "near:testnet": ("arras-v1b-1101.testnet",),
         "near:mainnet": ("v1.arras-escrow.near",),
     }
+)
+# Arras v2 deployments of the reviewed wasm (arras ddc5121, sha256 1541525c...fa77;
+# arras docs/MAINNET.md sections 8.1, 8.6 and 8.8), keyless, isolated by network.
+NEAR_ESCROW_CONTRACTS_V2: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "near:testnet": ("v2.arras-v2e-1107.testnet",),
+        "near:mainnet": ("v2.arras-escrow.near",),
+    }
+)
+# arras contracts/escrow-v2/src/ticket.rs:25
+OPERATOR_TICKET_DOMAIN = "arras:v2:operator_ticket"
+# A base58 64-byte signature has at most 88 characters (ticket.rs:63-66).
+_MAX_TICKET_SIG_LEN = 88
+# The keys of a v1 authorize msg; v1 refuses any other (deny_unknown_fields, E03).
+_V1_MSG_KEYS = frozenset(
+    (
+        "v",
+        "action",
+        "operator_id",
+        "receiver",
+        "release_deadline",
+        "reclaim_after",
+        "fee_bps_max",
+        "terms_hash",
+        "salt",
+    )
 )
 _LIFECYCLE_GAS = {
     "release": (3_000_000_000_000, 30_000_000_000_000),
@@ -109,6 +146,61 @@ def _json(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
+def _operator_id(value: object, name: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[a-z0-9_-]{1,32}", value) is None:
+        raise ValueError(f"{name}: expected [a-z0-9_-]{{1,32}}")
+    return value
+
+
+def _payment_id(value: object) -> str:
+    try:
+        if not isinstance(value, str) or not 32 <= len(value) <= 44:
+            raise ValueError
+        raw = _b58decode(value)
+        if len(raw) != 32 or _b58encode(raw) != value:
+            raise ValueError
+    except ValueError:
+        raise ValueError("invalid payment_id") from None
+    return value
+
+
+def _ticket_signature(value: object) -> bytes:
+    """Canonical base58 of exactly 64 bytes, as ticket.rs:62-73 decodes it."""
+    try:
+        if not isinstance(value, str) or not 1 <= len(value) <= _MAX_TICKET_SIG_LEN:
+            raise ValueError
+        raw = _b58decode(value)
+        if len(raw) != 64 or _b58encode(raw) != value:
+            raise ValueError
+    except ValueError:
+        raise ValueError("operator_ticket.sig: expected canonical base58 of 64 bytes") from None
+    return raw
+
+
+def _ticket_value(value: object) -> dict:
+    """Exactly {expiry, sig}, as msg.rs:28-33 parses it (deny_unknown_fields)."""
+    if not isinstance(value, Mapping) or value.keys() != {"expiry", "sig"}:
+        raise ValueError("operator_ticket: expected exactly {expiry, sig}")
+    expiry = _uint(value["expiry"], 64, "operator_ticket.expiry")
+    _ticket_signature(value["sig"])
+    return {"expiry": str(expiry), "sig": value["sig"]}
+
+
+def _msg_v2_fields(p: Mapping[str, Any], release_at: int, reclaim_at: int) -> dict:
+    """The v2 fields present (not None), in the order of msg.rs:66-69."""
+    fields: dict = {}
+    if p.get("dispute_deadline") is not None:
+        deadline = _uint(p["dispute_deadline"], 64, "dispute_deadline")
+        if deadline < release_at:
+            raise ValueError("dispute_deadline before release_deadline (Arras E67)")
+        if deadline > reclaim_at:
+            raise ValueError("dispute_deadline after reclaim_after (Arras E11)")
+        fields["dispute_deadline"] = str(deadline)
+    if p.get("operator_ticket") is not None:
+        fields["operator_ticket"] = _ticket_value(p["operator_ticket"])
+    return fields
+
+
 def _msg_values(p: Mapping[str, Any]) -> tuple:
     if not isinstance(p, Mapping):
         raise ValueError("msg must be a mapping")
@@ -123,9 +215,7 @@ def _msg_values(p: Mapping[str, Any]) -> tuple:
     }
     if not required <= p.keys():
         raise ValueError("msg is missing required fields")
-    operator = p["operator_id"]
-    if not isinstance(operator, str) or re.fullmatch(r"[a-z0-9_-]{1,32}", operator) is None:
-        raise ValueError("operator_id: expected [a-z0-9_-]{1,32}")
+    _operator_id(p["operator_id"], "operator_id")
     _account(p["receiver"], "receiver")
     release_at = _uint(p["release_deadline"], 64, "release_deadline")
     reclaim_at = _uint(p["reclaim_after"], 64, "reclaim_after")
@@ -148,6 +238,9 @@ def build_escrow_msg(params: Mapping[str, Any]) -> str:
 
     Fields: operator_id/receiver/terms_hash/salt (str), release_deadline and
     reclaim_after (int or canonical decimal str), fee_bps_max (int, u16).
+    Arras v2 only, appended in this order when present and not None:
+    dispute_deadline (Unsigned, release_deadline <= it <= reclaim_after) and
+    operator_ticket ({expiry, sig}, what sign_operator_ticket returns).
     Other mapping fields are ignored, allowing the same frozen vector for the id.
     """
     release_at, reclaim_at, fee, _, _ = _msg_values(params)
@@ -162,6 +255,7 @@ def build_escrow_msg(params: Mapping[str, Any]) -> str:
             "fee_bps_max": fee,
             "terms_hash": params["terms_hash"],
             "salt": params["salt"],
+            **_msg_v2_fields(params, release_at, reclaim_at),
         }
     )
 
@@ -237,6 +331,160 @@ class NearEd25519Signer:
         return self._signer.sign_message(digest)
 
 
+class OperatorTicketSigner(Protocol):
+    """The operator's ticket key: Ed25519 over the RAW ticket message, never a hash.
+
+    ``NearEd25519Signer`` (a seed held in memory) satisfies it, and so does any
+    external signer with these two members. The SDK never loads a key itself.
+    ``OwsNearSigner`` does not: its ``sign`` only takes 32-byte digests and
+    refuses the message (ValueError, nothing signed).
+    """
+
+    @property
+    def public_key(self) -> bytes:
+        """Raw 32-byte Ed25519 public key (the operator's ``ticket_pubkey``)."""
+        ...
+
+    def sign(self, message: bytes) -> bytes:
+        """Return the raw 64-byte Ed25519 signature of ``message``."""
+        ...
+
+
+def _ticket_subject(subject: object) -> tuple[int, tuple[str, ...]]:
+    """ticket.rs:30-39: tag 0 payment {payment_id}; tag 1 budget {operator_id, owner, agent}."""
+    if isinstance(subject, Mapping) and len(subject) == 1:
+        kind, fields = next(iter(subject.items()))
+        if not isinstance(fields, Mapping):
+            raise ValueError("subject: expected a mapping of fields")
+        if kind == "payment" and fields.keys() == {"payment_id"}:
+            return 0, (_payment_id(fields["payment_id"]),)
+        if kind == "budget" and fields.keys() == {"operator_id", "owner", "agent"}:
+            _operator_id(fields["operator_id"], "subject.operator_id")
+            _account(fields["owner"], "subject.owner")
+            _account(fields["agent"], "subject.agent")
+            return 1, (fields["operator_id"], fields["owner"], fields["agent"])
+    raise ValueError(
+        "subject: expected {'payment': {'payment_id'}} or "
+        "{'budget': {'operator_id', 'owner', 'agent'}}"
+    )
+
+
+def _ticket_public_key(value: object) -> bytes:
+    if isinstance(value, bytes) and len(value) == 32:
+        return value
+    try:
+        if not isinstance(value, str) or not value.startswith("ed25519:") or len(value) > 52:
+            raise ValueError
+        raw = _b58decode(value[8:])
+        if len(raw) != 32 or _b58encode(raw) != value[8:]:
+            raise ValueError
+    except ValueError:
+        raise ValueError("public_key: expected 32 bytes or ed25519:<base58 of 32 bytes>") from None
+    return raw
+
+
+def _ed25519_valid(public_key: bytes, signature: bytes, message: bytes) -> bool:
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        raise ImportError(
+            "Arras operator tickets need cryptography: "
+            "pip install 'uvd-x402-sdk[near]' (the near extra)"
+        ) from None
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key).verify(signature, message)
+    except InvalidSignature:
+        return False
+    return True
+
+
+def operator_ticket_message(contract: str, subject: Mapping[str, Any], expiry: Unsigned) -> bytes:
+    """The bytes the operator signs: ``borsh(TicketPreimage)`` of ticket.rs:41-59.
+
+    ``OPERATOR_TICKET_DOMAIN`` String, ``contract`` String (the escrow account),
+    ``subject`` enum (u8 tag, then its Strings), ``expiry`` u64 LE nanoseconds.
+    The contract's views ``ticket_message_payment`` / ``ticket_message_budget``
+    (views.rs:214-242) return these same bytes. ``subject`` is
+    ``{"payment": {"payment_id": ...}}`` or
+    ``{"budget": {"operator_id": ..., "owner": ..., "agent": ...}}``.
+    Any valid account is accepted as ``contract``: its name is inside the signed
+    bytes, so the ticket is only valid on that contract.
+    """
+    _account(contract, "contract")
+    tag, values = _ticket_subject(subject)
+    n = _uint(expiry, 64, "expiry")
+    ser = BorshSerializer().write_string(OPERATOR_TICKET_DOMAIN).write_string(contract)
+    ser.write_u8(tag)
+    for value in values:
+        ser.write_string(value)
+    return ser.write_u64(n).get_bytes()
+
+
+def sign_operator_ticket(
+    signer: OperatorTicketSigner,
+    *,
+    contract: str,
+    subject: Mapping[str, Any],
+    expiry: Unsigned,
+) -> dict:
+    """Sign an Arras v2 ``operator_ticket``: ``{"expiry": "<ns>", "sig": "<base58>"}``.
+
+    The dict goes as is into an ``authorize`` msg (``msg["operator_ticket"]``).
+    Valid on chain while ``now < expiry`` (ns), E54 after. A payment ticket is
+    single use in practice (a payment_id never repeats, E13); a budget ticket
+    admits every deposit of that (owner, agent) pair until expiry, even after
+    revoke_agent, so keep expiry short. Every input is checked before the signer
+    is touched, and the signature is verified before it is returned.
+    """
+    message = operator_ticket_message(contract, subject, expiry)
+    n = _uint(expiry, 64, "expiry")
+    if n == 0:
+        raise ValueError("expiry must be positive: a ticket is valid while now < expiry")
+    public_key = signer.public_key
+    if not isinstance(public_key, bytes) or len(public_key) != 32:
+        raise ValueError("expected 32-byte Ed25519 public key")
+    signature = signer.sign(message)
+    if not isinstance(signature, bytes) or len(signature) != 64:
+        raise ValueError("invalid Ed25519 ticket signature")
+    if not _ed25519_valid(public_key, signature, message):
+        raise ValueError("invalid Ed25519 ticket signature")
+    return {"expiry": str(n), "sig": _b58encode(signature)}
+
+
+def verify_operator_ticket(
+    public_key: bytes | str,
+    *,
+    contract: str,
+    subject: Mapping[str, Any],
+    ticket: object,
+    now_ns: Unsigned,
+) -> bool:
+    """True iff ``check_ticket`` (authorize.rs:265-285) would accept ``ticket`` at ``now_ns``.
+
+    False when ``now_ns >= expiry`` (E54), or when the ticket is not exactly
+    ``{expiry, sig}`` with a canonical base58 64-byte signature of this contract,
+    subject and expiry (E53). ``public_key`` is 32 raw bytes or the
+    ``ed25519:<base58>`` that ``get_operator(...).ticket_pubkey`` returns.
+    A malformed public_key, contract, subject or now_ns (the caller's inputs)
+    raises ValueError; a malformed ticket (untrusted) is False. This is a
+    pre-check: the chain verifies with its own Ed25519 implementation.
+    """
+    key = _ticket_public_key(public_key)
+    _account(contract, "contract")
+    _ticket_subject(subject)
+    now = _uint(now_ns, 64, "now_ns")
+    try:
+        fields = _ticket_value(ticket)
+    except ValueError:
+        return False
+    expiry = int(fields["expiry"])
+    if now >= expiry:
+        return False
+    message = operator_ticket_message(contract, subject, expiry)
+    return _ed25519_valid(key, _ticket_signature(fields["sig"]), message)
+
+
 @dataclass(frozen=True)
 class NearEscrowDelegateOptions:
     """Explicit trusted network/contract and selected access-key context.
@@ -255,19 +503,28 @@ class NearEscrowDelegateOptions:
     gas: Unsigned | None = None
 
 
-def _options(options: NearEscrowDelegateOptions) -> None:
+def near_escrow_contract_version(network: str, contract: str) -> str:
+    """``"v1"`` or ``"v2"`` for a registered Arras contract; ValueError otherwise."""
+    if network not in NEAR_ESCROW_TOKENS:
+        raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
+    if contract not in NEAR_ESCROW_CONTRACTS[network] + NEAR_ESCROW_CONTRACTS_V2[network]:
+        raise ValueError("escrow_contract is not registered for this network")
+    return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"
+
+
+def _options(options: NearEscrowDelegateOptions) -> str:
     if options.network not in NEAR_ESCROW_TOKENS:
         raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
     _account(options.sender_id, "sender_id")
     _account(options.escrow_contract, "escrow_contract")
-    if options.escrow_contract not in NEAR_ESCROW_CONTRACTS[options.network]:
-        raise ValueError("escrow_contract is not registered for this network")
+    version = near_escrow_contract_version(options.network, options.escrow_contract)
     nonce = _uint(options.nonce, 64, "nonce")
     height = _uint(options.max_block_height, 64, "max_block_height")
     if nonce == 0:
         raise ValueError("nonce must be positive")
     if nonce >= height * 1_000_000:
         raise ValueError("nonce must be below max_block_height * 1_000_000")
+    return version
 
 
 def build_escrow_authorization_delegate(
@@ -277,11 +534,17 @@ def build_escrow_authorization_delegate(
     amount: Unsigned,
     msg: Mapping[str, Any],
 ) -> dict:
-    """Build the single FT function call. No key is used by this builder."""
-    _options(options)
+    """Build the single FT function call. No key is used by this builder.
+
+    On a v1 contract the msg may not carry dispute_deadline or operator_ticket:
+    v1 parses it with deny_unknown_fields and returns the whole amount (E03).
+    """
+    version = _options(options)
     if token != NEAR_ESCROW_TOKENS[options.network]:
         raise ValueError("token does not match network USDC")
     canonical_msg = build_escrow_msg(msg)
+    if version == "v1" and json.loads(canonical_msg).keys() - _V1_MSG_KEYS:
+        raise ValueError("dispute_deadline and operator_ticket need an Arras v2 contract")
     if msg["receiver"] in (options.sender_id, options.escrow_contract):
         raise ValueError("receiver equals payer or escrow")
     n = _uint(amount, 128, "amount")
@@ -407,7 +670,7 @@ def sign_escrow_lifecycle(
     method: str,
     args: Mapping[str, Any] | None = None,
 ) -> dict:
-    """Sign one allowed v1 method with deposit zero and its gas floor/cap."""
+    """Sign one allowed method (the same five on v1 and v2), deposit zero, its gas floor/cap."""
     _options(options)
     if method not in _LIFECYCLE_GAS:
         raise ValueError("escrow method not allowed")
@@ -434,16 +697,7 @@ def sign_escrow_lifecycle(
         _account(args.get("account"), "account")
         params["account"] = args["account"]
     elif method != "withdraw":
-        payment_id = args.get("payment_id")
-        try:
-            if not isinstance(payment_id, str) or not 32 <= len(payment_id) <= 44:
-                raise ValueError
-            raw = _b58decode(payment_id)
-            if len(raw) != 32 or _b58encode(raw) != payment_id:
-                raise ValueError
-        except ValueError:
-            raise ValueError("invalid payment_id") from None
-        params["payment_id"] = payment_id
+        params["payment_id"] = _payment_id(args.get("payment_id"))
         if method == "release":
             amount = args.get("amount")
             if amount is not None and _uint(amount, 128, "amount") == 0:
@@ -487,11 +741,11 @@ def withdraw_for(options: NearEscrowDelegateOptions, account: str) -> dict:
 
 
 class AuthorizeFromBudget(Protocol):
-    """v2 adapter boundary. Wire format and authorization policy are not frozen."""
+    """Arras v2 budget adapter boundary (budget.rs:41-85); not implemented in this SDK yet."""
 
     def authorize_from_budget(self, request: Mapping[str, Any]) -> dict: ...
 
 
 def authorize_from_budget(options: NearEscrowDelegateOptions, request: Mapping[str, Any]) -> dict:
     """Reserved v2 entry point. Always raises before accessing the signer."""
-    raise NotImplementedError("Arras v2 budget ABI and golden vectors are not frozen")
+    raise NotImplementedError("Arras v2 authorize_from_budget is not implemented in this SDK yet")

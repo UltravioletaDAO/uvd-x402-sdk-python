@@ -71,11 +71,65 @@ def mutations(source: str):
         ("Ed25519PublicKey.from_public_bytes(public_key).verify(signature, digest)", "pass"),
         ('"deposit": 0}', '"deposit": 1}'),
         (
-            'raise NotImplementedError("Arras v2 budget ABI and golden vectors are not frozen")',
+            "raise NotImplementedError("
+            '"Arras v2 authorize_from_budget is not implemented in this SDK yet")',
             "return {}",
         ),
         ('("v1.arras-escrow.near",)', "()"),
         ('("v1.arras-escrow.near",)', '["v1.arras-escrow.near"]'),
+        # Arras v2: registry, version, msg fields and the operator ticket.
+        ('("v2.arras-escrow.near",)', '["v2.arras-escrow.near"]'),
+        (
+            'return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"',
+            'return "v2"',
+        ),
+        (
+            'return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"',
+            'return "v1"',
+        ),
+        ("**_msg_v2_fields(params, release_at, reclaim_at),", ""),
+        ('fields["dispute_deadline"] = str(deadline)', 'fields["dispute_deadline"] = deadline'),
+        (
+            'return {"expiry": str(expiry), "sig": value["sig"]}',
+            'return {"sig": value["sig"], "expiry": str(expiry)}',
+        ),
+        (
+            'return {"expiry": str(expiry), "sig": value["sig"]}',
+            'return {"expiry": expiry, "sig": value["sig"]}',
+        ),
+        ('value.keys() != {"expiry", "sig"}', 'not value.keys() >= {"expiry", "sig"}'),
+        ("_MAX_TICKET_SIG_LEN = 88", "_MAX_TICKET_SIG_LEN = 89"),
+        ('len(value) > 52', "len(value) > 53"),
+        (
+            'OPERATOR_TICKET_DOMAIN = "arras:v2:operator_ticket"',
+            'OPERATOR_TICKET_DOMAIN = "arras:v1:operator_ticket"',
+        ),
+        (
+            ".write_string(OPERATOR_TICKET_DOMAIN).write_string(contract)",
+            ".write_string(contract).write_string(OPERATOR_TICKET_DOMAIN)",
+        ),
+        ("ser.write_u8(tag)", "ser.write_u8(1 - tag)"),
+        ("return ser.write_u64(n).get_bytes()", "return ser.write_u128(n).get_bytes()"),
+        (
+            'return 1, (fields["operator_id"], fields["owner"], fields["agent"])',
+            'return 1, (fields["operator_id"], fields["agent"], fields["owner"])',
+        ),
+        ("isinstance(subject, Mapping) and len(subject) == 1", "isinstance(subject, Mapping)"),
+        ('fields.keys() == {"payment_id"}', 'fields.keys() >= {"payment_id"}'),
+        (
+            'fields.keys() == {"operator_id", "owner", "agent"}',
+            'fields.keys() >= {"operator_id", "owner", "agent"}',
+        ),
+        ("if now >= expiry:", "if now > expiry:"),
+        ("if now >= expiry:", "if False:"),
+        ('    _account(contract, "contract")\n    _ticket_subject(subject)\n', ""),
+        ('return _ed25519_valid(key, _ticket_signature(fields["sig"]), message)', "return True"),
+        ("        return False\n    return True\n", "        return True\n    return True\n"),
+        (
+            'return {"expiry": str(n), "sig": _b58encode(signature)}',
+            'return {"expiry": n, "sig": _b58encode(signature)}',
+        ),
+        ("'uvd-x402-sdk[near]' (the near extra)", "'uvd-x402-sdk[solana]' (the near extra)"),
     ]
     for old, new in replacements:
         assert source.count(old) == 1, ("mutation site moved", old, source.count(old))
@@ -97,7 +151,15 @@ def child():
     uvd_x402_sdk.near_escrow = module
     raise SystemExit(
         pytest.main(
-            ["-q", "--tb=short", "--disable-warnings", str(ROOT / "tests/test_near_escrow.py")]
+            [
+                "-q",
+                "--tb=short",
+                "--disable-warnings",
+                "-p",
+                "no:cacheprovider",
+                str(ROOT / "tests/test_near_escrow.py"),
+                str(ROOT / "tests/test_near_escrow_v2.py"),
+            ]
         )
     )
 

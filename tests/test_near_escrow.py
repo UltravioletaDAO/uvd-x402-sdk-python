@@ -91,9 +91,11 @@ def decode(payment):
 
 
 def test_frozen_file_not_rewritten():
+    # Byte copy of arras docs/vectores.json at 9f8332f (git blob 246303c1); its v1
+    # vectors are those of the previous copy, the "v2" section is new.
     assert (
         hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
-        == "fe81bfc72bd1e90a5afb86fb00eece59cbd78fde983eda397c797bf65351709b"
+        == "5a78be59d03ee2c57aae49aac6f64488b996f0e5868dda095c063a1372eb2f70"
     )
 
 
@@ -715,9 +717,24 @@ def test_guide_uses_the_capturer_key_for_release_and_refund():
         next_access_key_nonce=7,
         expiry_block_height=100_000_000,
         receipt_logs=[],
+        ticket_seed=bytes(range(64, 96)),
+        now_ns=1_793_000_000_000_000_000,
     )
     for block in blocks:
         exec(compile(block, "docs/near-escrow.md", "exec"), context)
+    # The Arras v2 flow of the guide: EM's ticket inside the msg the payer signs.
+    v2 = decode(context["v2_payment"])
+    assert v2["receiver"] == TOKEN and v2["sender"] == V1["payer"]
+    assert v2["args"]["receiver_id"] == es.NEAR_ESCROW_CONTRACTS_V2["near:testnet"][0]
+    assert v2["args"]["msg"] == context["v2_msg"]
+    assert context["v2_payment_id"] == V1["payment_id"]
+    assert es.verify_operator_ticket(
+        es.NearEd25519Signer(bytes(range(64, 96))).public_key,
+        contract=es.NEAR_ESCROW_CONTRACTS_V2["near:testnet"][0],
+        subject={"payment": {"payment_id": V1["payment_id"]}},
+        ticket=json.loads(context["v2_msg"])["operator_ticket"],
+        now_ns=context["now_ns"],
+    )
     for name, method, nonce in (("release_body", "release", 11), ("refund_body", "refund", 12)):
         body = context[name]
         d = decode({"payload": body["paymentPayload"]["payload"]})

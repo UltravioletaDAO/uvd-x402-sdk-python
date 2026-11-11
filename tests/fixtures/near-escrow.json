@@ -1,5 +1,5 @@
 {
-  "_fuente": "prescripcion del escrow Arras, sec. 7 (recomputados por el refutador el 2026-10-26); probados por U-01 y U-02 en contracts/escrow-core",
+  "_fuente": "vectores dorados del escrow Arras: payment_id V-1..V-3 y tarifas F-1..F-7; probados por U-01 y U-02 en contracts/escrow-core",
   "payment_id": {
     "formula": "base58(sha256(borsh(preimagen)))",
     "preimagen": [
@@ -124,6 +124,120 @@
         "net": "8700",
         "nota": "min_amount 0,01 USDC"
       }
+    ]
+  },
+  "v2": {
+    "_fuente": "Arras v2 (H-9): msg de v2, VB-1, tickets T-1/T-2 y disputa; probados por los tests de contracts/escrow-v2 (vectores_v2_del_json). Los vectores de v1 de arriba no cambian y valen igual en v2.",
+    "payment_id": "la misma formula y la misma preimagen que v1 (v = 1): dispute_deadline y operator_ticket no entran",
+    "msg_authorize": {
+      "regla": "el msg de v1 mas, al final y en este orden, dispute_deadline (U64 string; si falta vale reclaim_after) y operator_ticket ({expiry, sig}); ambos opcionales: un msg de v1 es un msg valido de v2 con el mismo payment_id",
+      "canonico_v1_en_v2": "{\"v\":1,\"action\":\"authorize\",\"operator_id\":\"em\",\"receiver\":\"worker-demo.testnet\",\"release_deadline\":\"1793577600000000000\",\"reclaim_after\":\"1793664000000000000\",\"fee_bps_max\":1300,\"terms_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"salt\":\"00000000000000000000000000000000\"}",
+      "canonico_con_dispute_deadline": "{\"v\":1,\"action\":\"authorize\",\"operator_id\":\"em\",\"receiver\":\"worker-demo.testnet\",\"release_deadline\":\"1793577600000000000\",\"reclaim_after\":\"1793664000000000000\",\"fee_bps_max\":1300,\"terms_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"salt\":\"00000000000000000000000000000000\",\"dispute_deadline\":\"1793577600000000000\"}",
+      "canonico_con_ticket_t1": "{\"v\":1,\"action\":\"authorize\",\"operator_id\":\"em\",\"receiver\":\"worker-demo.testnet\",\"release_deadline\":\"1793577600000000000\",\"reclaim_after\":\"1793664000000000000\",\"fee_bps_max\":1300,\"terms_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"salt\":\"00000000000000000000000000000000\",\"dispute_deadline\":\"1793577600000000000\",\"operator_ticket\":{\"expiry\":\"1793577600000000000\",\"sig\":\"4QDFiAQAarug41kHc1UUanhMK4P9pFZw4g3Xh2J15jpJC36ZQVeqP5YCXYzx9jXLhy7mNBKW2MNvgmd5vQ6wEMZs\"}}",
+      "payment_id_de_los_tres": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M"
+    },
+    "msg_budget": {
+      "regla": "deposita en el presupuesto (sender_id, agent, operator_id); operator_ticket opcional al final (obligatorio si el operador tiene ticket_pubkey)",
+      "canonico": "{\"v\":1,\"action\":\"budget\",\"operator_id\":\"em\",\"agent\":\"agent-demo.testnet\",\"tope_por_pago\":\"2000000\",\"tope_diario\":\"10000000\"}"
+    },
+    "authorize_from_budget": {
+      "regla": "la formula de payment_id de V-1..V-3 con payer = owner del presupuesto (el agente no entra)",
+      "vectores": [
+        {
+          "id": "VB-1",
+          "owner": "payer-demo.testnet",
+          "agent": "agent-demo.testnet",
+          "operator_id": "em",
+          "token_de": "V-1 (USDC de testnet)",
+          "receiver": "worker-demo.testnet",
+          "amount": "1000000",
+          "release_deadline": "1793577600000000000",
+          "reclaim_after": "1793664000000000000",
+          "fee_bps_max": 1300,
+          "terms_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "salt": "00000000000000000000000000000000",
+          "payment_id": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M",
+          "nota": "= V-1: el mismo pago por ft_transfer_call del owner o por su agente tiene el mismo id (y el segundo da E13)"
+        }
+      ]
+    },
+    "operator_ticket": {
+      "mensaje": "borsh(domain String, contract String, subject enum, expiry u64): domain = arras:v2:operator_ticket; contract = la cuenta del contrato; subject tag 0 = pago {payment_id String}, tag 1 = presupuesto {operator_id, owner, agent String}",
+      "firma": "ed25519 de esos bytes; sig = base58 de los 64 bytes; vale mientras now < expiry",
+      "reuso": "un ticket de pago es de un solo uso de hecho (E13: el payment_id no se repite); uno de presupuesto firma (operator_id, owner, agent) y expiry, sin monto ni nonce: vale para cualquier cantidad de depositos del par hasta expiry, tambien despues de revoke_agent. El operador firma con expiry corto",
+      "vista": "ticket_message_payment(payment_id, expiry) y ticket_message_budget(operator_id, owner, agent, expiry) devuelven los bytes en base64",
+      "llave_de_prueba": {
+        "semilla_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+        "pubkey_hex": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+        "ticket_pubkey": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+        "nota": "solo para tests y para el SDK; nunca una llave real: el contrato la rechaza como ticket_pubkey (E48)"
+      },
+      "vectores": [
+        {
+          "id": "T-1",
+          "contract": "v2.arras-dev.testnet",
+          "subject": {
+            "payment": {
+              "payment_id": "DN5eMA3sNES7xsoy6qvy24cVF6Dmwjxpkvd2b4e8P38M"
+            }
+          },
+          "expiry": "1793577600000000000",
+          "mensaje_hex": "1800000061727261733a76323a6f70657261746f725f7469636b65741400000076322e61727261732d6465762e746573746e6574002c000000444e35654d4133734e45533778736f7936717679323463564636446d776a78706b766432623465385033384d0000190d5311e418",
+          "sig": "4QDFiAQAarug41kHc1UUanhMK4P9pFZw4g3Xh2J15jpJC36ZQVeqP5YCXYzx9jXLhy7mNBKW2MNvgmd5vQ6wEMZs"
+        },
+        {
+          "id": "T-2",
+          "contract": "v2.arras-dev.testnet",
+          "subject": {
+            "budget": {
+              "operator_id": "em",
+              "owner": "payer-demo.testnet",
+              "agent": "agent-demo.testnet"
+            }
+          },
+          "expiry": "1793577600000000000",
+          "mensaje_hex": "1800000061727261733a76323a6f70657261746f725f7469636b65741400000076322e61727261732d6465762e746573746e65740102000000656d1200000070617965722d64656d6f2e746573746e6574120000006167656e742d64656d6f2e746573746e65740000190d5311e418",
+          "sig": "3LBjHxGuTxfHXng6Ze7Y5wQKunwi1HGwYSFoYWRWstrch5UZUWpMTtyYfYFw4oDeB6GB66fwyEcQGd56SruXUuns"
+        }
+      ],
+      "recomputado": "firmas recomputadas con OpenSSL 4.1.0 (pkeyutl -sign -rawin, Ed25519) sobre los mismos bytes: coinciden"
+    },
+    "disputa": {
+      "storage_reservado_bytes": 86,
+      "plazo_del_arbitro_ns": {
+        "min": "60000000000",
+        "max": "2592000000000000"
+      },
+      "vencida": "lo liberado queda liberado; lo vivo va a la parte que no abrio la disputa (to_receiver con la tarifa congelada), salvo que la haya abierto el payer con opened_at >= release_deadline: entonces vuelve al payer"
+    },
+    "codigos_nuevos": [
+      "E47_VENTANA_ARBITRO",
+      "E48_TICKET_PUBKEY",
+      "E50_SIN_PRESUPUESTO",
+      "E51_TOPE_DIARIO",
+      "E52_TOPE_POR_PAGO_PRESUPUESTO",
+      "E53_TICKET_INVALIDO",
+      "E54_TICKET_VENCIDO",
+      "E55_AGENTE_INVALIDO",
+      "E56_TOPES_PRESUPUESTO",
+      "E57_PLAZO_PRESUPUESTO",
+      "E60_NO_ES_PARTE",
+      "E61_FUERA_DE_PLAZO_DISPUTA",
+      "E62_NO_ES_ARBITRO",
+      "E63_REPARTO_INVALIDO",
+      "E64_ARBITRO_EN_PLAZO",
+      "E65_ARBITRO_VENCIDO",
+      "E66_REASON_HASH",
+      "E67_DISPUTA_ANTES_DE_RELEASE"
+    ],
+    "eventos_nuevos": [
+      "budget_deposited",
+      "budget_spent",
+      "budget_withdrawn",
+      "budget_caps_set",
+      "agent_revoked",
+      "dispute_opened",
+      "dispute_resolved"
     ]
   }
 }

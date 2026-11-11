@@ -676,6 +676,9 @@ Arras escrow helpers (`uvd_x402_sdk.near_escrow`, extra `near`) sign local Ed255
 delegates offline. See [the public API and facilitator request examples](docs/near-escrow.md).
 Signing requires a contract in `NEAR_ESCROW_CONTRACTS` for its network and advertised facilitator support.
 The registry contains `arras-v1b-1101.testnet` on testnet and `v1.arras-escrow.near` on mainnet.
+Arras v2 (`NEAR_ESCROW_CONTRACTS_V2`: `v2.arras-v2e-1107.testnet`, `v2.arras-escrow.near`) adds the
+optional `dispute_deadline` and `operator_ticket` to the authorize msg; `sign_operator_ticket` /
+`verify_operator_ticket` sign and check the operator's Ed25519 ticket (vectors T-1/T-2).
 
 ```python
 from uvd_x402_sdk import X402Client, X402Config

@@ -11,6 +11,7 @@ from typing import Literal, TypedDict
 
 from .near_escrow import (
     NEAR_ESCROW_CONTRACTS,
+    NEAR_ESCROW_CONTRACTS_V2,
     NEAR_ESCROW_TOKENS,
     NearLocalSigner,
     Unsigned,
@@ -91,13 +92,14 @@ def build_arras_storage_deposit(
 ) -> NearStorageTransaction:
     """Fund Arras storage with registration_only=False so surplus remains usable.
 
-    escrow_contract must be registered for network in NEAR_ESCROW_CONTRACTS, never inferred
+    escrow_contract must be registered for network in NEAR_ESCROW_CONTRACTS or
+    NEAR_ESCROW_CONTRACTS_V2 (the same NEP-145 storage_deposit), never inferred
     from an account parent. The 0.05 NEAR default funds roughly five payments,
     not a guarantee of capacity. This builder neither signs nor submits it.
     """
     if network not in NEAR_ESCROW_CONTRACTS:
         raise ValueError("unsupported NEAR network")
-    if escrow_contract not in NEAR_ESCROW_CONTRACTS[network]:
+    if escrow_contract not in NEAR_ESCROW_CONTRACTS[network] + NEAR_ESCROW_CONTRACTS_V2[network]:
         raise ValueError("escrow_contract is not registered for this network")
     return _storage(network, payer_id, account_id, escrow_contract, deposit, False)
 
