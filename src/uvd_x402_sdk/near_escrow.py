@@ -513,10 +513,9 @@ def near_escrow_contract_version(network: str, contract: str) -> str:
 
 
 def _options(options: NearEscrowDelegateOptions) -> str:
-    if options.network not in NEAR_ESCROW_TOKENS:
-        raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
     _account(options.sender_id, "sender_id")
     _account(options.escrow_contract, "escrow_contract")
+    # Also the network check: one guard, in the public helper.
     version = near_escrow_contract_version(options.network, options.escrow_contract)
     nonce = _uint(options.nonce, 64, "nonce")
     height = _uint(options.max_block_height, 64, "max_block_height")
