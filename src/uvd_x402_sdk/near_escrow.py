@@ -7,7 +7,7 @@ NEXT nonce and an expiry block from the selected key; persist the signed payment
 before submitting it. Lifecycle callers should use a function-call key restricted
 to this escrow and the methods they need (with a bounded gas allowance).
 
-Arras v2 (``NEAR_ESCROW_CONTRACTS_V2``) takes the v1 ``authorize`` msg plus two
+Arras v2 (``NEAR_ESCROW_V2_CONTRACTS``) takes the v1 ``authorize`` msg plus two
 optional fields, ``dispute_deadline`` and ``operator_ticket``; v1 refuses both
 (``E03``). ``sign_operator_ticket`` is the operator's ed25519 ticket
 (arras ``contracts/escrow-v2/src/ticket.rs``). ``authorize_from_budget`` is not
@@ -21,6 +21,7 @@ import base64
 import hashlib
 import json
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -43,12 +44,13 @@ __all__ = [
     "NEAR_ESCROW_MAX_GAS",
     "NEAR_ESCROW_TOKENS",
     "NEAR_ESCROW_CONTRACTS",
-    "NEAR_ESCROW_CONTRACTS_V2",
+    "NEAR_ESCROW_V2_CONTRACTS",
     "near_escrow_contract_version",
     "OPERATOR_TICKET_DOMAIN",
     "OperatorTicketSigner",
     "operator_ticket_message",
     "sign_operator_ticket",
+    "check_operator_ticket",
     "verify_operator_ticket",
     "build_escrow_msg",
     "payment_id_preimage",
@@ -75,18 +77,21 @@ NEAR_ESCROW_TOKENS: Mapping[str, str] = MappingProxyType(
         "near:testnet": "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af",
     }
 )
-# Arras v1 deployments, isolated by network.
+# Arras deployments this SDK signs for, isolated by network: v1 first, then v2.
 NEAR_ESCROW_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "near:testnet": ("arras-v1b-1101.testnet",),
-        "near:mainnet": ("v1.arras-escrow.near",),
+        "near:mainnet": ("v1.arras-escrow.near", "v2.arras-escrow.near"),
     }
 )
-# Arras v2 deployments of the reviewed wasm (arras ddc5121, sha256 1541525c...fa77;
-# arras docs/MAINNET.md sections 8.1, 8.6 and 8.8), keyless, isolated by network.
-NEAR_ESCROW_CONTRACTS_V2: Mapping[str, tuple[str, ...]] = MappingProxyType(
+# The registered contracts that run Arras v2 (they take dispute_deadline and
+# operator_ticket). v2.arras-escrow.near: the reviewed wasm (arras ddc5121, sha256
+# 1541525c...fa77), keyless since 2026-11-08 (arras docs/MAINNET.md 8.1, 8.8).
+# Testnet has none: the v2 rehearsal contract takes a test token, not Circle's USDC
+# (MAINNET.md 8.6), and the earlier one predates the review.
+NEAR_ESCROW_V2_CONTRACTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
-        "near:testnet": ("v2.arras-v2e-1107.testnet",),
+        "near:testnet": (),
         "near:mainnet": ("v2.arras-escrow.near",),
     }
 )
@@ -178,9 +183,14 @@ def _ticket_signature(value: object) -> bytes:
 
 
 def _ticket_value(value: object) -> dict:
-    """Exactly {expiry, sig}, as msg.rs:28-33 parses it (deny_unknown_fields)."""
+    """Exactly {expiry, sig}, as msg.rs:28-33 parses it (deny_unknown_fields).
+
+    expiry is the U64 decimal STRING of the wire: a JSON number there is E03.
+    """
     if not isinstance(value, Mapping) or value.keys() != {"expiry", "sig"}:
         raise ValueError("operator_ticket: expected exactly {expiry, sig}")
+    if not isinstance(value["expiry"], str):
+        raise ValueError("operator_ticket.expiry: expected a decimal string")
     expiry = _uint(value["expiry"], 64, "operator_ticket.expiry")
     _ticket_signature(value["sig"])
     return {"expiry": str(expiry), "sig": value["sig"]}
@@ -421,26 +431,34 @@ def operator_ticket_message(contract: str, subject: Mapping[str, Any], expiry: U
     return ser.write_u64(n).get_bytes()
 
 
+def _now(now_ns: Unsigned | None) -> int:
+    return time.time_ns() if now_ns is None else _uint(now_ns, 64, "now_ns")
+
+
 def sign_operator_ticket(
     signer: OperatorTicketSigner,
     *,
     contract: str,
     subject: Mapping[str, Any],
     expiry: Unsigned,
+    now_ns: Unsigned | None = None,
 ) -> dict:
     """Sign an Arras v2 ``operator_ticket``: ``{"expiry": "<ns>", "sig": "<base58>"}``.
 
     The dict goes as is into an ``authorize`` msg (``msg["operator_ticket"]``).
-    Valid on chain while ``now < expiry`` (ns), E54 after. A payment ticket is
-    single use in practice (a payment_id never repeats, E13); a budget ticket
-    admits every deposit of that (owner, agent) pair until expiry, even after
-    revoke_agent, so keep expiry short. Every input is checked before the signer
-    is touched, and the signature is verified before it is returned.
+    Valid on chain while ``now < expiry`` (nanoseconds), E54 after: a ticket
+    already expired at ``now_ns`` (default: the wall clock) is refused, which
+    also catches an expiry written in seconds. A payment ticket is single use in
+    practice (a payment_id never repeats, E13); a budget ticket admits every
+    deposit of that (owner, agent) pair until expiry, even after revoke_agent,
+    so keep expiry short. Take ``contract`` from your own configuration, never
+    from a request. Every input is checked before the signer is touched, and
+    the signature is verified before it is returned.
     """
     message = operator_ticket_message(contract, subject, expiry)
     n = _uint(expiry, 64, "expiry")
-    if n == 0:
-        raise ValueError("expiry must be positive: a ticket is valid while now < expiry")
+    if n <= _now(now_ns):
+        raise ValueError("expiry: the ticket is already expired at now_ns (Arras E54)")
     public_key = signer.public_key
     if not isinstance(public_key, bytes) or len(public_key) != 32:
         raise ValueError("expected 32-byte Ed25519 public key")
@@ -452,37 +470,73 @@ def sign_operator_ticket(
     return {"expiry": str(n), "sig": _b58encode(signature)}
 
 
+def check_operator_ticket(
+    ticket_pubkey: bytes | str | None,
+    *,
+    contract: str,
+    subject: Mapping[str, Any],
+    ticket: object,
+    now_ns: Unsigned | None = None,
+) -> str | None:
+    """What ``check_ticket`` (authorize.rs:265-285) answers: ``None`` if it passes.
+
+    ``ticket_pubkey`` is the operator's, as ``get_operator(...).ticket_pubkey``
+    returns it (``ed25519:<base58>``), its 32 bytes, or ``None`` if it has none.
+    No key and no ticket passes; a key without a ticket, or a ticket without a
+    key, is ``"E53_TICKET_INVALIDO"``; ``now_ns >= expiry`` (default: the wall
+    clock) is ``"E54_TICKET_VENCIDO"``, judged before the signature; a ticket
+    that is not exactly ``{expiry, sig}`` with a canonical decimal expiry and a
+    canonical base58 64-byte signature of this contract, subject and expiry is
+    E53. The chain parses ``expiry`` with ``str::parse`` (``"+1"``, ``"01"``
+    pass there), this check only the canonical form the SDK writes. A malformed
+    key, contract, subject or now_ns (the caller's inputs) raises ValueError; a
+    malformed ticket (untrusted) is E53. A pre-check: the chain verifies with
+    its own Ed25519 implementation.
+    """
+    _account(contract, "contract")
+    _ticket_subject(subject)
+    now = _now(now_ns)
+    key = None if ticket_pubkey is None else _ticket_public_key(ticket_pubkey)
+    if key is None and ticket is None:
+        return None
+    if key is None or ticket is None:
+        return "E53_TICKET_INVALIDO"
+    try:
+        fields = _ticket_value(ticket)
+    except ValueError:
+        return "E53_TICKET_INVALIDO"
+    expiry = int(fields["expiry"])
+    if now >= expiry:
+        return "E54_TICKET_VENCIDO"
+    message = operator_ticket_message(contract, subject, expiry)
+    if not _ed25519_valid(key, _ticket_signature(fields["sig"]), message):
+        return "E53_TICKET_INVALIDO"
+    return None
+
+
 def verify_operator_ticket(
     public_key: bytes | str,
     *,
     contract: str,
     subject: Mapping[str, Any],
     ticket: object,
-    now_ns: Unsigned,
+    now_ns: Unsigned | None = None,
 ) -> bool:
-    """True iff ``check_ticket`` (authorize.rs:265-285) would accept ``ticket`` at ``now_ns``.
+    """True iff an operator with this ``ticket_pubkey`` accepts ``ticket`` at ``now_ns``.
 
-    False when ``now_ns >= expiry`` (E54), or when the ticket is not exactly
-    ``{expiry, sig}`` with a canonical base58 64-byte signature of this contract,
-    subject and expiry (E53). ``public_key`` is 32 raw bytes or the
-    ``ed25519:<base58>`` that ``get_operator(...).ticket_pubkey`` returns.
-    A malformed public_key, contract, subject or now_ns (the caller's inputs)
-    raises ValueError; a malformed ticket (untrusted) is False. This is a
-    pre-check: the chain verifies with its own Ed25519 implementation.
+    ``check_operator_ticket(...) is None`` with a key that must be given: 32 raw
+    bytes or ``ed25519:<base58>``. Expired (E54) or not this message's (E53) is
+    False. If the operator may have no key any more (the owner can remove it),
+    ask ``check_operator_ticket`` with its current ``ticket_pubkey``.
     """
-    key = _ticket_public_key(public_key)
-    _account(contract, "contract")
-    _ticket_subject(subject)
-    now = _uint(now_ns, 64, "now_ns")
-    try:
-        fields = _ticket_value(ticket)
-    except ValueError:
-        return False
-    expiry = int(fields["expiry"])
-    if now >= expiry:
-        return False
-    message = operator_ticket_message(contract, subject, expiry)
-    return _ed25519_valid(key, _ticket_signature(fields["sig"]), message)
+    if public_key is None:
+        raise ValueError("public_key: expected the operator ticket_pubkey")
+    return (
+        check_operator_ticket(
+            public_key, contract=contract, subject=subject, ticket=ticket, now_ns=now_ns
+        )
+        is None
+    )
 
 
 @dataclass(frozen=True)
@@ -507,9 +561,9 @@ def near_escrow_contract_version(network: str, contract: str) -> str:
     """``"v1"`` or ``"v2"`` for a registered Arras contract; ValueError otherwise."""
     if network not in NEAR_ESCROW_TOKENS:
         raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
-    if contract not in NEAR_ESCROW_CONTRACTS[network] + NEAR_ESCROW_CONTRACTS_V2[network]:
+    if contract not in NEAR_ESCROW_CONTRACTS[network]:
         raise ValueError("escrow_contract is not registered for this network")
-    return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"
+    return "v2" if contract in NEAR_ESCROW_V2_CONTRACTS[network] else "v1"
 
 
 def _options(options: NearEscrowDelegateOptions) -> str:

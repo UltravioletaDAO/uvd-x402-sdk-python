@@ -9,6 +9,7 @@ import builtins
 import hashlib
 import json
 import struct
+import time
 from types import MappingProxyType
 
 import pytest
@@ -28,8 +29,10 @@ T1, T2 = TICKETS["vectores"]
 # The vectors' contract name: not a deployment, so tickets accept any account.
 CONTRACT = T1["contract"]
 EXPIRY = int(T1["expiry"])
-V2_TESTNET = es.NEAR_ESCROW_CONTRACTS_V2["near:testnet"][0]
-V2_MAINNET = es.NEAR_ESCROW_CONTRACTS_V2["near:mainnet"][0]
+# The vectors' expiry (2026-11-02) is in the past: every signature here says when "now" is.
+BEFORE = EXPIRY - 1
+V2_MAINNET = es.NEAR_ESCROW_V2_CONTRACTS["near:mainnet"][0]
+V2_TESTNET_REHEARSAL = "v2.arras-v2e-1107.testnet"  # takes a test token: not registered
 V2_ID = VECTORS["payment_id"]["vectores"][1]["payment_id"]
 LIFECYCLE = [
     ("release", {"payment_id": V1["payment_id"]}),
@@ -87,9 +90,19 @@ def verify(**changes):
     return es.verify_operator_ticket(values.pop("public_key"), **values)
 
 
-def v2_options(network="near:testnet", **changes):
+def sign(subject=None, expiry=EXPIRY, contract=CONTRACT, signer=None, now_ns=BEFORE):
+    return es.sign_operator_ticket(
+        es.NearEd25519Signer(SEED) if signer is None else signer,
+        contract=contract,
+        subject=T1["subject"] if subject is None else subject,
+        expiry=expiry,
+        now_ns=now_ns,
+    )
+
+
+def v2_options(network="near:mainnet", **changes):
     return options(
-        network=network, escrow_contract=es.NEAR_ESCROW_CONTRACTS_V2[network][0], **changes
+        network=network, escrow_contract=es.NEAR_ESCROW_V2_CONTRACTS[network][0], **changes
     )
 
 
@@ -115,12 +128,7 @@ def test_vector_key_is_the_published_test_key():
 def test_ticket_vectors(vector):
     message = es.operator_ticket_message(vector["contract"], vector["subject"], vector["expiry"])
     assert message.hex() == vector["mensaje_hex"]
-    ticket = es.sign_operator_ticket(
-        es.NearEd25519Signer(SEED),
-        contract=vector["contract"],
-        subject=vector["subject"],
-        expiry=vector["expiry"],
-    )
+    ticket = sign(vector["subject"], vector["expiry"], vector["contract"])
     assert ticket == {"expiry": vector["expiry"], "sig": vector["sig"]}
     # Independent of the SDK: the vector's signature over the vector's bytes.
     Ed25519PublicKey.from_public_bytes(bytes.fromhex(KEY["pubkey_hex"])).verify(
@@ -137,10 +145,27 @@ def test_ticket_vectors(vector):
 
 
 def test_ticket_expiry_as_int_signs_the_same_bytes():
-    ticket = es.sign_operator_ticket(
-        es.NearEd25519Signer(SEED), contract=CONTRACT, subject=T1["subject"], expiry=EXPIRY
-    )
-    assert ticket == t1_ticket()
+    assert sign(expiry=EXPIRY) == sign(expiry=str(EXPIRY)) == t1_ticket()
+
+
+def test_sign_refuses_a_ticket_already_expired():
+    # E54 at now >= expiry: expiry == now is refused, now + 1 signs.
+    with pytest.raises(ValueError, match="E54"):
+        sign(now_ns=EXPIRY)
+    with pytest.raises(ValueError, match="E54"):
+        sign(signer=NoKey(), now_ns=EXPIRY + 1)
+    assert sign(now_ns=EXPIRY - 1) == t1_ticket()
+    # Without now_ns the wall clock decides: the vectors' expiry is past, and an expiry
+    # written in seconds instead of nanoseconds is always in the past.
+    with pytest.raises(ValueError, match="E54"):
+        sign(signer=NoKey(), now_ns=None)
+    with pytest.raises(ValueError, match="E54"):
+        sign(signer=NoKey(), expiry=1_794_432_664, now_ns=None)
+    soon = time.time_ns() + 60 * 10**9
+    assert sign(expiry=soon, now_ns=None)["expiry"] == str(soon)
+    for bad in (True, -1, 2**64, "01", 1.0):
+        with pytest.raises(ValueError):
+            sign(signer=NoKey(), now_ns=bad)
 
 
 def test_ticket_message_byte_by_byte():
@@ -160,16 +185,19 @@ def test_ticket_message_byte_by_byte():
     assert es.operator_ticket_message(CONTRACT, T2["subject"], EXPIRY) == budget
     assert es.OPERATOR_TICKET_DOMAIN == "arras:v2:operator_ticket"
     # Field order of the budget subject: operator_id, owner, agent (ticket.rs:34-38).
-    swapped = {"budget": {**T2["subject"]["budget"], "owner": "agent-demo.testnet",
-                          "agent": "payer-demo.testnet"}}
+    swapped = {
+        "budget": {
+            **T2["subject"]["budget"],
+            "owner": "agent-demo.testnet",
+            "agent": "payer-demo.testnet",
+        }
+    }
     assert es.operator_ticket_message(CONTRACT, swapped, EXPIRY) != budget
 
 
 def test_ticket_expiry_edges_are_u64():
     for expiry in (1, 2**64 - 1, str(2**64 - 1)):
-        ticket = es.sign_operator_ticket(
-            es.NearEd25519Signer(SEED), contract=CONTRACT, subject=T1["subject"], expiry=expiry
-        )
+        ticket = sign(expiry=expiry, now_ns=0)
         assert ticket["expiry"] == str(expiry)
         assert es.operator_ticket_message(CONTRACT, T1["subject"], expiry)[-8:] == struct.pack(
             "<Q", int(expiry)
@@ -191,7 +219,7 @@ def test_verify_accepts_only_before_expiry():
 
 def test_verify_rejects_another_contract_subject_expiry_or_key():
     assert not verify(contract="v2b.arras-dev.testnet")
-    assert not verify(contract=V2_TESTNET)
+    assert not verify(contract=V2_TESTNET_REHEARSAL)
     assert not verify(contract=V2_MAINNET)
     assert not verify(subject={"payment": {"payment_id": V2_ID}})
     assert not verify(subject=T2["subject"])
@@ -260,15 +288,55 @@ def test_verify_rejects_signatures(sig):
         {**t1_ticket(), "x": 1},
         {"expiry": "0" + T1["expiry"], "sig": SIG},
         {"expiry": " " + T1["expiry"], "sig": SIG},
+        {"expiry": "+" + T1["expiry"], "sig": SIG},
         {"expiry": True, "sig": SIG},
         {"expiry": -1, "sig": SIG},
         {"expiry": 2**64, "sig": SIG},
         {"expiry": float(EXPIRY), "sig": SIG},
+        # A JSON number, as json.loads reads one: the contract answers E03 (msg.rs:324-327).
+        {"expiry": EXPIRY, "sig": SIG},
     ],
     ids=repr,
 )
 def test_verify_rejects_malformed_tickets(ticket):
     assert not verify(ticket=ticket)
+
+
+def test_check_is_the_contracts_check_ticket_table():
+    """authorize.rs:271-284, row by row, with the operator's key or without one."""
+
+    def check(ticket_pubkey=KEY["ticket_pubkey"], ticket="t1", now_ns=BEFORE, subject=None):
+        return es.check_operator_ticket(
+            ticket_pubkey,
+            contract=CONTRACT,
+            subject=T1["subject"] if subject is None else subject,
+            ticket=t1_ticket() if ticket == "t1" else ticket,
+            now_ns=now_ns,
+        )
+
+    assert check() is None
+    assert check(ticket_pubkey=bytes.fromhex(KEY["pubkey_hex"])) is None
+    assert check(ticket_pubkey=None, ticket=None) is None  # (None, None) => Ok
+    assert check(ticket=None) == "E53_TICKET_INVALIDO"  # key, no ticket
+    assert check(ticket_pubkey=None) == "E53_TICKET_INVALIDO"  # ticket, no key
+    assert check(now_ns=EXPIRY) == "E54_TICKET_VENCIDO"
+    # E54 is judged before the signature: an expired ticket of something else is E54.
+    assert check(now_ns=EXPIRY, subject=T2["subject"]) == "E54_TICKET_VENCIDO"
+    assert check(subject=T2["subject"]) == "E53_TICKET_INVALIDO"
+    assert check(ticket={"expiry": T1["expiry"], "sig": SIG + "1"}) == "E53_TICKET_INVALIDO"
+    assert check(ticket={"expiry": EXPIRY, "sig": SIG}) == "E53_TICKET_INVALIDO"
+    assert check(ticket=[]) == "E53_TICKET_INVALIDO"
+    other = ExternalSigner().public_key
+    assert check(ticket_pubkey=other) == "E53_TICKET_INVALIDO"
+    # verify is check with a key that must be given.
+    with pytest.raises(ValueError):
+        es.verify_operator_ticket(
+            None, contract=CONTRACT, subject=T1["subject"], ticket=t1_ticket(), now_ns=BEFORE
+        )
+    # Without now_ns the wall clock judges: the vectors' expiry is in the past.
+    assert check(now_ns=None) == "E54_TICKET_VENCIDO"
+    fresh = sign(expiry=time.time_ns() + 60 * 10**9, now_ns=None)
+    assert check(ticket=fresh, now_ns=None) is None
 
 
 @pytest.mark.parametrize(
@@ -357,7 +425,7 @@ def test_lengths_are_capped_before_base58_decoding(monkeypatch):
     ids=repr,
 )
 def test_sign_rejects_inputs_before_the_key(change):
-    values = dict(contract=CONTRACT, subject=T1["subject"], expiry=EXPIRY)
+    values = dict(contract=CONTRACT, subject=T1["subject"], expiry=EXPIRY, now_ns=0)
     values.update(change)
     with pytest.raises(ValueError):
         es.sign_operator_ticket(NoKey(), **values)
@@ -365,7 +433,7 @@ def test_sign_rejects_inputs_before_the_key(change):
 
 def test_an_injected_signer_signs_exactly_the_message():
     signer = ExternalSigner()
-    ticket = es.sign_operator_ticket(signer, contract=V2_MAINNET, subject=T2["subject"], expiry=7)
+    ticket = sign(T2["subject"], expiry=7, contract=V2_MAINNET, signer=signer, now_ns=6)
     assert signer.messages == [es.operator_ticket_message(V2_MAINNET, T2["subject"], 7)]
     assert ticket["expiry"] == "7"
     assert es.verify_operator_ticket(
@@ -398,7 +466,7 @@ def test_sign_refuses_a_bad_signer_result(public_key, signature):
     bad = BadSigner()
     bad.public_key = public_key
     with pytest.raises(ValueError):
-        es.sign_operator_ticket(bad, contract=CONTRACT, subject=T1["subject"], expiry=EXPIRY)
+        sign(signer=bad)
 
 
 def test_ticket_crypto_needs_the_near_extra(monkeypatch):
@@ -417,9 +485,7 @@ def test_ticket_crypto_needs_the_near_extra(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", without_crypto)
     with pytest.raises(ImportError, match=r"uvd-x402-sdk\[near\]"):
-        es.sign_operator_ticket(
-            PureSigner(), contract=CONTRACT, subject=T1["subject"], expiry=EXPIRY
-        )
+        sign(signer=PureSigner())
     with pytest.raises(ImportError, match=r"uvd-x402-sdk\[near\]"):
         verify()
     # The message itself needs nothing beyond the base install.
@@ -434,40 +500,51 @@ def test_v2_canonical_msgs_from_the_vectors():
     assert es.build_escrow_msg(V1) == m["canonico_v1_en_v2"] == VECTORS["msg_canonico_v1"]
     with_deadline = {**V1, "dispute_deadline": V1["release_deadline"]}
     assert es.build_escrow_msg(with_deadline) == m["canonico_con_dispute_deadline"]
-    ticket = es.sign_operator_ticket(
-        es.NearEd25519Signer(SEED),
-        contract=CONTRACT,
-        subject={"payment": {"payment_id": es.compute_payment_id(V1)}},
-        expiry=V1["release_deadline"],
-    )
-    assert es.build_escrow_msg({**with_deadline, "operator_ticket": ticket}) == (
-        m["canonico_con_ticket_t1"]
+    ticket = sign({"payment": {"payment_id": es.compute_payment_id(V1)}}, V1["release_deadline"])
+    assert (
+        es.build_escrow_msg({**with_deadline, "operator_ticket": ticket})
+        == (m["canonico_con_ticket_t1"])
     )
     for key in ("canonico_v1_en_v2", "canonico_con_dispute_deadline", "canonico_con_ticket_t1"):
         parsed = json.loads(m[key])
         # A served msg, parsed, rebuilds to itself: what a payer signs is what it was given.
         assert es.build_escrow_msg(parsed) == m[key]
         # dispute_deadline and operator_ticket do not enter the payment id (msg.rs:5-6).
-        assert es.compute_payment_id(
-            {**parsed, "token": TOKEN, "payer": V1["payer"], "amount": V1["amount"]}
-        ) == m["payment_id_de_los_tres"]
+        assert (
+            es.compute_payment_id(
+                {**parsed, "token": TOKEN, "payer": V1["payer"], "amount": V1["amount"]}
+            )
+            == m["payment_id_de_los_tres"]
+        )
 
 
 def test_v2_msg_key_order_and_absent_fields():
     text = es.build_escrow_msg({**V1, "operator_ticket": t1_ticket()})
     assert list(json.loads(text)) == [
-        "v", "action", "operator_id", "receiver", "release_deadline", "reclaim_after",
-        "fee_bps_max", "terms_hash", "salt", "operator_ticket",
+        "v",
+        "action",
+        "operator_id",
+        "receiver",
+        "release_deadline",
+        "reclaim_after",
+        "fee_bps_max",
+        "terms_hash",
+        "salt",
+        "operator_ticket",
     ]
-    assert text.endswith(',"operator_ticket":' + json.dumps({"expiry": str(EXPIRY), "sig": SIG},
-                                                              separators=(",", ":")) + "}")
+    assert text.endswith(
+        ',"operator_ticket":'
+        + json.dumps({"expiry": str(EXPIRY), "sig": SIG}, separators=(",", ":"))
+        + "}"
+    )
     # Ticket keys are written expiry, sig whatever order they come in.
-    reordered = {"sig": SIG, "expiry": EXPIRY}
+    reordered = {"sig": SIG, "expiry": str(EXPIRY)}
     assert es.build_escrow_msg({**V1, "operator_ticket": reordered}) == text
     # None is absent: the canonical text omits it (msg.rs:66-69, skip_serializing_if).
-    assert es.build_escrow_msg(
-        {**V1, "dispute_deadline": None, "operator_ticket": None}
-    ) == VECTORS["msg_canonico_v1"]
+    assert (
+        es.build_escrow_msg({**V1, "dispute_deadline": None, "operator_ticket": None})
+        == VECTORS["msg_canonico_v1"]
+    )
     deadline_only = es.build_escrow_msg({**V1, "dispute_deadline": int(V1["reclaim_after"])})
     assert json.loads(deadline_only)["dispute_deadline"] == V1["reclaim_after"]
 
@@ -503,6 +580,8 @@ def test_dispute_deadline_type(value):
         {"expiry": "0" + T1["expiry"], "sig": SIG},
         {"expiry": 2**64, "sig": SIG},
         {"expiry": True, "sig": SIG},
+        # A JSON number, as json.loads reads a served msg: the contract answers E03.
+        {"expiry": EXPIRY, "sig": SIG},
     ]
     + [{"expiry": T1["expiry"], "sig": sig} for sig in MALFORMED_SIGS],
     ids=repr,
@@ -515,7 +594,7 @@ def test_msg_refuses_a_malformed_ticket(ticket):
 @pytest.mark.parametrize("sig", OTHER_SIGS)
 def test_msg_cannot_tell_a_wrong_but_well_formed_signature(sig):
     # Shape only: without the operator key the msg builder cannot verify (the chain says E53).
-    assert json.loads(es.build_escrow_msg({**V1, "operator_ticket": {"expiry": 1, "sig": sig}}))[
+    assert json.loads(es.build_escrow_msg({**V1, "operator_ticket": {"expiry": "1", "sig": sig}}))[
         "operator_ticket"
     ] == {"expiry": "1", "sig": sig}
 
@@ -524,26 +603,30 @@ def test_msg_cannot_tell_a_wrong_but_well_formed_signature(sig):
 
 
 def test_v2_registry():
-    assert isinstance(es.NEAR_ESCROW_CONTRACTS_V2, MappingProxyType)
-    assert dict(es.NEAR_ESCROW_CONTRACTS_V2) == {
-        "near:testnet": ("v2.arras-v2e-1107.testnet",),
+    assert isinstance(es.NEAR_ESCROW_V2_CONTRACTS, MappingProxyType)
+    assert dict(es.NEAR_ESCROW_V2_CONTRACTS) == {
+        "near:testnet": (),
         "near:mainnet": ("v2.arras-escrow.near",),
     }
-    assert es.NEAR_ESCROW_CONTRACTS_V2.keys() == es.NEAR_ESCROW_TOKENS.keys()
+    assert es.NEAR_ESCROW_V2_CONTRACTS.keys() == es.NEAR_ESCROW_TOKENS.keys()
     with pytest.raises(TypeError):
-        es.NEAR_ESCROW_CONTRACTS_V2["near:mainnet"] = ("evil-sink.near",)
+        es.NEAR_ESCROW_V2_CONTRACTS["near:mainnet"] = ("evil-sink.near",)
     with pytest.raises(TypeError):
-        es.NEAR_ESCROW_CONTRACTS_V2["near:mainnet"][0] = "evil-sink.near"
+        es.NEAR_ESCROW_V2_CONTRACTS["near:mainnet"][0] = "evil-sink.near"
+    # NEAR_ESCROW_CONTRACTS is every contract the SDK signs for, v1 first; v2 is a subset.
+    assert es.NEAR_ESCROW_CONTRACTS["near:mainnet"] == ("v1.arras-escrow.near", V2_MAINNET)
     for network in es.NEAR_ESCROW_TOKENS:
-        v1, v2 = es.NEAR_ESCROW_CONTRACTS[network], es.NEAR_ESCROW_CONTRACTS_V2[network]
-        assert not set(v1) & set(v2)
+        v1 = es.NEAR_ESCROW_CONTRACTS[network][0]
+        assert es.near_escrow_contract_version(network, v1) == "v1"
+        assert set(es.NEAR_ESCROW_V2_CONTRACTS[network]) <= set(es.NEAR_ESCROW_CONTRACTS[network])
         for contract in es.NEAR_ESCROW_CONTRACTS[network]:
-            assert es.near_escrow_contract_version(network, contract) == "v1"
-        for contract in es.NEAR_ESCROW_CONTRACTS_V2[network]:
-            assert es.near_escrow_contract_version(network, contract) == "v2"
+            expected = "v2" if contract in es.NEAR_ESCROW_V2_CONTRACTS[network] else "v1"
+            assert es.near_escrow_contract_version(network, contract) == expected
     for network, contract in [
         ("near:testnet", V2_MAINNET),
-        ("near:mainnet", V2_TESTNET),
+        ("near:mainnet", V2_TESTNET_REHEARSAL),
+        # The testnet rehearsal of v2 takes a test token, not Circle's USDC: not registered.
+        ("near:testnet", V2_TESTNET_REHEARSAL),
         ("near:testnet", CONTRACT),
         ("near:testnet", "arras-v2-1103.testnet"),
         ("near:mainnet", "v3.arras-escrow.near"),
@@ -555,8 +638,8 @@ def test_v2_registry():
             es.near_escrow_contract_version(network, contract)
 
 
-@pytest.mark.parametrize("network", ["near:testnet", "near:mainnet"])
-def test_v2_authorization_wire(network):
+def test_v2_authorization_wire():
+    network = "near:mainnet"  # the only network with a registered v2 contract
     o = v2_options(network)
     token = es.NEAR_ESCROW_TOKENS[network]
     payment = es.sign_escrow_authorization(o, token=token, amount=V1["amount"], msg=v2_terms())
@@ -591,7 +674,7 @@ def test_v2_authorization_wire(network):
     [
         {"dispute_deadline": V1["release_deadline"]},
         {"operator_ticket": {"expiry": T1["expiry"], "sig": T1["sig"]}},
-        {"dispute_deadline": V1["reclaim_after"], "operator_ticket": {"expiry": 1, "sig": SIG}},
+        {"dispute_deadline": V1["reclaim_after"], "operator_ticket": {"expiry": "1", "sig": SIG}},
     ],
 )
 def test_v1_contract_refuses_v2_fields_before_the_key(network, extra):
@@ -618,6 +701,7 @@ def test_v1_contract_refuses_v2_fields_before_the_key(network, extra):
         ("near:testnet", "v2.arras-dev.testnet"),
         ("near:testnet", "arras-v2-1103.testnet"),
         ("near:testnet", "V2.arras-v2e-1107.testnet"),
+        ("near:testnet", V2_TESTNET_REHEARSAL),
     ],
 )
 @pytest.mark.parametrize("method", ["authorize"] + sorted({m for m, _ in LIFECYCLE}))
@@ -632,12 +716,12 @@ def test_unregistered_v2_lookalikes_before_the_key(network, contract, method):
             es.sign_escrow_lifecycle(o, method, dict(LIFECYCLE)[method])
 
 
-@pytest.mark.parametrize("network", ["near:testnet", "near:mainnet"])
 @pytest.mark.parametrize("method,args", LIFECYCLE)
-def test_v2_lifecycle_is_the_v1_wire_on_the_v2_contract(network, method, args):
+def test_v2_lifecycle_is_the_v1_wire_on_the_v2_contract(method, args):
+    network = "near:mainnet"
     o = v2_options(network)
     d = decode(es.sign_escrow_lifecycle(o, method, args))
-    assert d["receiver"] == es.NEAR_ESCROW_CONTRACTS_V2[network][0]
+    assert d["receiver"] == V2_MAINNET
     # release without an amount sends "amount": null, as on v1.
     assert d["method"] == method and d["args"].items() >= args.items() and d["deposit"] == 0
     assert d["gas"] == (50 if method.startswith("withdraw") else 30) * 10**12
@@ -649,13 +733,15 @@ def test_v2_lifecycle_is_the_v1_wire_on_the_v2_contract(network, method, args):
         )
     )
     assert (d["method"], d["args_text"], d["gas"], d["deposit"]) == (
-        v1["method"], v1["args_text"], v1["gas"], v1["deposit"]
+        v1["method"],
+        v1["args_text"],
+        v1["gas"],
+        v1["deposit"],
     )
 
 
-@pytest.mark.parametrize("network", ["near:testnet", "near:mainnet"])
-def test_storage_deposit_on_the_v2_contract(network):
-    contract = es.NEAR_ESCROW_CONTRACTS_V2[network][0]
+def test_storage_deposit_on_the_v2_contract():
+    network, contract = "near:mainnet", V2_MAINNET
     tx = storage.build_arras_storage_deposit(
         network=network, payer_id="parent.near", escrow_contract=contract, account_id="agent.near"
     )
@@ -667,10 +753,16 @@ def test_storage_deposit_on_the_v2_contract(network):
         account_id="agent.near",
     )
     assert tx["actions"] == v1["actions"]
-    for other in ("v2.arras-dev.testnet", "V2.arras-escrow.near", "arras-v2-1103.testnet"):
+    for net, other in [
+        (network, "v2.arras-dev.testnet"),
+        (network, "V2.arras-escrow.near"),
+        (network, "arras-v2-1103.testnet"),
+        ("near:testnet", V2_MAINNET),
+        ("near:testnet", V2_TESTNET_REHEARSAL),
+    ]:
         with pytest.raises(ValueError):
             storage.build_arras_storage_deposit(
-                network=network, payer_id="parent.near", escrow_contract=other
+                network=net, payer_id="parent.near", escrow_contract=other
             )
 
 
@@ -678,11 +770,12 @@ def test_v2_facilitator_envelope():
     from uvd_x402_sdk.envelope_v2 import build_verify_request_v2
 
     o = v2_options()
+    token = es.NEAR_ESCROW_TOKENS[o.network]
     msg = es.build_escrow_msg(v2_terms())
     accepted = {
         "scheme": "escrow",
-        "network": "near:testnet",
-        "asset": TOKEN,
+        "network": o.network,
+        "asset": token,
         "amount": V1["amount"],
         "payTo": o.escrow_contract,
         "maxTimeoutSeconds": 300,
@@ -691,11 +784,11 @@ def test_v2_facilitator_envelope():
                 "contract": o.escrow_contract,
                 "operatorId": V1["operator_id"],
                 "msg": msg,
-                "paymentId": V1["payment_id"],
+                "paymentId": es.compute_payment_id({**V1, "token": token}),
             }
         },
     }
-    payment = es.sign_escrow_authorization(o, token=TOKEN, amount=V1["amount"], msg=v2_terms())
+    payment = es.sign_escrow_authorization(o, token=token, amount=V1["amount"], msg=v2_terms())
     body = build_verify_request_v2(
         payment["payload"],
         {"url": "https://seller.example/task", "description": "t", "mimeType": "application/json"},

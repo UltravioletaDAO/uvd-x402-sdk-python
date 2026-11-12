@@ -11,7 +11,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 
 from uvd_x402_sdk import near_escrow as es
 from uvd_x402_sdk.solana_signing import _b58encode
@@ -616,7 +617,7 @@ def test_registries_are_immutable():
     assert isinstance(es.NEAR_ESCROW_CONTRACTS, MappingProxyType)
     assert dict(es.NEAR_ESCROW_CONTRACTS) == {
         "near:testnet": ("arras-v1b-1101.testnet",),
-        "near:mainnet": ("v1.arras-escrow.near",),
+        "near:mainnet": ("v1.arras-escrow.near", "v2.arras-escrow.near"),
     }
     assert isinstance(es.NEAR_ESCROW_TOKENS, MappingProxyType)
     assert dict(es.NEAR_ESCROW_TOKENS) == {
@@ -717,22 +718,31 @@ def test_guide_uses_the_capturer_key_for_release_and_refund():
         next_access_key_nonce=7,
         expiry_block_height=100_000_000,
         receipt_logs=[],
-        ticket_seed=bytes(range(64, 96)),
-        now_ns=1_793_000_000_000_000_000,
+        # A test ticket key as EM holds its own: an OpenSSL Ed25519 PEM, here in memory.
+        ticket_pem=Ed25519PrivateKey.from_private_bytes(bytes(range(64, 96))).private_bytes(
+            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+        ),
     )
     for block in blocks:
         exec(compile(block, "docs/near-escrow.md", "exec"), context)
     # The Arras v2 flow of the guide: EM's ticket inside the msg the payer signs.
     v2 = decode(context["v2_payment"])
-    assert v2["receiver"] == TOKEN and v2["sender"] == V1["payer"]
-    assert v2["args"]["receiver_id"] == es.NEAR_ESCROW_CONTRACTS_V2["near:testnet"][0]
+    v2_contract = es.NEAR_ESCROW_V2_CONTRACTS["near:mainnet"][0]
+    assert v2["receiver"] == es.NEAR_ESCROW_TOKENS["near:mainnet"] and v2["sender"] == V1["payer"]
+    assert v2["args"]["receiver_id"] == v2_contract
     assert v2["args"]["msg"] == context["v2_msg"]
-    assert context["v2_payment_id"] == V1["payment_id"]
+    assert context["v2_payment"]["network"] == "near:mainnet"
+    msg = json.loads(context["v2_msg"])
+    assert "dispute_deadline" not in msg
+    v2_id = es.compute_payment_id(
+        {**V1, "token": es.NEAR_ESCROW_TOKENS["near:mainnet"], "payer": V1["payer"]}
+    )
+    assert context["v2_payment_id"] == v2_id
     assert es.verify_operator_ticket(
         es.NearEd25519Signer(bytes(range(64, 96))).public_key,
-        contract=es.NEAR_ESCROW_CONTRACTS_V2["near:testnet"][0],
-        subject={"payment": {"payment_id": V1["payment_id"]}},
-        ticket=json.loads(context["v2_msg"])["operator_ticket"],
+        contract=v2_contract,
+        subject={"payment": {"payment_id": v2_id}},
+        ticket=msg["operator_ticket"],
         now_ns=context["now_ns"],
     )
     for name, method, nonce in (("release_body", "release", 11), ("refund_body", "refund", 12)):
