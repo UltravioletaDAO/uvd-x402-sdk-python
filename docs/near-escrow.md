@@ -207,9 +207,10 @@ sign short expiries. The ticket binds the `payment_id` only, not `dispute_deadli
 sending its own `ft_transfer_call` can pair EM's ticket with any `dispute_deadline` the contract
 accepts (`ticket.rs:41-48`; declared as P3-4 in arras `docs/handoffs/c0-arras-v2.md`).
 
-Execution Market's v2 flow (owner's decision of 2026-11: the owner removes `em`'s `ticket_pubkey`
-first, below, and EM signs no ticket). The msg carries v1's keys only, which is also all the
-facilitator accepts today, and the payer signs it against the v2 contract:
+Execution Market's v2 flow (owner's decision of 2026-11: the owner first removes `em`'s
+`ticket_pubkey` with `update_operator`, arras `docs/MAINNET.md` 8.1, and EM signs no ticket). The
+msg carries v1's keys only, the only msg shape the facilitator parses, and the payer signs it
+against the v2 contract; it reaches the chain once x402-rs serves v2 (below):
 
 ```python
 import json
