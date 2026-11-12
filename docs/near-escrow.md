@@ -6,11 +6,17 @@ They allocate no nonces and send no transactions.
 
 Use contract and operator IDs from trusted `GET /supported` configuration for the selected
 `scheme: escrow`, `near:mainnet` or `near:testnet` entry (`extra.nearEscrow.contracts` and
-`operatorIds`). `NEAR_ESCROW_CONTRACTS` is an immutable registry of contracts this SDK will sign for:
-`near:testnet` contains only `arras-v1b-1101.testnet`; `near:mainnet` contains only
-`v1.arras-escrow.near`. Authorization and every lifecycle method reject accounts outside
-the selected network row before accessing the signer. `NEAR_ESCROW_TOKENS` is immutable too.
-Check advertised support before submitting; callers still select the contract explicitly.
+`operatorIds`). `NEAR_ESCROW_CONTRACTS` is an immutable registry of contracts this SDK will sign for,
+v1 first: `near:testnet` contains only `arras-v1b-1101.testnet`; `near:mainnet` contains
+`v1.arras-escrow.near` and `v2.arras-escrow.near`. `NEAR_ESCROW_V2_CONTRACTS` is the subset that
+runs Arras v2: `v2.arras-escrow.near` (the reviewed wasm, arras `ddc5121`, sha256
+`1541525c...fa77`, keyless since 2026-11-08), and none on testnet: the v2 rehearsal contract there
+takes a test token, not Circle's USDC (arras `docs/MAINNET.md` 8.6), and the earlier one predates the
+review. `near_escrow_contract_version(network, contract)` answers `"v1"` or `"v2"` and raises for
+anything else. The same shape as the TypeScript SDK's `NEAR_ESCROW_CONTRACTS` /
+`NEAR_ESCROW_V2_CONTRACTS`. Authorization and every lifecycle method reject accounts outside the
+selected network row before accessing the signer. `NEAR_ESCROW_TOKENS` is immutable too. Check
+advertised support before submitting; callers still select the contract explicitly.
 
 ## Public API for adapters
 
@@ -37,11 +43,18 @@ Release/reclaim timestamps are **nanoseconds** (u64); expiry is a **block height
 | `withdraw_for` | `options`, `account: str` | payment `dict` |
 | `authorize_from_budget` | `options`, `request: Mapping` | always raises `NotImplementedError` before using a key |
 | `AuthorizeFromBudget` | Protocol: `authorize_from_budget(request: Mapping) -> dict` | v2 adapter boundary |
+| `near_escrow_contract_version` | `network: str`, `contract: str` | `"v1"` or `"v2"`; `ValueError` if unregistered |
+| `OperatorTicketSigner` | Protocol: `public_key: bytes` (32 bytes), `sign(message: bytes) -> bytes` (64 bytes, Ed25519 of the raw message) | ticket signing interface; `NearEd25519Signer` satisfies it |
+| `operator_ticket_message` | `contract: str`, `subject: Mapping`, `expiry: Unsigned` | exact Borsh `bytes` the operator signs |
+| `sign_operator_ticket` | `signer`, keyword-only `contract`, `subject`, `expiry`, `now_ns: Unsigned | None = None` (wall clock) | `{"expiry": "<ns>", "sig": "<base58>"}`; refuses `expiry <= now_ns` |
+| `check_operator_ticket` | `ticket_pubkey: bytes | str | None`, keyword-only `contract`, `subject`, `ticket`, `now_ns = None` | `None` (accepted), `"E53_TICKET_INVALIDO"` or `"E54_TICKET_VENCIDO"` |
+| `verify_operator_ticket` | `public_key: bytes | str`, keyword-only `contract`, `subject`, `ticket`, `now_ns = None` | `bool` |
 
 Message fields: `operator_id`, `receiver`, `terms_hash`, `salt` are strings;
 `release_deadline` and `reclaim_after` are `Unsigned`; `fee_bps_max` is an integer u16.
 The hashes are exactly 32 and 16 bytes of lowercase hex, without `0x`. Only these fields enter
-the canonical JSON; other fields of a shared vector/input mapping are ignored.
+the canonical JSON, plus the two Arras v2 fields when present and not `None` (below); other
+fields of a shared vector/input mapping are ignored.
 `release_deadline < reclaim_after` is checked locally. Chain time, balances, caps, storage,
 operator membership and live payment state remain chain/facilitator checks.
 
@@ -137,17 +150,190 @@ Arras v1 is monotoken. Chain events use `standard: arras`, version `1.0.0`, arra
 A signature or successful outer Delegate receipt alone is not proof of escrow authorization.
 Use the facilitator's receipt verdict and reconcile payment state/events.
 
+## Arras v2: the operator ticket and the v2 `authorize` msg
+
+Measured on arras `9f8332f` (`contracts/escrow-v2/src`). The v2 `authorize` msg is the v1 msg
+plus two optional fields, appended in this order: `dispute_deadline` (u64 ns as a string; absent
+means `reclaim_after`) and `operator_ticket` (`{"expiry": "<ns>", "sig": "<base58 of 64 bytes>"}`)
+(`msg.rs:53-70`, `msg.rs:87-104`). A v1 msg is a valid v2 msg with the same `payment_id`: neither
+field enters the id (`msg.rs:5-6`). v1 parses its msg with `deny_unknown_fields`, so a msg with
+either field sent to v1 is refused whole (`E03`): `sign_escrow_authorization` refuses it before the
+key on a v1 contract. Locally checked: `release_deadline <= dispute_deadline` (`E67`,
+`authorize.rs:221-224`) and `dispute_deadline <= reclaim_after` (the static half of `E11`,
+`authorize.rs:212-218`), and the ticket's exact shape. `now < dispute_deadline` stays a chain check.
+
+**When v2 requires the ticket.** `check_ticket` (`authorize.rs:265-285`) decides from the
+operator's `ticket_pubkey` (`lib.rs:222-223`):
+
+| Operator `ticket_pubkey` | Ticket in the msg | Result |
+| --- | --- | --- |
+| set | present, `now < expiry`, signature of this contract + subject + expiry | accepted |
+| set | absent | `E53_TICKET_INVALIDO` (`authorize.rs:273`) |
+| set | `now >= expiry` | `E54_TICKET_VENCIDO` (`authorize.rs:275-278`) |
+| set | malformed or another message's signature | `E53` (`authorize.rs:279-282`) |
+| not set | absent | accepted (`authorize.rs:272`) |
+| not set | present | `E53`: nobody can verify it (`authorize.rs:273`) |
+
+It runs for every payment by `ft_transfer_call` (`authorize.rs:181-187`, subject
+`{"payment": {"payment_id"}}`), every budget deposit (`authorize.rs:489-497`, subject
+`{"budget": {"operator_id", "owner", "agent"}}`) and every `authorize_from_budget`
+(`budget.rs:240-246`, a payment subject), after `E11`, `E67`, `E12` and `E13` and before `E14`
+(`authorize.rs:5-7`). The owner sets, rotates or removes the key with `register_operator` /
+`update_operator` (`lib.rs:281-282`, `lib.rs:285-302`). On mainnet, operator `em` of
+`v2.arras-escrow.near` has a `ticket_pubkey` (arras `docs/MAINNET.md`, 8.1): every EM payment and
+budget deposit there needs EM's ticket. Lifecycle methods never take a ticket. A rejected
+`ft_transfer_call` returns the whole amount with the log `arras:rechazo:<CODE>`
+(`authorize.rs:1-3`, `error.rs:113-116`).
+
+**The ticket.** `operator_ticket_message(contract, subject, expiry)` is
+`borsh(domain, contract, subject, expiry)` with `domain = "arras:v2:operator_ticket"`
+(`ticket.rs:25`, `ticket.rs:41-59`): Strings as u32 LE length + UTF-8, the subject as a u8 tag
+(0 payment, 1 budget) and its Strings, `expiry` as u64 LE nanoseconds. The contract views
+`ticket_message_payment` / `ticket_message_budget` return the same bytes (`views.rs:214-242`).
+`sign_operator_ticket` signs those bytes with Ed25519 (no hash) and returns the dict that goes
+into the msg; it refuses a ticket already expired at `now_ns` (default: the wall clock), which also
+catches an expiry written in seconds. `check_operator_ticket` answers what `check_ticket` would,
+`None`, `"E53_TICKET_INVALIDO"` or `"E54_TICKET_VENCIDO"`, with the operator's current
+`ticket_pubkey` or `None` (the whole table above; E54 judged before the signature,
+`authorize.rs:275-282`); `verify_operator_ticket` is the same with a key that must be given. The
+ticket's `expiry` must be the canonical decimal string the msg carries: a JSON number there is
+`E03`, and the chain's `str::parse` also takes `"+1"` / `"01"`, which these checks call E53 (the SDK
+never writes them). The ticket key is injected: a 32-byte seed in `NearEd25519Signer`, or any
+object with `public_key` and `sign(message)`. The SDK never reads a key from a file or the
+environment. `OwsNearSigner` is not a ticket signer: its `sign` accepts only 32-byte digests and
+refuses the message. A payment ticket is single use in practice (the id never repeats, `E13`); a
+budget ticket admits any number of deposits of its pair until `expiry`, even after `revoke_agent`:
+sign short expiries. The ticket binds the `payment_id` only, not `dispute_deadline`: a payer
+sending its own `ft_transfer_call` can pair EM's ticket with any `dispute_deadline` the contract
+accepts (`ticket.rs:41-48`; declared as P3-4 in arras `docs/handoffs/c0-arras-v2.md`).
+
+Execution Market's v2 flow (owner's decision of 2026-11: the owner first removes `em`'s
+`ticket_pubkey` with `update_operator`, arras `docs/MAINNET.md` 8.1, and EM signs no ticket). The
+msg carries v1's keys only, the only msg shape the facilitator parses, and the payer signs it
+against the v2 contract; it reaches the chain once x402-rs serves v2 (below):
+
+```python
+import json
+
+em_v2_network = "near:mainnet"
+em_v2_contract = "v2.arras-escrow.near"  # EM's configured contract, checked by the SDK
+assert near.near_escrow_contract_version(em_v2_network, em_v2_contract) == "v2"
+em_v2_token = near.NEAR_ESCROW_TOKENS[em_v2_network]
+em_v2_msg = near.build_escrow_msg(terms)  # served in extra.nearEscrow.msg: no v2 fields
+em_v2_payment_id = near.compute_payment_id(
+    {**terms, "token": em_v2_token, "payer": payer, "amount": amount}
+)
+em_v2_options = near.NearEscrowDelegateOptions(
+    network=em_v2_network, signer=near.NearEd25519Signer(secret_key),
+    sender_id=payer, escrow_contract=em_v2_contract,
+    nonce=next_nonce, max_block_height=expiry_height,
+)
+em_v2_payment = near.sign_escrow_authorization(
+    em_v2_options, token=em_v2_token, amount=amount, msg=json.loads(em_v2_msg),
+)
+```
+
+Use a random `salt` per payment, never one derived from the task: the same terms in v1 and v2 give
+the same `payment_id`, and each escrow's verifier would rate it.
+
+With the ticket instead (operator `em` keeps its `ticket_pubkey`, one payment):
+
+```python
+import json
+import time
+
+from cryptography.hazmat.primitives.serialization import (
+    Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+)
+
+# EM signs a ticket per payment. Its ticket key is an OpenSSL Ed25519 PEM
+# (/arras/mainnet/em-ticket-v2): EM loads it and injects it; the SDK reads no key.
+# Any object with public_key + sign(message) works as the signer too.
+seed = load_pem_private_key(ticket_pem, password=None).private_bytes(
+    Encoding.Raw, PrivateFormat.Raw, NoEncryption()
+)
+ticket_signer = near.NearEd25519Signer(seed)
+
+v2_network = "near:mainnet"
+v2_contract = near.NEAR_ESCROW_V2_CONTRACTS[v2_network][0]  # from EM's own config
+v2_token = near.NEAR_ESCROW_TOKENS[v2_network]
+v2_payment_id = near.compute_payment_id(
+    {**terms, "token": v2_token, "payer": payer, "amount": amount}
+)
+now_ns = time.time_ns()
+v2_terms = {**terms, "operator_ticket": near.sign_operator_ticket(
+    ticket_signer, contract=v2_contract,
+    subject={"payment": {"payment_id": v2_payment_id}},
+    expiry=now_ns + 10 * 60 * 10**9,  # ten minutes: valid while the chain's now < expiry
+)}
+v2_msg = near.build_escrow_msg(v2_terms)  # served in extra.nearEscrow.msg
+
+# The payer signs exactly the msg it was served, against the v2 contract.
+served = json.loads(v2_msg)
+assert near.build_escrow_msg(served) == v2_msg  # refuse a msg the SDK would rewrite
+v2_options = near.NearEscrowDelegateOptions(
+    network=v2_network, signer=near.NearEd25519Signer(secret_key),
+    sender_id=payer, escrow_contract=v2_contract,
+    nonce=next_nonce, max_block_height=expiry_height,
+)
+v2_payment = near.sign_escrow_authorization(
+    v2_options, token=v2_token, amount=amount, msg=served,
+)
+```
+
+Without `ticket_pubkey` on the operator (the owner can remove it, below), omit `operator_ticket`: a
+ticket there is `E53`. `dispute_deadline` is omitted above, so v2 uses `reclaim_after`; setting it to
+`release_deadline` (the minimum, `E67`) removes the branch where a payer who disputes from
+`release_deadline` on gets the live amount back if the arbiter does not answer (`lib.rs:8-12`,
+`dispute.rs:20-25`). `build_escrow_msg` rewrites a served msg that is not canonical (another `v` or
+`action`, unknown or camelCase keys are dropped, numbers become strings), hence the `assert`.
+
+`extra.nearEscrow` is the same as on v1 (`contract`, `operatorId`, `msg`, `paymentId`). The payer
+pays storage as on v1 (`build_arras_storage_deposit` takes any contract of `NEAR_ESCROW_CONTRACTS`)
+unless the operator's `sponsor_pool` covers it. Lifecycle on v2 is signed by `em`'s v2 capturer,
+`em-capturer-v2.arras-escrow.near` (arras `docs/MAINNET.md` 8.2), not v1's.
+
+**What the facilitator needs first** (x402-rs `665585e6`, two separate gates): its served-contract
+list, `NEAR_ESCROW_CONTRACTS_MAINNET`, lists v1 only (arras `docs/MAINNET.md` 8.9), and it relays
+to nothing else (`ContractNotServed`, `src/chain/near/escrow.rs:888-891`); and it parses the msg with
+`deny_unknown_fields` and only the v1 keys (`src/chain/near/escrow.rs:575-590`), so it refuses a msg
+with `dispute_deadline` or `operator_ticket`. With v2 added to that list, a v1-shaped msg reaches v2
+through an operator without `ticket_pubkey`; with a ticket, the parser must accept the v2 fields too.
+
+Lifecycle on v2 is the v1 wire: `release`, `refund`, `reclaim`, `withdraw`, `withdraw_for` keep
+their names and arguments (`lifecycle.rs:17-91`, `withdraw.rs:19-26`; withdraw callbacks 10 + 10
+TGas as v1, `lib.rs:47-50`). The gas windows (38..100 TGas for the authorization, default 100) are
+the facilitator's v1 measurements (x402-rs `src/chain/near/escrow.rs:84-92`); v2 adds an Ed25519 check and
+86 bytes of dispute storage per payment and was measured with 100 TGas, not at the floor. A
+`Disputed` payment answers `E22` to all three until resolved (`lifecycle.rs:1-3`). v2 keeps v1's
+codes and log format and adds `E47`, `E48`, `E50`-`E57` and `E60`-`E67` (`error.rs:6-34`). Its
+events keep `standard: arras`, version `1.0.0` (`events.rs:1-4`): `parse_arras_events` reads the v1
+events v2 emits and skips the seven v2-only ones, `dispute_resolved` included, which moves money
+(`to_receiver`, `to_payer`, `fee`): reconciling a disputed payment needs another reader. Not in this
+SDK yet: the `budget` msg, `authorize_from_budget`, the dispute methods and the v2 views
+(`get_budget`, `compute_budget_payment_id`). Rating a v2 payment through ERC-8004 needs a verifier
+for v2, which is not registered yet: `near_erc8004.near_erc8004_verifier("near:mainnet",
+"v2.arras-escrow.near")` raises (`docs/near-erc8004.md`).
+
 ## Reproducible conformance
 
-`tests/fixtures/near-escrow.json` is an unchanged byte copy of Arras `docs/vectores.json`
-(sha256 `fe81bfc72bd1e90a5afb86fb00eece59cbd78fde983eda397c797bf65351709b`). Never regenerate it.
-It pins all V-1..V-3 preimages/hashes/ids and the canonical message. Payment IDs can have
-32..44 characters; the decoder checks exactly 32 bytes, including leading zeroes.
+`tests/fixtures/near-escrow.json` is an unchanged byte copy of Arras `docs/vectores.json` at
+arras `9f8332f` (git blob `246303c1`, sha256
+`5a78be59d03ee2c57aae49aac6f64488b996f0e5868dda095c063a1372eb2f70`). Never regenerate it; re-copy
+it from Arras. It pins all V-1..V-3 preimages/hashes/ids and the canonical message, and its `v2`
+section the three canonical v2 msgs, VB-1 and the tickets T-1 / T-2 (message bytes and signature
+with arras' published test seed `01` x 32). Payment IDs can have 32..44 characters; the decoder
+checks exactly 32 bytes, including leading zeroes.
 
 ```powershell
-python -m pytest -q tests/test_near_escrow.py
+python -m pytest -q tests/test_near_escrow.py tests/test_near_escrow_v2.py
 python scripts/near_escrow_parity.py --ts-root ../uvd-x402-sdk-typescript --node node
 ```
+
+`tests/test_near_escrow_v2.py` reproduces T-1 and T-2 byte for byte and signature for signature
+(the TypeScript SDK must give the same bytes and signature with that key), rebuilds the message by
+hand, and pins the sha256 of every v1 output of 0.112.0 (authorizations, lifecycle, storage):
+v1 did not move by one byte.
 
 The second command requires the TypeScript H-6 checkout with dependencies installed (`npm ci`).
 It compiles the actual TS helper in memory and compares all three unchanged vectors and
@@ -155,7 +341,7 @@ It compiles the actual TS helper in memory and compares all three unchanged vect
 and the full JSON payment. V-3 retains its mainnet message/preimage/ID. Signing exercises use
 each network's registered contract and USDC. The harness also compares the contract registry and refusals
 before signing, without RPC calls or generated expectations. It fails if TypeScript is unavailable.
-The v2 budget format is not defined here; no budget vectors or signing are invented.
+That harness covers v1 only; v2 parity is through T-1 / T-2 in both SDKs' suites.
 
 ## Golden-flow helpers (0.106.0)
 
@@ -183,7 +369,8 @@ These return `{signerId, receiverId, actions}` for a wallet's normal transaction
 API. They are unsigned transactions, with one `storage_deposit` call and 30 TGas.
 The payer pays both gas and the attached deposit; they are never facilitator
 delegates. Arras requires a deployment in `near_escrow.NEAR_ESCROW_CONTRACTS` for
-the selected network, just like escrow signing. No account parent is inferred.
+the selected network, just like escrow signing (v1 or v2: the same NEP-145 `storage_deposit`). No
+account parent is inferred.
 USDC uses the native token from `NEAR_ESCROW_TOKENS` for that network.
 
 Arras defaults to 0.05 NEAR (`50000000000000000000000` yoctoNEAR) with

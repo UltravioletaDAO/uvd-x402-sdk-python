@@ -675,7 +675,12 @@ Arras escrow helpers (`uvd_x402_sdk.near_escrow`, extra `near`) sign local Ed255
 `ft_transfer_call` authorizations and `release`/`refund`/`reclaim`/`withdraw`/`withdraw_for`
 delegates offline. See [the public API and facilitator request examples](docs/near-escrow.md).
 Signing requires a contract in `NEAR_ESCROW_CONTRACTS` for its network and advertised facilitator support.
-The registry contains `arras-v1b-1101.testnet` on testnet and `v1.arras-escrow.near` on mainnet.
+The registry contains `arras-v1b-1101.testnet` on testnet and `v1.arras-escrow.near` and
+`v2.arras-escrow.near` on mainnet. Arras v2 (`NEAR_ESCROW_V2_CONTRACTS`: `v2.arras-escrow.near`; none
+on testnet) adds the optional `dispute_deadline` and `operator_ticket` to the authorize msg;
+`sign_operator_ticket` / `check_operator_ticket` / `verify_operator_ticket` sign and check the
+operator's Ed25519 ticket (vectors T-1/T-2). ERC-8004 rates each payment with the verifier of its
+escrow (`near_erc8004_verifier`); v2's is not registered yet, so rating a v2 payment raises.
 
 ```python
 from uvd_x402_sdk import X402Client, X402Config

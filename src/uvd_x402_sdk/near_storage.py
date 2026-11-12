@@ -92,8 +92,10 @@ def build_arras_storage_deposit(
     """Fund Arras storage with registration_only=False so surplus remains usable.
 
     escrow_contract must be registered for network in NEAR_ESCROW_CONTRACTS, never inferred
-    from an account parent. The 0.05 NEAR default funds roughly five payments,
-    not a guarantee of capacity. This builder neither signs nor submits it.
+    from an account parent. Storage is per contract: a deposit on v1 does not fund
+    v2. The 0.05 NEAR default funds roughly five v1 payments (fewer on v2, which
+    also reserves dispute storage per payment), not a guarantee of capacity. This
+    builder neither signs nor submits it.
     """
     if network not in NEAR_ESCROW_CONTRACTS:
         raise ValueError("unsupported NEAR network")

@@ -68,7 +68,40 @@ def mutations(source):
             '"feedback_index": lambda v: _decimal(v, positive=True),\n}',
             '"feedback_index": lambda v: _decimal(v, positive=False),\n}',
         ),
-        ('and data["proof"]["verifier"] != contracts["verifier"]', "and False"),
+        ('and data["proof"]["verifier"] not in _verifiers(network)', "and False"),
+        # Arras v2 has no verifier: a v1 verifier in its row must turn a test red.
+        (
+            '"v2.arras-escrow.near": None,',
+            '"v2.arras-escrow.near": "erc8004-verifier.arras-escrow.near",',
+        ),
+        # One verifier per escrow: each site that picks the verifier, made to pick v1's.
+        (
+            "return rows.get(escrow) if isinstance(escrow, str) else None",
+            "return rows.get(escrow, NEAR_ERC8004_CONTRACTS[network]['verifier'])"
+            " if isinstance(escrow, str) else None",
+        ),
+        (
+            "return rows.get(escrow) if isinstance(escrow, str) else None",
+            "return rows.get(escrow)",
+        ),
+        (
+            'receiver = _escrow_verifier(network, cfg["escrow"])'
+            ' if role == "verifier" else contracts[role]',
+            "receiver = contracts[role]",
+        ),
+        (
+            '"account_id": contracts[role] if account is None else account,',
+            '"account_id": contracts[role],',
+        ),
+        (
+            'account = contracts["verifier"] if verifier is None else verifier',
+            'account = contracts["verifier"]',
+        ),
+        ("            verifier=account,\n", "            verifier=None,\n"),
+        (
+            'receivers = _verifiers(network) if role == "verifier" else {contracts[role]}',
+            "receivers = {contracts[role]}",
+        ),
         ('"min_gas_nft_transfer_call": 50 * TGAS,', '"min_gas_nft_transfer_call": 1,'),
         ('"min_gas_give_feedback": 40 * TGAS,', '"min_gas_give_feedback": 1,'),
         (

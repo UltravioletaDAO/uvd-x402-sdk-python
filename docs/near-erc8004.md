@@ -12,6 +12,25 @@ its existing API.
 | `near:mainnet` | `identity-registry.erc-8004.near` | `reputation-registry.erc-8004.near` | `erc8004-verifier.arras-escrow.near` |
 | `near:testnet` | `identity-registry.erc-8004.testnet` | `reputation-registry.erc-8004.testnet` | `erc8004-verifier.arras-dev.testnet` |
 
+**One verifier per Arras escrow.** A verifier checks payments of one escrow contract, so a task is
+rated with the verifier of the escrow it was paid in. `NEAR_ERC8004_ESCROW_VERIFIERS[network]` has
+one row per contract of `near_escrow.NEAR_ESCROW_CONTRACTS[network]`: `v1.arras-escrow.near` ->
+`erc8004-verifier.arras-escrow.near` (the verifier above; testnet: `arras-v1b-1101.testnet` ->
+`erc8004-verifier.arras-dev.testnet`), and `v2.arras-escrow.near` -> `None`: no verifier for Arras
+v2 is deployed yet. `near_erc8004_verifier(network, escrow)` returns the verifier of an escrow and
+raises `ValueError` for an unregistered escrow or one whose row is `None`, so rating a v2 payment
+fails closed with that error instead of asking v1's verifier about a payment it cannot see.
+`give_feedback_with_proof`, the `new_feedback` reader and the `verify_feedback_proof` outcome parser
+accept exactly the non-`None` verifiers of the network. A verifier config is bound to the escrow it
+reads: `client.get_config("verifier", verifier=...)` reads the verifier asked for (default
+`NEAR_ERC8004_CONTRACTS[network]["verifier"]`, v1's), refuses an unregistered one before any RPC,
+and refuses an answer that reads another verifier's escrow; `verify_feedback_proof` built with that
+config goes to that escrow's verifier, with that config's gas floor. A verifier that does not
+answer raises: no config, nothing to sign. Registering v2's verifier
+(`payment-proof.arras-escrow.near`, not deployed yet) is a one-row data change in a release, made
+only after its account exists on mainnet. `NEAR_ERC8004_CONTRACTS[network]["verifier"]` and
+`NEAR_ERC8004_ESCROWS[network]` stay v1's pair.
+
 `agent_registry(network)` returns the registration-file identifier, for example
 `near:mainnet:identity-registry.erc-8004.near`. These are application identifiers;
 the helper does not register a CAIP namespace. Validation is not exposed.
@@ -68,11 +87,14 @@ agent wallet. Registration has no implicit retry or deduplication in this SDK.
 
 ```python
 from uvd_x402_sdk import (
-    NEAR_ERC8004_CONTRACTS,
     build_erc8004_give_feedback_with_proof,
+    near_erc8004_verifier,
 )
 
-verifier = NEAR_ERC8004_CONTRACTS[network]["verifier"]
+# The verifier of the Arras escrow the task was paid in (from the task's own record).
+# v1.arras-escrow.near today; v2.arras-escrow.near raises until its verifier is registered.
+task_escrow = "v1.arras-escrow.near"
+verifier = near_erc8004_verifier(network, task_escrow)
 reputation = client.get_config("reputation")
 
 def rate_worker(agent_id, payment_id, payer_account):
@@ -105,11 +127,16 @@ Use `parse_erc8004_outcome(..., method="give_feedback_with_proof")` after the
 wallet returns a final outcome. It distinguishes `accepted` (decimal index),
 `rejected` (`Erc8004Rejection`) and `error` (`Erc8004PanicCode`). A successful NEAR
 transaction with a null feedback result can be a refunded callback rejection.
-Pending or inconsistent outcomes raise `ValueError`. This release accepts only
-`NEAR_ERC8004_CONTRACTS[network]["verifier"]` in `give_feedback_with_proof`;
-another account, including the other network's verifier, raises `ValueError`
-before signing. A `new_feedback` event with another proof verifier is skipped
-and cannot substantiate an accepted proof-feedback outcome.
+Pending or inconsistent outcomes raise `ValueError`. `give_feedback_with_proof`
+accepts only a registered verifier of the network (`NEAR_ERC8004_ESCROW_VERIFIERS`;
+today `NEAR_ERC8004_CONTRACTS[network]["verifier"]` alone); another account,
+including the other network's verifier, raises `ValueError` before signing. A
+`new_feedback` event with another proof verifier is skipped and cannot
+substantiate an accepted proof-feedback outcome. The builder does not see the
+payment behind `proof`: choosing the verifier of the task's escrow is the
+caller's, with `near_erc8004_verifier`. A v2 payment sent to v1's verifier is
+rejected on chain (each verifier reads its own escrow only): a wasted
+transaction.
 
 ## Configuration and spending limits
 
@@ -117,6 +144,10 @@ Every builder requires an `Erc8004Config` from `client.get_config(role)`, or fro
 `parse_erc8004_config(raw, network=..., role=...)` for an already captured trusted
 RPC response. Snapshots are immutable and network-bound; builders and signing
 revalidate them. Refresh configuration deliberately when preparing new work.
+For the verifier role, `client.get_config("verifier", verifier=account)` and
+`parse_erc8004_config(raw, ..., role="verifier", verifier=account)` also bind the
+snapshot to the account it was read from (its `escrow` must be that verifier's
+row); without `verifier=`, a captured snapshot is bound by its `escrow` alone.
 
 | Operation | Deposit selection | Gas selection |
 | --- | --- | --- |
@@ -189,13 +220,14 @@ already been checked. These helpers trust the supplied RPC's provenance fields;
 they do not authenticate a node or prove settlement.
 
 When consuming `new_feedback` or `read_feedback_proof`, count a proof as verified
-Execution Market reputation only when it is non-null,
-`proof.verifier == NEAR_ERC8004_CONTRACTS[network]["verifier"]` and
-`proof.context == "em"`. Apply both filters even when indexing parsed events.
-`read_feedback_proof` returns the recorded proof without restricting its verifier
-or context; a non-null proof alone does not establish verified EM reputation.
-For aggregate reads, use `get_verified_summary` with the network's verifier and
-`context="em"`, as in the example above.
+Execution Market reputation only when it is non-null, `proof.verifier` is a
+registered verifier of the network (a non-`None` value of
+`NEAR_ERC8004_ESCROW_VERIFIERS[network]`) and `proof.context == "em"`. Apply both
+filters even when indexing parsed events. `read_feedback_proof` returns the
+recorded proof without restricting its verifier or context; a non-null proof
+alone does not establish verified EM reputation. For aggregate reads, use
+`get_verified_summary` with each registered verifier and `context="em"`, as in
+the example above; each verifier has its own summary.
 
 ## Local signing
 
