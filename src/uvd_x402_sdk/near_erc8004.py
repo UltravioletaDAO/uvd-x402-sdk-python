@@ -98,7 +98,9 @@ Erc8004PanicCode = Enum(
     {
         **{f"ID_E{i:02}": f"ERC8004_ID_E{i:02}" for i in (*range(1, 8), *range(10, 24))},
         **{f"REP_E{i:02}": f"ERC8004_REP_E{i:02}" for i in (*range(1, 18), 30, 40, 41, 42, 43)},
-        **{f"ARV_E{i:02}": f"ERC8004_ARV_E{i:02}" for i in range(1, 16)},
+        # E16: v2's verifier (payment-proof, arras branch c0-arras-verifier-v2 lib.rs:97,112),
+        # a dispute expired in the receiver's favour; v1's emits E01..E15 only.
+        **{f"ARV_E{i:02}": f"ERC8004_ARV_E{i:02}" for i in range(1, 17)},
     },
     type=str,
 )
@@ -1062,7 +1064,7 @@ class NearErc8004Client:
         to sign.
         """
         contracts = _contracts(self.network)
-        _require(isinstance(role, str) and role in contracts, "unknown contract role")
+        # An unknown role is refused by _call, before the RPC.
         if role != "verifier":
             _require(verifier is None, "verifier applies only to role verifier")
             return parse_erc8004_config(

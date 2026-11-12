@@ -1381,3 +1381,24 @@ def test_a_verify_outcome_names_a_registered_verifier(monkeypatch):
     for receiver in refused[1:]:
         with pytest.raises(ValueError, match="provenance"):
             parse(receiver)
+
+
+@pytest.mark.parametrize("code", [1, 15, 16])
+def test_a_verifier_panic_is_an_error_code_e16_included(monkeypatch, code):
+    # E16 is v2's verifier only (a dispute expired in the receiver's favour): an error the
+    # caller reads, never "unrecognized" (which reads as pending or malformed).
+    patched_v2_row(monkeypatch)
+    outcome = verify_outcome(V2_VERIFIER)
+    message = f"Smart contract panicked: ERC8004_ARV_E{code:02}: refused"
+    outcome["status"] = {
+        "Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": message}}}}
+    }
+    result = erc.parse_erc8004_outcome(
+        outcome, network="near:mainnet", method="verify_feedback_proof"
+    )
+    assert result.status == "error" and result.panic.value == f"ERC8004_ARV_E{code:02}"
+    outcome["status"]["Failure"]["ActionError"]["kind"]["FunctionCallError"]["ExecutionError"] = (
+        "Smart contract panicked: ERC8004_ARV_E17: refused"
+    )
+    with pytest.raises(ValueError, match="unrecognized"):
+        erc.parse_erc8004_outcome(outcome, network="near:mainnet", method="verify_feedback_proof")

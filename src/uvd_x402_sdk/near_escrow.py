@@ -484,11 +484,13 @@ def check_operator_ticket(
     returns it (``ed25519:<base58>``), its 32 bytes, or ``None`` if it has none.
     No key and no ticket passes; a key without a ticket, or a ticket without a
     key, is ``"E53_TICKET_INVALIDO"``; ``now_ns >= expiry`` (default: the wall
-    clock) is ``"E54_TICKET_VENCIDO"``, judged before the signature; a ticket
-    that is not exactly ``{expiry, sig}`` with a canonical decimal expiry and a
-    canonical base58 64-byte signature of this contract, subject and expiry is
-    E53. The chain parses ``expiry`` with ``str::parse`` (``"+1"``, ``"01"``
-    pass there), this check only the canonical form the SDK writes. A malformed
+    clock) is ``"E54_TICKET_VENCIDO"``, judged before the signature is verified;
+    a ticket that is not exactly ``{expiry, sig}`` with a canonical decimal expiry
+    and a canonical base58 64-byte signature of this contract, subject and expiry
+    is E53. Two differences with the chain, both in tickets the SDK never writes:
+    it parses ``expiry`` with ``str::parse`` (``"+1"``, ``"01"`` pass there), and
+    it decodes ``sig`` only after E54 (msg.rs:20-21), so an expired ticket with a
+    malformed ``sig`` is E54 there and E53 here (as in the TypeScript SDK). A malformed
     key, contract, subject or now_ns (the caller's inputs) raises ValueError; a
     malformed ticket (untrusted) is E53. A pre-check: the chain verifies with
     its own Ed25519 implementation.
@@ -559,7 +561,7 @@ class NearEscrowDelegateOptions:
 
 def near_escrow_contract_version(network: str, contract: str) -> str:
     """``"v1"`` or ``"v2"`` for a registered Arras contract; ValueError otherwise."""
-    if network not in NEAR_ESCROW_TOKENS:
+    if not isinstance(network, str) or network not in NEAR_ESCROW_TOKENS:
         raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
     if contract not in NEAR_ESCROW_CONTRACTS[network]:
         raise ValueError("escrow_contract is not registered for this network")
@@ -567,9 +569,11 @@ def near_escrow_contract_version(network: str, contract: str) -> str:
 
 
 def _options(options: NearEscrowDelegateOptions) -> str:
+    # The network first, as in 0.112.0 and the TypeScript SDK: the same first refusal.
+    if options.network not in NEAR_ESCROW_TOKENS:
+        raise ValueError("unsupported NEAR network: use near:mainnet or near:testnet")
     _account(options.sender_id, "sender_id")
     _account(options.escrow_contract, "escrow_contract")
-    # Also the network check: one guard, in the public helper.
     version = near_escrow_contract_version(options.network, options.escrow_contract)
     nonce = _uint(options.nonce, 64, "nonce")
     height = _uint(options.max_block_height, 64, "max_block_height")

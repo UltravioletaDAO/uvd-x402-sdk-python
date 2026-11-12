@@ -725,7 +725,13 @@ def test_guide_uses_the_capturer_key_for_release_and_refund():
     )
     for block in blocks:
         exec(compile(block, "docs/near-escrow.md", "exec"), context)
-    # The Arras v2 flow of the guide: EM's ticket inside the msg the payer signs.
+    # EM on v2 without a ticket: v1's msg, byte for byte, toward the v2 contract.
+    em_v2 = decode(context["em_v2_payment"])
+    assert em_v2["args"]["receiver_id"] == "v2.arras-escrow.near"
+    assert em_v2["args"]["msg"] == context["em_v2_msg"] == VECTORS["msg_canonico_v1"]
+    assert em_v2["receiver"] == es.NEAR_ESCROW_TOKENS["near:mainnet"]
+    assert context["em_v2_payment"]["network"] == "near:mainnet"
+    # The Arras v2 flow of the guide with a ticket: EM's ticket inside the msg the payer signs.
     v2 = decode(context["v2_payment"])
     v2_contract = es.NEAR_ESCROW_V2_CONTRACTS["near:mainnet"][0]
     assert v2["receiver"] == es.NEAR_ESCROW_TOKENS["near:mainnet"] and v2["sender"] == V1["payer"]

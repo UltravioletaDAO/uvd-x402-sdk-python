@@ -207,7 +207,35 @@ sign short expiries. The ticket binds the `payment_id` only, not `dispute_deadli
 sending its own `ft_transfer_call` can pair EM's ticket with any `dispute_deadline` the contract
 accepts (`ticket.rs:41-48`; declared as P3-4 in arras `docs/handoffs/c0-arras-v2.md`).
 
-Minimal Execution Market flow (operator `em` with its `ticket_pubkey`, one payment):
+Execution Market's v2 flow (owner's decision of 2026-11: the owner removes `em`'s `ticket_pubkey`
+first, below, and EM signs no ticket). The msg carries v1's keys only, which is also all the
+facilitator accepts today, and the payer signs it against the v2 contract:
+
+```python
+import json
+
+em_v2_network = "near:mainnet"
+em_v2_contract = "v2.arras-escrow.near"  # EM's configured contract, checked by the SDK
+assert near.near_escrow_contract_version(em_v2_network, em_v2_contract) == "v2"
+em_v2_token = near.NEAR_ESCROW_TOKENS[em_v2_network]
+em_v2_msg = near.build_escrow_msg(terms)  # served in extra.nearEscrow.msg: no v2 fields
+em_v2_payment_id = near.compute_payment_id(
+    {**terms, "token": em_v2_token, "payer": payer, "amount": amount}
+)
+em_v2_options = near.NearEscrowDelegateOptions(
+    network=em_v2_network, signer=near.NearEd25519Signer(secret_key),
+    sender_id=payer, escrow_contract=em_v2_contract,
+    nonce=next_nonce, max_block_height=expiry_height,
+)
+em_v2_payment = near.sign_escrow_authorization(
+    em_v2_options, token=em_v2_token, amount=amount, msg=json.loads(em_v2_msg),
+)
+```
+
+Use a random `salt` per payment, never one derived from the task: the same terms in v1 and v2 give
+the same `payment_id`, and each escrow's verifier would rate it.
+
+With the ticket instead (operator `em` keeps its `ticket_pubkey`, one payment):
 
 ```python
 import json

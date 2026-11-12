@@ -75,16 +75,27 @@ def mutations(source: str):
             '"Arras v2 authorize_from_budget is not implemented in this SDK yet")',
             "return {}",
         ),
-        ('("v1.arras-escrow.near",)', "()"),
-        ('("v1.arras-escrow.near",)', '["v1.arras-escrow.near"]'),
+        # The mainnet row: v1 first (old readers take [0]), v2 signable, immutable.
+        (
+            '"near:mainnet": ("v1.arras-escrow.near", "v2.arras-escrow.near"),',
+            '"near:mainnet": ("v1.arras-escrow.near",),',
+        ),
+        (
+            '"near:mainnet": ("v1.arras-escrow.near", "v2.arras-escrow.near"),',
+            '"near:mainnet": ("v2.arras-escrow.near", "v1.arras-escrow.near"),',
+        ),
+        (
+            '"near:mainnet": ("v1.arras-escrow.near", "v2.arras-escrow.near"),',
+            '"near:mainnet": ["v1.arras-escrow.near", "v2.arras-escrow.near"],',
+        ),
         # Arras v2: registry, version, msg fields and the operator ticket.
         ('("v2.arras-escrow.near",)', '["v2.arras-escrow.near"]'),
         (
-            'return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"',
+            'return "v2" if contract in NEAR_ESCROW_V2_CONTRACTS[network] else "v1"',
             'return "v2"',
         ),
         (
-            'return "v1" if contract in NEAR_ESCROW_CONTRACTS[network] else "v2"',
+            'return "v2" if contract in NEAR_ESCROW_V2_CONTRACTS[network] else "v1"',
             'return "v1"',
         ),
         ("**_msg_v2_fields(params, release_at, reclaim_at),", ""),
@@ -123,7 +134,10 @@ def mutations(source: str):
         ("if now >= expiry:", "if now > expiry:"),
         ("if now >= expiry:", "if False:"),
         ('    _account(contract, "contract")\n    _ticket_subject(subject)\n', ""),
-        ('return _ed25519_valid(key, _ticket_signature(fields["sig"]), message)', "return True"),
+        ('if not _ed25519_valid(key, _ticket_signature(fields["sig"]), message):', "if False:"),
+        # check_operator_ticket: authorize.rs:271-273, a key and a ticket come together.
+        ("if key is None and ticket is None:", "if ticket is None:"),
+        ("if key is None or ticket is None:", "if False:"),
         ("        return False\n    return True\n", "        return True\n    return True\n"),
         (
             'return {"expiry": str(n), "sig": _b58encode(signature)}',

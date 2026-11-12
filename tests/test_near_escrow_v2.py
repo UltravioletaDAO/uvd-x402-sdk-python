@@ -687,6 +687,21 @@ def test_v1_contract_refuses_v2_fields_before_the_key(network, extra):
         )
 
 
+@pytest.mark.parametrize("method", ["authorize"] + sorted({m for m, _ in LIFECYCLE}))
+def test_the_network_is_refused_before_the_accounts(method):
+    # 0.112.0's order and the TypeScript SDK's: the network, then the accounts, then the row.
+    for network in ("near:MAINNET", "near", "eip155:1"):
+        o = options(network=network, sender_id="", escrow_contract="", signer=NoKey())
+        with pytest.raises(ValueError, match="unsupported NEAR network"):
+            if method == "authorize":
+                es.sign_escrow_authorization(o, token=TOKEN, amount=V1["amount"], msg=V1)
+            else:
+                es.sign_escrow_lifecycle(o, method, dict(LIFECYCLE)[method])
+    for network in (["near:mainnet"], None, 1):
+        with pytest.raises(ValueError, match="unsupported NEAR network"):
+            es.near_escrow_contract_version(network, V2_MAINNET)
+
+
 @pytest.mark.parametrize(
     "network,contract",
     [
