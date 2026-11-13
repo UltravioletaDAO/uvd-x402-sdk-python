@@ -69,10 +69,85 @@ def mutations(source):
             '"feedback_index": lambda v: _decimal(v, positive=False),\n}',
         ),
         ('and data["proof"]["verifier"] not in _verifiers(network)', "and False"),
-        # Arras v2 has no verifier: a v1 verifier in its row must turn a test red.
+        # One verifier per escrow: v1's verifier in v2's row, or no verifier, must turn a test red.
         (
-            '"v2.arras-escrow.near": None,',
+            '"v2.arras-escrow.near": "payment-proof.arras-escrow.near",',
             '"v2.arras-escrow.near": "erc8004-verifier.arras-escrow.near",',
+        ),
+        (
+            '"v2.arras-escrow.near": "payment-proof.arras-escrow.near",',
+            '"v2.arras-escrow.near": None,',
+        ),
+        # The payment's escrow (0.114.0): each site that checks it, made to check nothing or the
+        # wrong verifier.
+        (
+            "    if escrow is not None:\n        _require(\n            near_erc8004",
+            "    if False:\n        _require(\n            near_erc8004",
+        ),
+        # The refuter's survivors of round 1: a check only for verifiers in the map (the views take
+        # any account), a falsy escrow skipped, and mainnet's rows read on testnet.
+        (
+            "    if escrow is not None:\n        _require(\n            near_erc8004",
+            "    if escrow is not None and verifier in _verifiers(network):\n"
+            "        _require(\n            near_erc8004",
+        ),
+        (
+            "    if escrow is not None:\n        _require(\n            near_erc8004",
+            "    if escrow:\n        _require(\n            near_erc8004",
+        ),
+        (
+            "            account = near_erc8004_verifier(self.network, escrow)",
+            '            account = near_erc8004_verifier("near:mainnet", escrow)',
+        ),
+        (
+            "_check_escrow(self.network, escrow, verifier)\n        return self.view(\n"
+            '            "reputation", "get_verified_summary"',
+            '_check_escrow("near:mainnet", escrow, verifier)\n        return self.view(\n'
+            '            "reputation", "get_verified_summary"',
+        ),
+        (
+            '            data["verifier"]\n            if method == "give_feedback_with_proof"',
+            '            contracts["verifier"]\n'
+            '            if method == "give_feedback_with_proof"',
+        ),
+        (
+            '            else _escrow_verifier(network, cfg["escrow"])\n'
+            "        )\n        _check_escrow",
+            '            else contracts["verifier"]\n        )\n        _check_escrow',
+        ),
+        ("        now_ns=now_ns,\n        escrow=escrow,\n    )", "        now_ns=now_ns,\n    )"),
+        (
+            "now_ns=now_ns, escrow=escrow\n    )\n    return _json(",
+            "now_ns=now_ns\n    )\n    return _json(",
+        ),
+        (
+            "now_ns=now_ns, escrow=escrow\n    )\n    return _sign_function_call_transaction(",
+            "now_ns=now_ns\n    )\n    return _sign_function_call_transaction(",
+        ),
+        (
+            "            account = near_erc8004_verifier(self.network, escrow)",
+            '            account = contracts["verifier"]',
+        ),
+        ("        _check_escrow(self.network, escrow, account)\n", ""),
+        (
+            "_check_escrow(self.network, escrow, verifier)\n        return self.view(\n"
+            '            "reputation", "get_verified_summary"',
+            'return self.view(\n            "reputation", "get_verified_summary"',
+        ),
+        (
+            "_check_escrow(self.network, escrow, verifier)\n        return self.view(\n"
+            '            "reputation", "list_verified_feedback"',
+            'return self.view(\n            "reputation", "list_verified_feedback"',
+        ),
+        (
+            "_check_escrow(self.network, escrow, verifier)\n        return self.view(\n"
+            '            "reputation",\n            "get_proof_feedback"',
+            'return self.view(\n            "reputation",\n            "get_proof_feedback"',
+        ),
+        (
+            "_check_escrow(self.network, escrow, verifier)\n        return self.view(\n"
+            '            "reputation",\n            "is_proof_pending"',
+            'return self.view(\n            "reputation",\n            "is_proof_pending"',
         ),
         # One verifier per escrow: each site that picks the verifier, made to pick v1's.
         (
@@ -183,6 +258,21 @@ def main():
         "HTTP_PROXY": "http://127.0.0.1:9",
         "NO_PROXY": "127.0.0.1,localhost",
     }
+    # A test that fails on the unmutated source reads every mutant as KILLED (0.114.0: an identity
+    # check against the package re-exports did, since the child swaps the module object).
+    baseline = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--child"],
+        input=json.dumps(["near_erc8004", SOURCE.read_text(encoding="utf-8")]),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        cwd=ROOT,
+        env=env,
+        timeout=120,
+    )
+    if baseline.returncode != 0:
+        print(baseline.stdout[-2000:], baseline.stderr[-500:], flush=True)
+        raise SystemExit("the unmutated source fails a test: every mutant would read KILLED")
     survivors = []
     rows = [
         ("near_erc8004", label, source)

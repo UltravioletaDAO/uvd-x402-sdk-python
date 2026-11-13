@@ -311,9 +311,10 @@ events keep `standard: arras`, version `1.0.0` (`events.rs:1-4`): `parse_arras_e
 events v2 emits and skips the seven v2-only ones, `dispute_resolved` included, which moves money
 (`to_receiver`, `to_payer`, `fee`): reconciling a disputed payment needs another reader. Not in this
 SDK yet: the `budget` msg, `authorize_from_budget`, the dispute methods and the v2 views
-(`get_budget`, `compute_budget_payment_id`). Rating a v2 payment through ERC-8004 needs a verifier
-for v2, which is not registered yet: `near_erc8004.near_erc8004_verifier("near:mainnet",
-"v2.arras-escrow.near")` raises (`docs/near-erc8004.md`).
+(`get_budget`, `compute_budget_payment_id`). A v2 payment is rated through ERC-8004 with v2's own
+verifier (0.114.0): `near_erc8004.near_erc8004_verifier("near:mainnet", "v2.arras-escrow.near")` is
+`payment-proof.arras-escrow.near`; pass the payment's `escrow=` to the proof builders and signing
+so a v1 verifier is refused before signing (`docs/near-erc8004.md`).
 
 ## Reproducible conformance
 

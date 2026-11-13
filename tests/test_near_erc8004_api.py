@@ -40,3 +40,32 @@ def test_guide_flow_executes_offline(monkeypatch):
     feedback = scope["rate_worker"]("0", "payment-id", "payer.near")
     assert feedback["actions"][0]["params"]["methodName"] == "give_feedback_with_proof"
     assert scope["sign_registration"](Signer(), "1", "1" * 32)
+
+
+def test_the_unmutated_source_passes_through_the_mutation_child():
+    # scripts/near_erc8004_mutations.py counts a mutant KILLED when its child sees a failure: a
+    # test that fails with the source unmutated (the child swaps the module object) kills them all.
+    # This file is not in the child's run, so it can start one.
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).parents[1]
+    source = (root / "src/uvd_x402_sdk/near_erc8004.py").read_text(encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/near_erc8004_mutations.py"), "--child"],
+        input=json.dumps(["near_erc8004", source]),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        cwd=root,
+        env={
+            **os.environ,
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "127.0.0.1,localhost",
+        },
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout[-2000:]
+    assert " passed" in result.stdout and " failed" not in result.stdout

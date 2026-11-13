@@ -50,13 +50,18 @@ NEAR_ERC8004_ESCROWS = MappingProxyType(
 # The ERC-8004 verifier that rates the payments of each registered Arras escrow
 # (one row per contract of near_escrow.NEAR_ESCROW_CONTRACTS). None: no verifier is
 # registered for that escrow, and rating its payments is refused (fail closed). A
-# row is filled in a release only after its account is deployed on chain.
+# row is filled in a release only after its account is deployed on chain. A
+# verifier is trusted by its account here, never by its get_config (anyone can
+# deploy a contract that answers the same one; arras docs/MAINNET.md 9.5).
 NEAR_ERC8004_ESCROW_VERIFIERS = MappingProxyType(
     {
         "near:mainnet": MappingProxyType(
             {
                 "v1.arras-escrow.near": "erc8004-verifier.arras-escrow.near",
-                "v2.arras-escrow.near": None,
+                # Keyless since 2026-11-13 00:37Z: code sha256 ea430d5f...31e5a0, the
+                # reproducible wasm of arras 40eba87e (contracts/erc8004-payment-proof),
+                # get_config escrow v2.arras-escrow.near.
+                "v2.arras-escrow.near": "payment-proof.arras-escrow.near",
             }
         ),
         "near:testnet": MappingProxyType(
@@ -98,8 +103,9 @@ Erc8004PanicCode = Enum(
     {
         **{f"ID_E{i:02}": f"ERC8004_ID_E{i:02}" for i in (*range(1, 8), *range(10, 24))},
         **{f"REP_E{i:02}": f"ERC8004_REP_E{i:02}" for i in (*range(1, 18), 30, 40, 41, 42, 43)},
-        # E16: v2's verifier (payment-proof, arras branch c0-arras-verifier-v2 lib.rs:97,112),
-        # a dispute expired in the receiver's favour; v1's emits E01..E15 only.
+        # E16: v2's verifier (payment-proof.arras-escrow.near, arras 40eba87e
+        # contracts/erc8004-payment-proof/src/lib.rs:97,112,357), a dispute expired in the
+        # receiver's favour; v1's emits E01..E15 only.
         **{f"ARV_E{i:02}": f"ERC8004_ARV_E{i:02}" for i in range(1, 17)},
     },
     type=str,
@@ -134,8 +140,8 @@ def near_erc8004_verifier(network: str, escrow: str) -> str:
     """The ERC-8004 verifier that rates payments made in ``escrow``, an Arras contract.
 
     Rate a task with the verifier of the escrow it was paid in. An escrow with no
-    registered verifier yet (Arras v2 today) raises ValueError: its payments are
-    not rated, rather than sent to a verifier that reads another contract.
+    registered verifier (a None row) raises ValueError: its payments are not
+    rated, rather than sent to a verifier that reads another contract.
     """
     _contracts(network)
     rows = NEAR_ERC8004_ESCROW_VERIFIERS[network]
@@ -149,6 +155,20 @@ def near_erc8004_verifier(network: str, escrow: str) -> str:
         "its payments cannot be rated",
     )
     return rows[escrow]
+
+
+def _check_escrow(network: str, escrow: object, verifier: object) -> None:
+    """With ``escrow`` given, ``verifier`` must be that escrow's verifier.
+
+    Another escrow's verifier answers E12 (no such payment): the registry returns
+    the deposit and the rating is lost without an error. ``escrow=None`` checks
+    nothing (the 0.113.0 call): the payment id does not say its escrow.
+    """
+    if escrow is not None:
+        _require(
+            near_erc8004_verifier(network, escrow) == verifier,
+            "verifier is not the ERC-8004 verifier of the payment's escrow",
+        )
 
 
 def agent_registry(network: str) -> str:
@@ -485,11 +505,15 @@ def build_erc8004_call(
     deposit: str | None = None,
     gas: str | None = None,
     now_ns: Unsigned | None = None,
+    escrow: str | None = None,
 ) -> dict[str, Any]:
     """Build one wallet-selector action using a validated get_config snapshot.
 
     Storage-growth calls require an explicit deposit (1 yocto for no growth).
     Wallet deadlines are checked again at signing against its current clock.
+    ``escrow``: the Arras contract the proof's payment was made in
+    (give_feedback_with_proof, verify_feedback_proof only); the verifier must be
+    its verifier. It is checked, never sent.
     """
     contracts = _contracts(network)
     _account(signer_id, "signer_id")
@@ -506,6 +530,17 @@ def build_erc8004_call(
             data["verifier"] in _verifiers(network),
             "unsupported verifier for selected network",
         )
+    if escrow is not None:
+        _require(
+            method in ("give_feedback_with_proof", "verify_feedback_proof"),
+            "escrow applies only to give_feedback_with_proof and verify_feedback_proof",
+        )
+        proven_by = (
+            data["verifier"]
+            if method == "give_feedback_with_proof"
+            else _escrow_verifier(network, cfg["escrow"])
+        )
+        _check_escrow(network, escrow, proven_by)
     limits = cfg["limits"] if role == "identity" else cfg
     for field, limit in (
         ("agent_uri", "max_agent_uri_len"),
@@ -596,7 +631,7 @@ def build_erc8004_call(
     }
 
 
-def _validated_transaction(descriptor, *, network, config, now_ns=None):
+def _validated_transaction(descriptor, *, network, config, now_ns=None, escrow=None):
     _require(
         isinstance(descriptor, dict) and set(descriptor) == {"signerId", "receiverId", "actions"},
         "invalid transaction descriptor",
@@ -624,6 +659,7 @@ def _validated_transaction(descriptor, *, network, config, now_ns=None):
         gas=params["gas"],
         deposit=params["deposit"],
         now_ns=now_ns,
+        escrow=escrow,
     )
     _require(
         descriptor["receiverId"] == tx["receiverId"], "transaction network or receiver mismatch"
@@ -632,9 +668,16 @@ def _validated_transaction(descriptor, *, network, config, now_ns=None):
 
 
 def erc8004_args_json(
-    descriptor, *, network: str, config: Erc8004Config, now_ns: Unsigned | None = None
+    descriptor,
+    *,
+    network: str,
+    config: Erc8004Config,
+    now_ns: Unsigned | None = None,
+    escrow: str | None = None,
 ) -> bytes:
-    tx = _validated_transaction(descriptor, network=network, config=config, now_ns=now_ns)
+    tx = _validated_transaction(
+        descriptor, network=network, config=config, now_ns=now_ns, escrow=escrow
+    )
     return _json(tx["actions"][0]["params"]["args"]).encode("utf-8")
 
 
@@ -647,13 +690,18 @@ def sign_erc8004_transaction(
     network: str,
     config: Erc8004Config,
     now_ns: Unsigned | None = None,
+    escrow: str | None = None,
 ) -> str:
     """Return a verified base64 NEAR V0 SignedTransaction; never submit it.
 
     The caller supplies the next nonce and recent block hash and checks FullAccess
     permission separately. No offline signature establishes key permissions.
+    ``escrow`` (proof methods): the payment's Arras contract, checked against the
+    descriptor's verifier before the key is read, as in build_erc8004_call.
     """
-    tx = _validated_transaction(descriptor, network=network, config=config, now_ns=now_ns)
+    tx = _validated_transaction(
+        descriptor, network=network, config=config, now_ns=now_ns, escrow=escrow
+    )
     return _sign_function_call_transaction(tx, signer, nonce, block_hash, network)
 
 
@@ -1053,28 +1101,34 @@ class NearErc8004Client:
         )
         return loads_bounded(bytes(raw))
 
-    def get_config(self, role: str = "identity", *, verifier: str | None = None) -> Erc8004Config:
+    def get_config(
+        self, role: str = "identity", *, verifier: str | None = None, escrow: str | None = None
+    ) -> Erc8004Config:
         """The get_config of a contract of this network, bound to it.
 
-        Role "verifier" reads ``verifier`` (default ``NEAR_ERC8004_CONTRACTS[network]
-        ["verifier"]``, v1's), which must be a registered verifier of the network
-        (refused before any RPC), and the answer must read that verifier's escrow.
-        Pass ``near_erc8004_verifier(network, escrow)`` of the payment to quote
-        verify_feedback_proof against it. An RPC error raises: no config, nothing
-        to sign.
+        Role "verifier" reads ``verifier`` (default: the verifier of ``escrow`` when
+        given, else ``NEAR_ERC8004_CONTRACTS[network]["verifier"]``, v1's), which
+        must be a registered verifier of the network, and of ``escrow`` when given
+        (both refused before any RPC); the answer must read that verifier's escrow.
+        Pass the payment's escrow to quote verify_feedback_proof against its
+        verifier. An RPC error raises: no config, nothing to sign.
         """
         contracts = _contracts(self.network)
         # An unknown role is refused by _call, before the RPC.
         if role != "verifier":
             _require(verifier is None, "verifier applies only to role verifier")
+            _require(escrow is None, "escrow applies only to role verifier")
             return parse_erc8004_config(
                 self._call(role, "get_config", {}), network=self.network, role=role
             )
         account = contracts["verifier"] if verifier is None else verifier
+        if verifier is None and escrow is not None:
+            account = near_erc8004_verifier(self.network, escrow)
         _require(
             isinstance(account, str) and account in _verifiers(self.network),
             "unsupported verifier for selected network",
         )
+        _check_escrow(self.network, escrow, account)
         return parse_erc8004_config(
             self._call(role, "get_config", {}, account),
             network=self.network,
@@ -1192,12 +1246,18 @@ class NearErc8004Client:
             **filters,
         )
 
-    def get_verified_summary(self, agent_id, verifier, **filters):
+    # The four views keyed by a verifier take ``escrow``: when given, the verifier
+    # must be that escrow's, checked before the RPC (another escrow's verifier
+    # holds none of its payments, and its answer reads as "not rated yet").
+
+    def get_verified_summary(self, agent_id, verifier, *, escrow=None, **filters):
+        _check_escrow(self.network, escrow, verifier)
         return self.view(
             "reputation", "get_verified_summary", agent_id=agent_id, verifier=verifier, **filters
         )
 
-    def list_verified_feedback(self, agent_id, verifier, **page):
+    def list_verified_feedback(self, agent_id, verifier, *, escrow=None, **page):
+        _check_escrow(self.network, escrow, verifier)
         return self.view(
             "reputation", "list_verified_feedback", agent_id=agent_id, verifier=verifier, **page
         )
@@ -1219,7 +1279,8 @@ class NearErc8004Client:
     def get_identity_registry(self):
         return self.view("reputation", "get_identity_registry")
 
-    def get_proof_feedback(self, verifier, proof, client_address):
+    def get_proof_feedback(self, verifier, proof, client_address, *, escrow=None):
+        _check_escrow(self.network, escrow, verifier)
         return self.view(
             "reputation",
             "get_proof_feedback",
@@ -1228,7 +1289,8 @@ class NearErc8004Client:
             client_address=client_address,
         )
 
-    def is_proof_pending(self, verifier, proof, client_address):
+    def is_proof_pending(self, verifier, proof, client_address, *, escrow=None):
+        _check_escrow(self.network, escrow, verifier)
         return self.view(
             "reputation",
             "is_proof_pending",
