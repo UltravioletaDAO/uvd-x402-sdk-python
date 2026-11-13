@@ -998,10 +998,11 @@ def test_proof_verifier_is_network_bound_before_key(network, kind):
         erc.sign_erc8004_transaction(tx, NoKey(), "1", "1" * 32, network=network, config=cfg)
 
 
-# --- Arras escrow -> ERC-8004 verifier: v1 keeps its verifier, v2 has none yet ------------------
+# --- Arras escrow -> ERC-8004 verifier: one verifier per escrow -----------------------------------
 
-# v2's verifier, payment-proof.arras-escrow.near, is not deployed (2026-11-11): no release names it
-# until it is. The tests of the filled row patch the table with a fictitious account instead.
+# v2's verifier, payment-proof.arras-escrow.near, is keyless on mainnet since 2026-11-13 and 0.114.0
+# registers it. The tests of the data patch itself (a row filled, or None) still patch the table,
+# with a fictitious account (V2_VERIFIER) or None.
 PAYMENT_PROOF = "payment-proof.arras-escrow.near"
 V2_VERIFIER = "v2-verifier.example.near"
 V1_VERIFIER = erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["verifier"]
@@ -1066,7 +1067,7 @@ def test_every_registered_escrow_has_a_verifier_row():
     assert erc.NEAR_ERC8004_ESCROW_VERIFIERS.keys() == erc.NEAR_ERC8004_CONTRACTS.keys()
     assert dict(erc.NEAR_ERC8004_ESCROW_VERIFIERS["near:mainnet"]) == {
         "v1.arras-escrow.near": "erc8004-verifier.arras-escrow.near",
-        "v2.arras-escrow.near": None,
+        "v2.arras-escrow.near": PAYMENT_PROOF,
     }
     assert dict(erc.NEAR_ERC8004_ESCROW_VERIFIERS["near:testnet"]) == {
         "arras-v1b-1101.testnet": "erc8004-verifier.arras-dev.testnet",
@@ -1080,8 +1081,10 @@ def test_every_registered_escrow_has_a_verifier_row():
             rows[erc.NEAR_ERC8004_ESCROWS[network]]
             == erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
         )
+        # A verifier reads one escrow: no account is the verifier of two.
+        assert len(set(rows.values())) == len(rows)
         for escrow in es.NEAR_ESCROW_V2_CONTRACTS[network]:
-            assert rows[escrow] is None
+            assert rows[escrow] == PAYMENT_PROOF
     with pytest.raises(TypeError):
         erc.NEAR_ERC8004_ESCROW_VERIFIERS["near:mainnet"]["v2.arras-escrow.near"] = V2_VERIFIER
 
@@ -1094,7 +1097,9 @@ def test_the_v1_escrow_is_rated_by_the_current_verifier(network):
     assert tx["actions"][0]["params"]["args"]["verifier"] == verifier
 
 
-def test_rating_a_v2_payment_fails_closed_until_its_verifier_is_registered():
+def test_an_escrow_whose_row_is_none_fails_closed(monkeypatch):
+    # 0.113.0's v2 row, and any escrow registered before its verifier is deployed.
+    patched_v2_row(monkeypatch, None)
     with pytest.raises(ValueError, match="no ERC-8004 verifier is registered"):
         erc.near_erc8004_verifier("near:mainnet", "v2.arras-escrow.near")
     for verifier in (PAYMENT_PROOF, V2_VERIFIER):
@@ -1179,7 +1184,8 @@ def never_rpc(method, params):
 VERIFY = dict(network="near:mainnet", signer_id="payer.near", client="payer.near", proof="p")
 
 
-def test_today_no_verifier_config_rates_a_v2_payment():
+def test_with_a_none_row_no_verifier_config_rates_its_payments(monkeypatch):
+    patched_v2_row(monkeypatch, None)
     client = erc.NearErc8004Client("near:mainnet", rpc=never_rpc)
     for verifier in (
         PAYMENT_PROOF,
@@ -1195,7 +1201,7 @@ def test_today_no_verifier_config_rates_a_v2_payment():
     ):
         with pytest.raises(ValueError, match="unsupported verifier"):
             client.get_config("verifier", verifier=verifier)
-    # A snapshot that reads v2 is refused, whoever answered it: nothing rates v2 yet.
+    # A snapshot that reads v2 is refused, whoever answered it: nothing rates v2 with a None row.
     with pytest.raises(ValueError, match="escrow"):
         erc.parse_erc8004_config(
             verifier_config("v2.arras-escrow.near"), network="near:mainnet", role="verifier"
@@ -1371,14 +1377,14 @@ def test_a_verify_outcome_names_a_registered_verifier(monkeypatch):
             verify_outcome(receiver), network="near:mainnet", method="verify_feedback_proof"
         )
 
-    assert parse(V1_VERIFIER).status == "accepted"
-    refused = (V2_VERIFIER, PAYMENT_PROOF, "erc8004-verifier.arras-dev.testnet", None, [1])
+    assert parse(V1_VERIFIER).status == parse(PAYMENT_PROOF).status == "accepted"
+    refused = (V2_VERIFIER, "erc8004-verifier.arras-dev.testnet", None, [1])
     for receiver in refused:
         with pytest.raises(ValueError, match="provenance"):
             parse(receiver)
     patched_v2_row(monkeypatch)
     assert parse(V2_VERIFIER).status == parse(V1_VERIFIER).status == "accepted"
-    for receiver in refused[1:]:
+    for receiver in (PAYMENT_PROOF, *refused[1:]):
         with pytest.raises(ValueError, match="provenance"):
             parse(receiver)
 
@@ -1402,3 +1408,530 @@ def test_a_verifier_panic_is_an_error_code_e16_included(monkeypatch, code):
     )
     with pytest.raises(ValueError, match="unrecognized"):
         erc.parse_erc8004_outcome(outcome, network="near:mainnet", method="verify_feedback_proof")
+
+
+# --- 0.114.0: v2's verifier registered, and the payment's escrow checked against it -------------
+
+V1_ESCROW, V2_ESCROW = "v1.arras-escrow.near", "v2.arras-escrow.near"
+# payment-proof.arras-escrow.near's get_config, read by c0der on 2026-11-13 (private RPC, final).
+MEASURED_V2_CONFIG = {
+    "contract": "erc8004-arras-verifier",
+    "escrow": V2_ESCROW,
+    "min_gas_verify": "25000000000000",
+    "gas_get_payment": "10000000000000",
+    "gas_on_payment": "10000000000000",
+}
+# Its verify_feedback_proof of the released payment 9nySy6vT... (tx ixnTdSzC..., same day).
+MEASURED_V2_ANSWER = {
+    "counterparty": "worker-v2.arras-escrow.near",
+    "role": "receiver",
+    "context": "em",
+    "weight": "50000",
+}
+PAIRS = [(V1_ESCROW, V1_VERIFIER), (V2_ESCROW, PAYMENT_PROOF)]
+CROSSED = [(V1_ESCROW, PAYMENT_PROOF), (V2_ESCROW, V1_VERIFIER)]
+CROSS = "verifier is not the ERC-8004 verifier of the payment's escrow"
+
+
+def v2_config(**changes):
+    return erc.parse_erc8004_config(
+        {**MEASURED_V2_CONFIG, **changes}, network="near:mainnet", role="verifier"
+    )
+
+
+def test_v2_payments_are_rated_by_payment_proof():
+    # No identity check against the package re-exports here: the mutation runner swaps this
+    # module's object, so one would fail for every mutant (test_near_erc8004_api pins them).
+    assert erc.near_erc8004_verifier("near:mainnet", V2_ESCROW) == PAYMENT_PROOF
+    assert erc.near_erc8004_verifier("near:mainnet", V1_ESCROW) == V1_VERIFIER
+    assert erc._verifiers("near:mainnet") == {V1_VERIFIER, PAYMENT_PROOF}
+    assert erc._verifiers("near:testnet") == {"erc8004-verifier.arras-dev.testnet"}
+    # v2 is a mainnet row only: testnet has no v2 escrow and no second verifier.
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        erc.near_erc8004_verifier("near:testnet", V2_ESCROW)
+    # The v1 constants, read by consumers of 0.113.0, are v1's pair as before.
+    assert erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["verifier"] == V1_VERIFIER
+    assert erc.NEAR_ERC8004_ESCROWS["near:mainnet"] == V1_ESCROW
+
+
+def test_the_measured_v2_config_is_accepted_from_payment_proof():
+    calls = []
+    answers = {V1_VERIFIER: verifier_config(), PAYMENT_PROOF: MEASURED_V2_CONFIG}
+    client = erc.NearErc8004Client("near:mainnet", rpc=rpc_by_account(answers, calls))
+    by_account = client.get_config("verifier", verifier=PAYMENT_PROOF)
+    by_escrow = client.get_config("verifier", escrow=V2_ESCROW)
+    assert calls == [PAYMENT_PROOF, PAYMENT_PROOF]
+    assert dict(by_account.data) == dict(by_escrow.data) == MEASURED_V2_CONFIG
+    captured = erc.parse_erc8004_config(
+        MEASURED_V2_CONFIG, network="near:mainnet", role="verifier", verifier=PAYMENT_PROOF
+    )
+    for cfg in (by_account, by_escrow, captured, v2_config()):
+        tx = erc.build_erc8004_verify_feedback_proof(config=cfg, escrow=V2_ESCROW, **VERIFY)
+        assert tx["receiverId"] == PAYMENT_PROOF
+        assert tx["actions"][0]["params"]["gas"] == str(50 * erc.TGAS)
+        assert tx["actions"][0]["params"]["deposit"] == "0"
+
+
+@pytest.mark.parametrize(
+    "escrow",
+    [
+        V1_ESCROW,
+        "arras-v1b-1101.testnet",
+        "v3.arras-escrow.near",
+        "V2.arras-escrow.near",
+        "v2.arras-escrow.near ",
+        " v2.arras-escrow.near",
+        PAYMENT_PROOF,
+        "",
+        None,
+        [V2_ESCROW],
+    ],
+    ids=repr,
+)
+def test_a_payment_proof_config_that_reads_another_escrow_is_refused(escrow):
+    answer = {**MEASURED_V2_CONFIG, "escrow": escrow}
+    client = erc.NearErc8004Client("near:mainnet", rpc=rpc_by_account({PAYMENT_PROOF: answer}))
+    with pytest.raises(ValueError, match="escrow|another verifier"):
+        client.get_config("verifier", verifier=PAYMENT_PROOF)
+    with pytest.raises(ValueError, match="escrow|another verifier"):
+        client.get_config("verifier", escrow=V2_ESCROW)
+
+
+def test_payment_proof_is_trusted_by_its_account_not_its_config():
+    # Another account answering v2's exact config is not v2's verifier.
+    impostor = rpc_by_account({"payment-proof.evil.near": MEASURED_V2_CONFIG})
+    client = erc.NearErc8004Client("near:mainnet", rpc=impostor)
+    with pytest.raises(ValueError, match="unsupported verifier"):
+        client.get_config("verifier", verifier="payment-proof.evil.near")
+    # v1's verifier answering v2's config, and payment-proof answering v1's, are refused.
+    swapped = rpc_by_account(
+        {V1_VERIFIER: MEASURED_V2_CONFIG, PAYMENT_PROOF: verifier_config(V1_ESCROW)}
+    )
+    for kwargs in (
+        {},
+        {"verifier": V1_VERIFIER},
+        {"escrow": V1_ESCROW},
+        {"verifier": PAYMENT_PROOF},
+        {"escrow": V2_ESCROW},
+    ):
+        with pytest.raises(ValueError, match="another verifier"):
+            erc.NearErc8004Client("near:mainnet", rpc=swapped).get_config("verifier", **kwargs)
+    for change in ({"contract": "erc8004-payment-proof"}, {"min_gas_verify": str(24 * erc.TGAS)}):
+        with pytest.raises(ValueError):
+            v2_config(**change)
+
+
+def feedback(network="near:mainnet", **options):
+    return erc.build_erc8004_give_feedback_with_proof(
+        network=network,
+        signer_id="payer.near",
+        config=config("reputation", network),
+        agent_id="0",
+        value="1",
+        value_decimals=0,
+        proof="9nySy6vTK95bgPUm5MkdsZtzC9XaGrSCV1EjNnRR6uyC",
+        **options,
+    )
+
+
+@pytest.mark.parametrize("escrow,verifier", PAIRS)
+def test_give_feedback_with_proof_takes_the_verifier_of_the_payments_escrow(escrow, verifier):
+    plain = feedback(verifier=verifier)
+    bound = feedback(verifier=verifier, escrow=escrow)
+    # The escrow is checked, never sent: the descriptor is the 0.113.0 one.
+    assert bound == plain
+    assert bound["receiverId"] == erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["reputation"]
+    assert bound["actions"][0]["params"]["args"]["verifier"] == verifier
+    cfg = config("reputation")
+    assert erc.erc8004_args_json(
+        bound, network="near:mainnet", config=cfg, escrow=escrow
+    ) == erc.erc8004_args_json(bound, network="near:mainnet", config=cfg)
+    signed = erc.sign_erc8004_transaction(
+        bound, Signer(), "1", "1" * 32, network="near:mainnet", config=cfg, escrow=escrow
+    )
+    assert isinstance(signed, str)
+
+
+@pytest.mark.parametrize("escrow,verifier", CROSSED)
+def test_a_crossed_verifier_is_refused_before_the_key(escrow, verifier):
+    # The other verifier answers E12 (no such payment): the registry refunds the deposit and the
+    # rating is lost without an error. With the payment's escrow, the SDK refuses it first.
+    with pytest.raises(ValueError, match=CROSS):
+        feedback(verifier=verifier, escrow=escrow)
+    cfg = config("reputation")
+    descriptor = feedback(verifier=verifier)
+    with pytest.raises(ValueError, match=CROSS):
+        erc.sign_erc8004_transaction(
+            descriptor, NoKey(), "1", "1" * 32, network="near:mainnet", config=cfg, escrow=escrow
+        )
+    with pytest.raises(ValueError, match=CROSS):
+        erc.erc8004_args_json(descriptor, network="near:mainnet", config=cfg, escrow=escrow)
+
+
+@pytest.mark.parametrize(
+    "escrow",
+    [
+        "V2.arras-escrow.near",
+        "v2.arras-escrow.near ",
+        "v2.arras-escrow.testnet",
+        "arras-v1b-1101.testnet",
+        PAYMENT_PROOF,
+        "",
+        False,
+        0,
+        1,
+        True,
+        [V2_ESCROW],
+    ],
+    ids=repr,
+)
+def test_an_unregistered_escrow_is_refused_on_every_proof_path(escrow):
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        feedback(verifier=PAYMENT_PROOF, escrow=escrow)
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        erc.build_erc8004_verify_feedback_proof(config=v2_config(), escrow=escrow, **VERIFY)
+    client = erc.NearErc8004Client("near:mainnet", rpc=never_rpc)
+    with pytest.raises(ValueError, match="registered Arras contract|unsupported verifier"):
+        client.get_config("verifier", escrow=escrow)
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        client.get_proof_feedback(PAYMENT_PROOF, "p", "payer.near", escrow=escrow)
+
+
+def test_escrow_is_refused_where_it_proves_nothing():
+    with pytest.raises(ValueError, match="escrow applies only"):
+        erc.build_erc8004_give_feedback(
+            network="near:mainnet",
+            signer_id="payer.near",
+            config=config("reputation"),
+            agent_id="0",
+            value="1",
+            value_decimals=0,
+            escrow=V2_ESCROW,
+        )
+    with pytest.raises(ValueError, match="escrow applies only"):
+        build("register", {"agent_uri": "ipfs://card"}, escrow=V1_ESCROW)
+    client = erc.NearErc8004Client("near:mainnet", rpc=never_rpc)
+    for role in ("identity", "reputation"):
+        with pytest.raises(ValueError, match="escrow applies only to role verifier"):
+            client.get_config(role, escrow=V2_ESCROW)
+
+
+def test_a_none_row_is_refused_with_the_escrow_given(monkeypatch):
+    patched_v2_row(monkeypatch, None)
+    with pytest.raises(ValueError, match="no ERC-8004 verifier is registered"):
+        feedback(verifier=V1_VERIFIER, escrow=V2_ESCROW)
+    with pytest.raises(ValueError, match="no ERC-8004 verifier is registered"):
+        erc.NearErc8004Client("near:mainnet", rpc=never_rpc).get_config(
+            "verifier", escrow=V2_ESCROW
+        )
+
+
+def test_testnet_keeps_its_one_pair():
+    tx = feedback(
+        "near:testnet",
+        verifier="erc8004-verifier.arras-dev.testnet",
+        escrow="arras-v1b-1101.testnet",
+    )
+    assert tx["actions"][0]["params"]["args"]["verifier"] == "erc8004-verifier.arras-dev.testnet"
+    with pytest.raises(ValueError):
+        feedback("near:testnet", verifier=PAYMENT_PROOF, escrow=V2_ESCROW)
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        feedback("near:testnet", verifier="erc8004-verifier.arras-dev.testnet", escrow=V1_ESCROW)
+    # get_config by escrow reads the testnet verifier, and refuses a mainnet escrow before RPC.
+    calls = []
+    answers = {"erc8004-verifier.arras-dev.testnet": verifier_config("arras-v1b-1101.testnet")}
+    client = erc.NearErc8004Client("near:testnet", rpc=rpc_by_account(answers, calls))
+    cfg = client.get_config("verifier", escrow="arras-v1b-1101.testnet")
+    assert calls == ["erc8004-verifier.arras-dev.testnet"]
+    assert cfg.data["escrow"] == "arras-v1b-1101.testnet"
+    for escrow in (V1_ESCROW, V2_ESCROW):
+        with pytest.raises(ValueError, match="registered Arras contract"):
+            client.get_config("verifier", escrow=escrow)
+    assert len(calls) == 1
+
+
+def test_verify_feedback_proof_escrow_must_be_its_configs():
+    v1, v2 = config("verifier"), v2_config()
+    assert erc.build_erc8004_verify_feedback_proof(config=v1, escrow=V1_ESCROW, **VERIFY) == (
+        erc.build_erc8004_verify_feedback_proof(config=v1, **VERIFY)
+    )
+    assert (
+        erc.build_erc8004_verify_feedback_proof(config=v2, escrow=V2_ESCROW, **VERIFY)["receiverId"]
+        == PAYMENT_PROOF
+    )
+    for cfg, escrow in ((v1, V2_ESCROW), (v2, V1_ESCROW)):
+        with pytest.raises(ValueError, match=CROSS):
+            erc.build_erc8004_verify_feedback_proof(config=cfg, escrow=escrow, **VERIFY)
+        descriptor = erc.build_erc8004_verify_feedback_proof(config=cfg, **VERIFY)
+        with pytest.raises(ValueError, match=CROSS):
+            erc.sign_erc8004_transaction(
+                descriptor,
+                NoKey(),
+                "1",
+                "1" * 32,
+                network="near:mainnet",
+                config=cfg,
+                escrow=escrow,
+            )
+
+
+@pytest.mark.parametrize("escrow,verifier", CROSSED)
+def test_get_config_refuses_a_crossed_pair_before_rpc(escrow, verifier):
+    client = erc.NearErc8004Client("near:mainnet", rpc=never_rpc)
+    with pytest.raises(ValueError, match=CROSS):
+        client.get_config("verifier", verifier=verifier, escrow=escrow)
+
+
+@pytest.mark.parametrize("escrow,verifier", PAIRS)
+def test_get_config_by_escrow_reads_its_verifier(escrow, verifier):
+    calls = []
+    answers = {V1_VERIFIER: verifier_config(), PAYMENT_PROOF: MEASURED_V2_CONFIG}
+    client = erc.NearErc8004Client("near:mainnet", rpc=rpc_by_account(answers, calls))
+    assert client.get_config("verifier", escrow=escrow).data["escrow"] == escrow
+    assert client.get_config("verifier", verifier=verifier, escrow=escrow).data["escrow"] == escrow
+    assert calls == [verifier, verifier]
+
+
+VERIFIER_VIEWS = {
+    "get_verified_summary": (
+        lambda c, v, **kw: c.get_verified_summary("0", v, context="em", **kw),
+        {"count": "1", "summary_value": "90", "summary_value_decimals": 0, "weight_sum": "50000"},
+    ),
+    "list_verified_feedback": (
+        lambda c, v, **kw: c.list_verified_feedback("0", v, from_index=0, limit=25, **kw),
+        [{"agent_id": "0", "client_address": "payer.near", "feedback_index": "1"}],
+    ),
+    "get_proof_feedback": (
+        lambda c, v, **kw: c.get_proof_feedback(v, "p", "payer.near", **kw),
+        {"agent_id": "0", "client_address": "payer.near", "feedback_index": "1"},
+    ),
+    "is_proof_pending": (lambda c, v, **kw: c.is_proof_pending(v, "p", "payer.near", **kw), False),
+}
+
+
+@pytest.mark.parametrize("view", VERIFIER_VIEWS)
+def test_verifier_views_take_the_payments_escrow(view):
+    call, answer = VERIFIER_VIEWS[view]
+    # Without escrow= a view takes any account as verifier (0.113.0): with it, only the escrow's.
+    foreign = [(V2_ESCROW, "evil.near"), (V1_ESCROW, "evil.near"), (V2_ESCROW, V2_VERIFIER)]
+    for escrow, verifier in CROSSED + foreign:
+        with pytest.raises(ValueError, match=CROSS):
+            call(erc.NearErc8004Client("near:mainnet", rpc=never_rpc), verifier, escrow=escrow)
+    with pytest.raises(ValueError, match="registered Arras contract"):
+        call(erc.NearErc8004Client("near:testnet", rpc=never_rpc), V1_VERIFIER, escrow=V1_ESCROW)
+    sent = []
+
+    def rpc_for(network):
+        def rpc(method, params):
+            sent.append(json.loads(base64.b64decode(params["args_base64"])))
+            assert params["account_id"] == erc.NEAR_ERC8004_CONTRACTS[network]["reputation"]
+            assert params["method_name"] == view
+            return {"result": {"result": list(json.dumps(answer).encode())}}
+
+        return rpc
+
+    testnet_pair = ("arras-v1b-1101.testnet", "erc8004-verifier.arras-dev.testnet")
+    for network, pairs in (("near:mainnet", PAIRS), ("near:testnet", [testnet_pair])):
+        client = erc.NearErc8004Client(network, rpc=rpc_for(network))
+        for escrow, verifier in pairs:
+            assert call(client, verifier, escrow=escrow) == answer
+            # Without the escrow, the 0.113.0 call: the same request.
+            assert call(client, verifier) == answer
+            assert sent[-1] == sent[-2] and sent[-1]["verifier"] == verifier
+            assert "escrow" not in sent[-1]
+
+
+def v2_feedback_outcome():
+    """The recorded v1 rating (mainnet), as the same rating through payment-proof would read."""
+    outcome = json.loads(
+        json.dumps(FIXTURE["networks"][0]["transactions"][2]["result"]).replace(
+            V1_VERIFIER, PAYMENT_PROOF
+        )
+    )
+    call = outcome["transaction"]["actions"][0]["FunctionCall"]
+    args = json.loads(base64.b64decode(call["args"]))
+    assert args["verifier"] == V1_VERIFIER
+    call["args"] = base64.b64encode(
+        json.dumps({**args, "verifier": PAYMENT_PROOF}).encode()
+    ).decode()
+    return outcome
+
+
+def test_a_v2_rating_parses_end_to_end():
+    outcome = v2_feedback_outcome()
+    parsed = erc.parse_erc8004_outcome(
+        outcome, network="near:mainnet", method="give_feedback_with_proof"
+    )
+    assert parsed.status == "accepted" and parsed.value == "1"
+    events = erc.parse_erc8004_receipt_events(outcome["receipts_outcome"], "near:mainnet")
+    assert [e["data"][0]["proof"]["verifier"] for e in events if e["event"] == "new_feedback"] == [
+        PAYMENT_PROOF
+    ]
+    reputation = erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["reputation"]
+    logs = [new_feedback_log(v) for v in (PAYMENT_PROOF, V2_VERIFIER, "payment-proof.evil.near")]
+    events = erc.parse_erc8004_events(logs, network="near:mainnet", executor_id=reputation)
+    assert [e["data"][0]["proof"]["verifier"] for e in events] == [PAYMENT_PROOF]
+    # The event must name the verifier the transaction was sent with.
+    call = outcome["transaction"]["actions"][0]["FunctionCall"]
+    args = json.loads(base64.b64decode(call["args"]))
+    call["args"] = base64.b64encode(json.dumps({**args, "verifier": V1_VERIFIER}).encode()).decode()
+    with pytest.raises(ValueError, match="matching receipt event"):
+        erc.parse_erc8004_outcome(
+            outcome, network="near:mainnet", method="give_feedback_with_proof"
+        )
+
+
+def test_the_measured_v2_answer_is_an_accepted_verification():
+    outcome = verify_outcome(PAYMENT_PROOF)
+    outcome["status"] = {
+        "SuccessValue": base64.b64encode(json.dumps(MEASURED_V2_ANSWER).encode()).decode()
+    }
+    parsed = erc.parse_erc8004_outcome(
+        outcome, network="near:mainnet", method="verify_feedback_proof"
+    )
+    assert parsed.status == "accepted" and parsed.value == MEASURED_V2_ANSWER
+
+
+def panicked(code, receiver=PAYMENT_PROOF):
+    outcome = verify_outcome(receiver)
+    message = f"Smart contract panicked: {code}: refused"
+    outcome["status"] = {
+        "Failure": {"ActionError": {"kind": {"FunctionCallError": {"ExecutionError": message}}}}
+    }
+    return outcome
+
+
+@pytest.mark.parametrize("code", ["ERC8004_ARV_E16", "ERC8004_ARV_E13", "ERC8004_ARV_E12"])
+def test_e16_from_payment_proof_is_a_refused_proof_not_an_unknown_failure(code):
+    # With the real row, no patch: a direct verify_feedback_proof that payment-proof refuses.
+    parsed = erc.parse_erc8004_outcome(
+        panicked(code), network="near:mainnet", method="verify_feedback_proof"
+    )
+    assert parsed.status == "error" and parsed.panic == erc.Erc8004PanicCode(code)
+    assert parsed.panic.name == code.removeprefix("ERC8004_")
+
+
+def test_e16_through_give_feedback_with_proof_is_the_registrys_rejection():
+    # The registry's callback logs E45 (verifier failed) and returns null; the verifier's own
+    # failed receipt (ERC8004_ARV_E16) is not the registry's and does not change the verdict.
+    outcome = v2_feedback_outcome()
+    outcome["status"] = {"SuccessValue": base64.b64encode(b"null").decode()}
+    reputation = erc.NEAR_ERC8004_CONTRACTS["near:mainnet"]["reputation"]
+    outcome["receipts_outcome"] = [
+        {
+            "outcome": {
+                "executor_id": PAYMENT_PROOF,
+                "status": {"Failure": {"ActionError": {"kind": "ERC8004_ARV_E16"}}},
+                "logs": [],
+            }
+        },
+        {
+            "outcome": {
+                "executor_id": reputation,
+                "status": {"SuccessValue": "bnVsbA=="},
+                "logs": ["erc8004:rechazo:" + erc.Erc8004Rejection.E45.value],
+            }
+        },
+    ]
+    parsed = erc.parse_erc8004_outcome(
+        outcome, network="near:mainnet", method="give_feedback_with_proof"
+    )
+    assert parsed.status == "rejected" and parsed.rejection == erc.Erc8004Rejection.E45
+
+
+# sha256 of v1 outputs, recorded from origin/main 6488e37 (0.113.0), Ed25519 seed 01 x 32: v1 did
+# not move by one byte, with or without its escrow given. Never re-record to make a change pass.
+V1_DIGESTS = {
+    "near:mainnet give_feedback_with_proof descriptor": (
+        "7a46ad90250d5c1ccc801e3f0f828c7831911371c97174941ca41ccb69635342"
+    ),
+    "near:mainnet give_feedback_with_proof args": (
+        "27f03b86aa956f8f446bbf8d8c8f64e78564202076f175fdf55ab25326c33147"
+    ),
+    "near:mainnet give_feedback_with_proof signed": (
+        "0656994eb927431fe6068b97e325687a51f74c06bf9e62fb1ab9aa592081f322"
+    ),
+    "near:mainnet verify_feedback_proof descriptor": (
+        "587b1139ead0f3173e9a544fcc04e309160b1404e42937b2fef3345aba473ab6"
+    ),
+    "near:mainnet verify_feedback_proof args": (
+        "f080ed0c86b5cd3f239dc03d5c0fa42b6e72c8b3559989f7be2ef89f87a02a62"
+    ),
+    "near:mainnet verify_feedback_proof signed": (
+        "2c15a96437a8576acdbe5058141cde0bed251753fefd01b63bb30f4bbefd330c"
+    ),
+    "near:testnet give_feedback_with_proof descriptor": (
+        "dc6ed7db6f5ae29cdb34c577abfd74ba18a50ac908ab44acd9dcec68e9644875"
+    ),
+    "near:testnet give_feedback_with_proof args": (
+        "c8bb4d6caa96f52b05d214dd546b76f860f58801b926fe19a12e121846c87bae"
+    ),
+    "near:testnet give_feedback_with_proof signed": (
+        "bd98ec5be465499774c40b7999bfe7b9f0ecd156c39af3b7a8a19a3694b95c4a"
+    ),
+    "near:testnet verify_feedback_proof descriptor": (
+        "d2c17068e0667298ad5c702f785059698e69b1fcfa4124db6f07de620f601b38"
+    ),
+    "near:testnet verify_feedback_proof args": (
+        "f080ed0c86b5cd3f239dc03d5c0fa42b6e72c8b3559989f7be2ef89f87a02a62"
+    ),
+    "near:testnet verify_feedback_proof signed": (
+        "315fd909ab63dfcfeceade65a75f35e1344ab0615dd16ce3f2bea56649f1ed42"
+    ),
+}
+
+
+class SeedSigner(Signer):
+    def __init__(self):
+        self.key = Ed25519PrivateKey.from_private_bytes(bytes([1]) * 32)
+
+
+@pytest.mark.parametrize("with_escrow", [False, True])
+def test_v1_outputs_did_not_move(with_escrow):
+    def digest(value):
+        raw = value if isinstance(value, bytes) else value.encode()
+        return hashlib.sha256(raw).hexdigest()
+
+    seen = {}
+    for network in NETWORKS:
+        verifier = erc.NEAR_ERC8004_CONTRACTS[network]["verifier"]
+        bound = {"escrow": erc.NEAR_ERC8004_ESCROWS[network]} if with_escrow else {}
+        rep, ver = config("reputation", network), config("verifier", network)
+        proof = "EbkEtGaM7ZwY6aHSdHSqxdFx9cJV13KPT7fYBWjxbfd9"
+        rating = erc.build_erc8004_give_feedback_with_proof(
+            network=network,
+            signer_id="payer.near",
+            config=rep,
+            agent_id="7",
+            value="90",
+            value_decimals=0,
+            tag1="starred",
+            verifier=verifier,
+            proof=proof,
+            **bound,
+        )
+        check = erc.build_erc8004_verify_feedback_proof(
+            network=network,
+            signer_id="payer.near",
+            config=ver,
+            client="payer.near",
+            proof=proof,
+            **bound,
+        )
+        for name, tx, cfg in (
+            ("give_feedback_with_proof", rating, rep),
+            ("verify_feedback_proof", check, ver),
+        ):
+            key = f"{network} {name}"
+            seen[f"{key} descriptor"] = digest(
+                json.dumps(tx, sort_keys=True, separators=(",", ":"))
+            )
+            seen[f"{key} args"] = digest(
+                erc.erc8004_args_json(tx, network=network, config=cfg, **bound)
+            )
+            seen[f"{key} signed"] = digest(
+                erc.sign_erc8004_transaction(
+                    tx, SeedSigner(), "7", "1" * 32, network=network, config=cfg, **bound
+                )
+            )
+    assert seen == V1_DIGESTS

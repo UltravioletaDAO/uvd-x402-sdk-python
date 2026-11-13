@@ -7,29 +7,55 @@ its existing API.
 
 ## Deployments
 
-| Network | Identity | Reputation | Arras verifier |
-| --- | --- | --- | --- |
-| `near:mainnet` | `identity-registry.erc-8004.near` | `reputation-registry.erc-8004.near` | `erc8004-verifier.arras-escrow.near` |
-| `near:testnet` | `identity-registry.erc-8004.testnet` | `reputation-registry.erc-8004.testnet` | `erc8004-verifier.arras-dev.testnet` |
+| Network | Identity | Reputation |
+| --- | --- | --- |
+| `near:mainnet` | `identity-registry.erc-8004.near` | `reputation-registry.erc-8004.near` |
+| `near:testnet` | `identity-registry.erc-8004.testnet` | `reputation-registry.erc-8004.testnet` |
+
+| Network | Arras escrow | ERC-8004 verifier of its payments |
+| --- | --- | --- |
+| `near:mainnet` | `v1.arras-escrow.near` | `erc8004-verifier.arras-escrow.near` |
+| `near:mainnet` | `v2.arras-escrow.near` | `payment-proof.arras-escrow.near` (0.114.0) |
+| `near:testnet` | `arras-v1b-1101.testnet` | `erc8004-verifier.arras-dev.testnet` |
 
 **One verifier per Arras escrow.** A verifier checks payments of one escrow contract, so a task is
-rated with the verifier of the escrow it was paid in. `NEAR_ERC8004_ESCROW_VERIFIERS[network]` has
-one row per contract of `near_escrow.NEAR_ESCROW_CONTRACTS[network]`: `v1.arras-escrow.near` ->
-`erc8004-verifier.arras-escrow.near` (the verifier above; testnet: `arras-v1b-1101.testnet` ->
-`erc8004-verifier.arras-dev.testnet`), and `v2.arras-escrow.near` -> `None`: no verifier for Arras
-v2 is deployed yet. `near_erc8004_verifier(network, escrow)` returns the verifier of an escrow and
-raises `ValueError` for an unregistered escrow or one whose row is `None`, so rating a v2 payment
-fails closed with that error instead of asking v1's verifier about a payment it cannot see.
-`give_feedback_with_proof`, the `new_feedback` reader and the `verify_feedback_proof` outcome parser
-accept exactly the non-`None` verifiers of the network. A verifier config is bound to the escrow it
-reads: `client.get_config("verifier", verifier=...)` reads the verifier asked for (default
-`NEAR_ERC8004_CONTRACTS[network]["verifier"]`, v1's), refuses an unregistered one before any RPC,
-and refuses an answer that reads another verifier's escrow; `verify_feedback_proof` built with that
-config goes to that escrow's verifier, with that config's gas floor. A verifier that does not
-answer raises: no config, nothing to sign. Registering v2's verifier
-(`payment-proof.arras-escrow.near`, not deployed yet) is a one-row data change in a release, made
-only after its account exists on mainnet. `NEAR_ERC8004_CONTRACTS[network]["verifier"]` and
-`NEAR_ERC8004_ESCROWS[network]` stay v1's pair.
+rated with the verifier of the escrow it was paid in; the other verifier reads only its own escrow
+and answers `E12` (no such payment there), the registry returns the deposit and the rating is lost
+without an error.
+`NEAR_ERC8004_ESCROW_VERIFIERS[network]` has one row per contract of
+`near_escrow.NEAR_ESCROW_CONTRACTS[network]`, the table above. `payment-proof.arras-escrow.near`
+is keyless on mainnet since 2026-11-13 (code sha256
+`ea430d5fbb3bbe3b59adf5c2cd7010e00f295e6be5a37eee935c560c5431e5a0`, the reproducible wasm of arras
+`40eba87e`, `contracts/erc8004-payment-proof`); its `get_config` reads `v2.arras-escrow.near`.
+A verifier is trusted by its account in this table, never by its `get_config` (both answer
+`"contract": "erc8004-arras-verifier"`, and anyone can deploy a contract that answers the same).
+`near_erc8004_verifier(network, escrow)` returns the verifier of an escrow and raises `ValueError`
+for an unregistered escrow or one whose row is `None` (a row is filled only once its verifier is
+deployed). `give_feedback_with_proof`, the `new_feedback` reader and the `verify_feedback_proof`
+outcome parser accept exactly the non-`None` verifiers of the network. A verifier config is bound
+to the escrow it reads: `client.get_config("verifier", verifier=...)` reads the verifier asked for
+(default `NEAR_ERC8004_CONTRACTS[network]["verifier"]`, v1's), refuses an unregistered one before
+any RPC, and refuses an answer that reads another verifier's escrow; `verify_feedback_proof` built
+with that config goes to that escrow's verifier, with that config's gas floor. A verifier that
+does not answer raises: no config, nothing to sign. `NEAR_ERC8004_CONTRACTS[network]["verifier"]`
+and `NEAR_ERC8004_ESCROWS[network]` stay v1's pair.
+
+**The payment's escrow, `escrow=` (0.114.0).** A payment id does not say which escrow holds it, so
+the SDK can refuse a crossed verifier only when told the escrow. Pass the escrow the task was paid
+in as `escrow=` and the verifier must be that escrow's, before any RPC or key:
+`build_erc8004_give_feedback_with_proof` / `build_erc8004_verify_feedback_proof` /
+`build_erc8004_call`, `erc8004_args_json`, `sign_erc8004_transaction`,
+`client.get_config("verifier", escrow=...)` (which then reads that escrow's verifier) and the four
+views keyed by a verifier (`get_verified_summary`, `list_verified_feedback`,
+`get_proof_feedback`, `is_proof_pending`). The escrow is checked, never sent: the descriptor, its
+arguments and its signature are those of the same call without it. A builder method other than the
+two proof methods, or a config role other than `verifier`, raises with `escrow=`.
+
+Without `escrow=` a call is the 0.113.0 call, and the SDK cannot see a crossing: any registered
+verifier of the network is accepted, so since 0.114.0 a v1 payment sent with
+`payment-proof.arras-escrow.near` builds and signs (and is lost on chain), as a v2 payment sent with
+v1's verifier did before. The direct `client.view(...)` entry point and `read_feedback_proof` take
+no `escrow=`; the views keep accepting any account as `verifier`, as in 0.113.0.
 
 `agent_registry(network)` returns the registration-file identifier, for example
 `near:mainnet:identity-registry.erc-8004.near`. These are application identifiers;
@@ -91,8 +117,9 @@ from uvd_x402_sdk import (
     near_erc8004_verifier,
 )
 
-# The verifier of the Arras escrow the task was paid in (from the task's own record).
-# v1.arras-escrow.near today; v2.arras-escrow.near raises until its verifier is registered.
+# The verifier of the Arras escrow the task was paid in (from the task's own record):
+# v1.arras-escrow.near -> erc8004-verifier.arras-escrow.near,
+# v2.arras-escrow.near -> payment-proof.arras-escrow.near.
 task_escrow = "v1.arras-escrow.near"
 verifier = near_erc8004_verifier(network, task_escrow)
 reputation = client.get_config("reputation")
@@ -108,6 +135,8 @@ def rate_worker(agent_id, payment_id, payer_account):
         tag1="starred",
         verifier=verifier,
         proof=payment_id,
+        # Checked, never sent: another escrow's verifier is refused before signing.
+        escrow=task_escrow,
     )
 
 summary = client.get_verified_summary("0", verifier, context="em")
@@ -128,15 +157,22 @@ wallet returns a final outcome. It distinguishes `accepted` (decimal index),
 `rejected` (`Erc8004Rejection`) and `error` (`Erc8004PanicCode`). A successful NEAR
 transaction with a null feedback result can be a refunded callback rejection.
 Pending or inconsistent outcomes raise `ValueError`. `give_feedback_with_proof`
-accepts only a registered verifier of the network (`NEAR_ERC8004_ESCROW_VERIFIERS`;
-today `NEAR_ERC8004_CONTRACTS[network]["verifier"]` alone); another account,
-including the other network's verifier, raises `ValueError` before signing. A
-`new_feedback` event with another proof verifier is skipped and cannot
+accepts only a registered verifier of the network (`NEAR_ERC8004_ESCROW_VERIFIERS`:
+on mainnet `erc8004-verifier.arras-escrow.near` and `payment-proof.arras-escrow.near`);
+another account, including the other network's verifier, raises `ValueError` before
+signing. A `new_feedback` event with another proof verifier is skipped and cannot
 substantiate an accepted proof-feedback outcome. The builder does not see the
-payment behind `proof`: choosing the verifier of the task's escrow is the
-caller's, with `near_erc8004_verifier`. A v2 payment sent to v1's verifier is
-rejected on chain (each verifier reads its own escrow only): a wasted
-transaction.
+payment behind `proof`: give it the task's escrow (`escrow=`) and a verifier of the
+other escrow raises before signing; without it, choosing the verifier of the
+task's escrow is the caller's, with `near_erc8004_verifier`, and a v2 payment sent
+to v1's verifier (or the reverse) is `E12` on chain: the rating is lost.
+
+A proof the verifier refuses is an error code, never "unrecognized": a direct
+`verify_feedback_proof` that fails parses as `error` with its `Erc8004PanicCode`
+(`ARV_E01`..`ARV_E16`; `E16`, v2's verifier only, is a dispute that expired in the
+receiver's favour, which is not a proof). Through `give_feedback_with_proof` the
+registry logs its own rejection (`E45_VERIFICADOR_FALLO`) and refunds the deposit:
+`rejected` with `Erc8004Rejection.E45`.
 
 ## Configuration and spending limits
 
@@ -148,6 +184,8 @@ For the verifier role, `client.get_config("verifier", verifier=account)` and
 `parse_erc8004_config(raw, ..., role="verifier", verifier=account)` also bind the
 snapshot to the account it was read from (its `escrow` must be that verifier's
 row); without `verifier=`, a captured snapshot is bound by its `escrow` alone.
+`client.get_config("verifier", escrow=task_escrow)` reads the verifier of that
+escrow (and refuses a `verifier=` that is not it).
 
 | Operation | Deposit selection | Gas selection |
 | --- | --- | --- |

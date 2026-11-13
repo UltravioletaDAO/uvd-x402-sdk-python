@@ -680,7 +680,10 @@ The registry contains `arras-v1b-1101.testnet` on testnet and `v1.arras-escrow.n
 on testnet) adds the optional `dispute_deadline` and `operator_ticket` to the authorize msg;
 `sign_operator_ticket` / `check_operator_ticket` / `verify_operator_ticket` sign and check the
 operator's Ed25519 ticket (vectors T-1/T-2). ERC-8004 rates each payment with the verifier of its
-escrow (`near_erc8004_verifier`); v2's is not registered yet, so rating a v2 payment raises.
+escrow (`near_erc8004_verifier`): v1's is `erc8004-verifier.arras-escrow.near`, v2's
+`payment-proof.arras-escrow.near` (0.114.0). Pass the payment's `escrow=` to the proof builders,
+signing and views, and a verifier of the other escrow is refused before signing
+([guide](docs/near-erc8004.md)).
 
 ```python
 from uvd_x402_sdk import X402Client, X402Config
